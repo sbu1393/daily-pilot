@@ -5,7 +5,7 @@ import { motion } from "framer-motion"
 import { fmtMinutes, faDigits } from "@/app/lib/time"
 import TimeAgo from "../TimeAgo"
 import { todayKey } from "@/app/lib/jalili" // ۱. ایمپورت تابع محاسبه تاریخ امروز
-import { categoryInfo, priorityMeta, type TaskItem } from "./taskTypes"
+import { categoryInfo, priorityMeta, priorityMissingMeta, type TaskItem } from "./taskTypes"
 import styles from "./task.module.css"
 
 /* انیمیشن ورود کارت (لیست با stagger هماهنگ می‌شود) */
@@ -34,7 +34,7 @@ type Props = {
 function TaskCard({ task, onComplete, onDelete, onReanalyze }: Props) {
     const done = task.status === "DONE"
     const cat = categoryInfo(task.category)
-    const pr = priorityMeta[task.priority]
+    const pr = task.priority != null ? priorityMeta[task.priority] : priorityMissingMeta
 
     const saved =
         task.allocatedMinutes != null && task.spentMinutes != null

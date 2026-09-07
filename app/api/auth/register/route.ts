@@ -1,6 +1,7 @@
 import {NextRequest,NextResponse} from "next/server"
 import {getPrisma} from "@/app/lib/getPrisma"
 import bcrypt from "bcrypt"
+import { createSession } from "@/app/lib/createSession"
 import { registerSchema } from "@/app/schema/formSchema"
 import { isRateLimited, clientIp } from "@/app/lib/rateLimit"
     
@@ -98,7 +99,7 @@ import { isRateLimited, clientIp } from "@/app/lib/rateLimit"
     
     
     
-    return NextResponse.json(
+    const response = NextResponse.json(
     {
     message:"ثبت نام موفق بود",
     user:{
@@ -110,6 +111,8 @@ import { isRateLimited, clientIp } from "@/app/lib/rateLimit"
     status:201
     }
     )
+
+    return createSession(user, response)
     
     
     

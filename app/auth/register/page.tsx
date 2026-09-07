@@ -75,7 +75,8 @@ export default function RegisterForm() {
             }
 
             toast.success("ثبت نام با موفقیت انجام شد")
-            router.push("/auth/login")
+            router.push("/dashboard")
+            router.refresh()
         }
         catch (error) {
             console.log(error)

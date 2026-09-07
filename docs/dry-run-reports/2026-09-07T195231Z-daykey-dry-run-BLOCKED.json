@@ -1,0 +1,39 @@
+{
+  "capturedAt": "2026-09-07T19:52:31Z",
+  "phase": "4B-3A",
+  "status": "BLOCKED — analyzer did not run",
+  "databaseConnection": {
+    "status": "UNAVAILABLE",
+    "evidence": "npx prisma migrate status -> P1012: Environment variable not found: DATABASE_URL",
+    "note": "Neither shell env nor project .env provides DATABASE_URL to the Prisma CLI/client. No connection attempt beyond read-only status check."
+  },
+  "migrationStatus": {
+    "status": "UNKNOWN — could not be read without database connection",
+    "pendingOnDisk": [
+      "20260907183514_add_user_prefs_task_priority_nullable_history_index (Phase 2A)",
+      "20260907190952_add_dailyplan_versioning_and_task_event (Phase 3)"
+    ],
+    "applied": "not verifiable in this environment",
+    "note": "Migrations NOT applied by this phase (per strict rules)."
+  },
+  "analyzerRun": {
+    "script": "scripts/analyze-daykey-migration.ts",
+    "executed": false,
+    "reason": "P1012 — first findMany would fail identically (verified guard path in Phase 4B-1)",
+    "writesPerformed": "none — nothing connected; script is findMany-only by construction"
+  },
+  "results": {
+    "totalUsers": null,
+    "tasksRequiringConversion": null,
+    "dailyPlansRequiringConversion": null,
+    "missingDayKeyCount": null,
+    "invalidDayKeyCount": null,
+    "collisionCount": null,
+    "blockers": [
+      "DATABASE_URL not available in execution environment — supply via Settings → Environment (or run the analyzer where the DB lives), then re-run Phase 4B-3A"
+    ],
+    "warnings": [
+      "Phase 2A + Phase 3 migrations still pending on target database (verify with prisma migrate status once connected)"
+    ]
+  }
+}

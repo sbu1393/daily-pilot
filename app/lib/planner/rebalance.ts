@@ -11,7 +11,8 @@ type OpenTask = {
     id: number
     estimatedTime: number | null
     score: number | null
-    priority: "HIGH" | "MEDIUM" | "LOW"
+    // null = تسک هنوز تحلیل نشده (G-16: priority nullable)
+    priority: "HIGH" | "MEDIUM" | "LOW" | null
     status: "TODO" | "IN_PROGRESS" | "DONE"
 }
 

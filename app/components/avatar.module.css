@@ -1,0 +1,34 @@
+.avatar {
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    flex: none;
+    font-weight: 800;
+    user-select: none;
+    overflow: hidden;
+    background: var(--gradient);
+    color: #fff;
+    box-shadow: 0 4px 12px -4px rgba(79, 70, 229, .5);
+}
+
+.initials {
+    line-height: 1;
+}
+
+.sm {
+    width: 36px;
+    height: 36px;
+    font-size: .8rem;
+}
+
+.md {
+    width: 52px;
+    height: 52px;
+    font-size: 1.05rem;
+}
+
+.lg {
+    width: 88px;
+    height: 88px;
+    font-size: 1.7rem;
+}

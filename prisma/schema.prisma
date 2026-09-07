@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum TaskPriority {
+  HIGH
+  LOW
+  MEDIUM
+}
+
+model User {
+  id         Int         @id @default(autoincrement())
+  username   String
+  email      String      @unique
+  password   String
+  firstName  String?
+  lastName   String?
+  birthDate  DateTime?
+  phone      String?
+  image      String?
+  tasks      Task[]
+  dailyPlans DailyPlan[]
+}
+
+model Task {
+  id                    Int          @id @default(autoincrement())
+  text                  String
+  category              String?
+  priority              TaskPriority @default(MEDIUM)
+  score                 Int? // 0 تا 100 — خروجی AI
+  reason                String? // دلیل اولویت‌بندی — خروجی AI
+  estimatedTime         Int? // تخمین خام AI (دقیقه) — ورودی موتور
+  allocatedMinutes      Int? // سهم تخصیص‌یافته توسط موتور (دقیقه)
+  spentMinutes          Int? // مدت واقعی اعلام‌شده هنگام DONE (دقیقه)
+  scheduledDate         DateTime // لحظه‌ی نیمه‌شب تهرانِ روز برنامه‌ریزی
+  dayKey                String? // کلید روز جلالی "1403-05-17" — مرجع گروه‌بندی
+  previousScheduledDate DateTime? // برای تشخیص rollover
+  status                TaskStatus @default(TODO)
+  completedAt           DateTime? // لحظه‌ی اتمام
+  completedOn           String? // کلید جلالی روز اتمام → تاریخچه
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  userId                Int
+  user                  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, dayKey])
+  @@index([userId, status])
+}
+
+model DailyPlan {
+  id               Int      @id @default(autoincrement())
+  dayKey           String // کلید روز جلالی
+  availableMinutes Int      @default(0) // ظرفیت روز اعلام‌شده توسط کاربر
+  userId           Int
+  createdAt        DateTime @default(now())
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dayKey])
+}

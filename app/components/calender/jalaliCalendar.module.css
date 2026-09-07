@@ -1,0 +1,114 @@
+.scroll {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    max-width: 100%;
+    min-width: 0;
+    /* بسیار مهم: جلوگیری از کش آمدن والد در فلکس */
+    flex-wrap: nowrap;
+    /* تضمین اینکه روزها در یک خط افقی باقی بمانند */
+    padding: 6px 4px 14px;
+    -webkit-overflow-scrolling: touch;
+    /* اسکرول نرم و روان در مرورگر موبایل */
+    overscroll-behavior-x: contain;
+}
+
+/* برای اینکه نوار اسکرول زیبا و باریک دیده شود و متوجه اسکرول بشوی: */
+.scroll::-webkit-scrollbar {
+    height: 4px;
+}
+
+.scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+}
+
+
+.dayBtn {
+    flex: 0 0 auto;
+    width: 76px;
+    height: 98px;
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    background: var(--surface);
+    backdrop-filter: blur(16px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    cursor: pointer;
+    font-family: inherit;
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+    transition: all 0.2s ease;
+}
+
+.dayBtn:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.1);
+}
+
+.dayName {
+    font-size: 0.72rem;
+    color: var(--muted);
+}
+
+.dayNumber {
+    font-size: 1.7rem;
+    font-weight: 800;
+    line-height: 1;
+    color: var(--ink);
+}
+
+.dayMonth {
+    font-size: 0.66rem;
+    color: var(--muted-2);
+}
+
+.dayBtn.active {
+    background: var(--gradient);
+    box-shadow: 0 16px 34px rgba(99, 102, 241, 0.35);
+    transform: translateY(-6px);
+}
+
+.dayBtn.active span {
+    color: #fff;
+}
+
+.dayBtn.today:not(.active) {
+    border: 2px solid var(--primary);
+}
+
+/* ====== مارکر تاریخچه (فاز ۷) ====== */
+.dayBtn {
+    position: relative;
+}
+
+.dayMarker {
+    position: absolute;
+    top: 5px;
+    inset-inline-start: 5px;
+    /* در RTL = گوشهی بالای راست */
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--gradient);
+    color: #fff;
+    font-size: 0.62rem;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+    display: grid;
+    place-items: center;
+    box-shadow: 0 2px 6px rgba(79, 70, 229, 0.35);
+    pointer-events: none;
+}
+
+/* روی روزِ انتخابشده (که پسزمینه گرادیانی داره) رنگ نقطه برعکس شه */
+.active .dayMarker {
+    background: #fff;
+    color: var(--primary-dark);
+    box-shadow: none;
+}

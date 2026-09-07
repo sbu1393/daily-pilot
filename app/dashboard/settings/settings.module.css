@@ -1,0 +1,315 @@
+.wrap {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 24px;
+    align-items: start;
+}
+
+/* ====== سایدبار ====== */
+.sidebar {
+    background: var(--surface);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 22px 16px;
+    display: grid;
+    gap: 20px;
+    position: sticky;
+    top: 96px;
+    box-shadow: var(--shadow-soft);
+}
+
+.sidebarUser {
+    display: grid;
+    gap: 10px;
+    justify-items: center;
+    text-align: center;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border-soft);
+}
+
+.sidebarUserInfo {
+    display: grid;
+    gap: 4px;
+}
+
+.sidebarUserInfo strong {
+    font-size: 1rem;
+    color: var(--ink);
+}
+
+.sidebarUserInfo span {
+    font-size: .75rem;
+    color: var(--muted);
+    direction: ltr;
+}
+
+.nav {
+    display: grid;
+    gap: 6px;
+}
+
+.navItem {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    text-align: start;
+    border: none;
+    background: none;
+    color: var(--ink-2);
+    font: inherit;
+    font-size: .9rem;
+    font-weight: 700;
+    padding: 12px 14px;
+    border-radius: 14px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.navItem:hover {
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+}
+
+.navItemActive {
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+}
+
+/* ====== محتوا ====== */
+.content {
+    min-width: 0;
+}
+
+.section {
+    display: grid;
+    gap: 18px;
+}
+
+.title {
+    margin: 0;
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: var(--ink);
+}
+
+.subtitle {
+    margin: -8px 0 4px;
+    color: var(--muted);
+    font-size: .9rem;
+}
+
+.card {
+    background: var(--surface);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 22px;
+    display: grid;
+    gap: 14px;
+    box-shadow: var(--shadow-soft);
+    transition: transform .2s ease, box-shadow .2s ease;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 14px 30px rgba(15, 23, 42, .1);
+}
+
+.passwordSuccess {
+    background: var(--success-bg);
+    color: var(--success);
+    border: 1px solid rgba(16, 185, 129, .4);
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: .85rem;
+    font-weight: 700;
+    line-height: 1.9;
+}
+
+.passwordError {
+    background: var(--danger-bg);
+    color: var(--danger);
+    border: 1px solid rgba(248, 113, 113, .4);
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: .85rem;
+    font-weight: 700;
+    line-height: 1.9;
+}
+
+.cardTitle {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 800;
+    color: var(--ink);
+}
+
+.text {
+    margin: 0;
+    color: var(--ink-2);
+    font-size: .9rem;
+    line-height: 2.1;
+}
+
+.muted {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: .8rem;
+    line-height: 1.9;
+}
+
+.avatarRow {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 6px 2px 2px;
+}
+
+/* ====== تم ====== */
+.themeRow {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+
+.themeOption {
+    display: grid;
+    gap: 8px;
+    justify-items: center;
+    padding: 16px 10px;
+    border: 1.5px solid var(--border);
+    border-radius: 16px;
+    background: var(--surface-solid);
+    color: var(--ink-2);
+    font: inherit;
+    font-size: .85rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.themeOption:hover {
+    border-color: var(--primary);
+}
+
+.themeOptionActive {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, .12);
+}
+
+.themeIcon {
+    font-size: 1.4rem;
+}
+
+/* ====== سوئیچ ====== */
+.toggleRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.switch {
+    flex: none;
+    width: 52px;
+    height: 30px;
+    border-radius: 999px;
+    border: none;
+    background: var(--border);
+    cursor: pointer;
+    position: relative;
+    transition: var(--transition);
+    padding: 0;
+}
+
+.switchOn {
+    background: var(--gradient);
+}
+
+.switchKnob {
+    position: absolute;
+    top: 3px;
+    inset-inline-start: 3px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .25);
+    transition: inset-inline-start .2s ease;
+}
+
+.switchOn .switchKnob {
+    inset-inline-start: 25px;
+}
+
+/* ====== یادآور ====== */
+.reminderRow {
+    display: grid;
+    gap: 6px;
+    max-width: 220px;
+}
+
+/* ====== تب‌های اطلاعات ====== */
+.infoTabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.infoTab {
+    border: 1.5px solid var(--border);
+    background: var(--surface-solid);
+    color: var(--ink-2);
+    font: inherit;
+    font-size: .8rem;
+    font-weight: 700;
+    padding: 9px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.infoTab:hover {
+    border-color: var(--primary);
+}
+
+.infoTabActive {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+}
+
+/* ====== موبایل ====== */
+@media (max-width: 860px) {
+    .wrap {
+        grid-template-columns: 1fr;
+    }
+
+    .sidebar {
+        position: static;
+    }
+
+    .sidebarUser {
+        display: none;
+    }
+
+    .nav {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .navItem {
+        justify-content: center;
+        padding: 10px 8px;
+        font-size: .8rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .themeRow {
+        grid-template-columns: 1fr;
+    }
+}

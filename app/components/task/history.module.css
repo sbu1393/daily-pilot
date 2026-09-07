@@ -1,0 +1,31 @@
+.section { margin-top: 28px; display: grid; gap: 16px; }
+
+.head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.head h3 { margin: 0; font-size: 1.15rem; font-weight: 800; }
+.date { color: var(--muted); font-size: .85rem; direction: ltr; }
+
+.statsRow { display: flex; flex-wrap: wrap; gap: 10px; }
+.stat { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 10px 16px; display: grid; gap: 2px; }
+.statLabel { font-size: .72rem; color: var(--muted); }
+.statValue { font-size: 1rem; font-weight: 800; }
+.good { color: var(--success); }
+.bad { color: var(--danger); }
+
+.block { display: grid; gap: 10px; }
+.blockTitle { margin: 0; font-size: .95rem; font-weight: 800; color: var(--ink-2); }
+.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+
+.item { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.itemMain { display: grid; gap: 4px; min-width: 0; }
+.itemText { font-weight: 600; }
+.itemCat { font-size: .72rem; color: var(--primary-dark); background: var(--primary-soft); padding: 2px 10px; border-radius: 999px; justify-self: start; }
+.itemMeta { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.metaChip { font-size: .72rem; color: var(--ink-2); background: var(--chip-bg); border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
+.savedChip { color: var(--success); background: var(--success-bg); }
+.overChip { color: var(--danger); background: var(--danger-bg); }
+
+.leftoverNote { font-size: .85rem; color: var(--warning); background: var(--warning-bg); border-radius: 12px; padding: 10px 14px; }
+.rolloverBtn { background: var(--gradient); color: #fff; border: none; border-radius: 12px; padding: 10px 18px; font-weight: 700; font-family: inherit; cursor: pointer; }
+.rolloverBtn:disabled { opacity: .6; cursor: not-allowed; }
+
+.empty, .loading { text-align: center; color: var(--muted-2); padding: 24px 0; font-size: .9rem; }

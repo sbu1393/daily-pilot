@@ -1,0 +1,228 @@
+.statsWrap {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 14px;
+    margin: 22px 0 8px;
+  }
+  
+  .statCard {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 14px 16px;
+    box-shadow: 0 8px 24px rgba(var(--ink-rgb), 0.05);
+    backdrop-filter: blur(16px);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  
+  .statHead {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+  
+  .statValue {
+    font-size: 1.2rem;
+    font-weight: 800;
+    color: var(--ink);
+  }
+  
+  .statCard.pool .statValue {
+    color: var(--primary-dark);
+  }
+  .statCard.saved .statValue {
+    color: var(--amber);
+  }
+  
+  .progressTrack {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--primary-soft);
+    overflow: hidden;
+    margin-top: 2px;
+  }
+  .progressFill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--gradient-h);
+    transition: width 0.4s ease;
+  }
+  .progressTrack.over .progressFill {
+    background: var(--danger-strong);
+  }
+  
+  .warnChip {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--danger-strong);
+    background: var(--danger-bg-strong);
+    border-radius: 999px;
+    padding: 3px 10px;
+    width: max-content;
+  }
+  
+  .statsFooter {
+    margin-top: 10px;
+    display: flex;
+    justify-content: flex-end;
+  }
+  .editBtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--ink-2);
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .editBtn:hover {
+    border-color: var(--primary);
+    color: var(--primary-dark);
+  }
+  
+  /* ===== مودال شروع روز ===== */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1050;
+    background: rgba(var(--ink-rgb), 0.45);
+    backdrop-filter: blur(6px);
+    display: grid;
+    place-items: center;
+    padding: 16px;
+  }
+  .modalCard {
+    width: 100%;
+    max-width: 440px;
+    background: var(--surface-solid);
+    border: 1px solid var(--border);
+    border-radius: 28px;
+    padding: 26px;
+    box-shadow: 0 30px 80px rgba(var(--ink-rgb), 0.25);
+    animation: pop 0.25s ease;
+  }
+  @keyframes pop {
+    from {
+      opacity: 0;
+      transform: scale(0.96) translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  
+  .modalHead {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 6px;
+  }
+  .modalHead h3 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 800;
+  }
+  .closeBtn {
+    border: none;
+    background: var(--chip-bg);
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    color: var(--ink-2);
+  }
+  .modalSub {
+    color: var(--muted);
+    font-size: 0.85rem;
+    line-height: 1.9;
+    margin: 0 0 18px;
+  }
+  
+  .presetRow {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .preset {
+    border: 1.5px solid var(--border);
+    background: var(--surface-solid);
+    color: var(--ink-2);
+    border-radius: 999px;
+    padding: 8px 16px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .preset:hover {
+    border-color: var(--primary);
+  }
+  .presetActive {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+  }
+  
+  .minuteInput {
+    width: 100%;
+    border: 1.5px solid var(--border);
+    background: var(--input-bg);
+    color: var(--ink);
+    border-radius: 16px;
+    padding: 13px 16px;
+    font-size: 1rem;
+    font-weight: 700;
+    font-family: inherit;
+    margin-bottom: 16px;
+    transition: border-color 0.2s ease;
+    text-align: center;
+  }
+  .minuteInput:focus {
+    outline: none;
+    border-color: var(--primary);
+  }
+  
+  .btnPrimary {
+    width: 100%;
+    border: none;
+    border-radius: 16px;
+    padding: 14px;
+    font-size: 1rem;
+    font-weight: 800;
+    font-family: inherit;
+    color: #fff;
+    background: var(--gradient);
+    box-shadow: 0 12px 26px -10px rgba(79, 70, 229, 0.6);
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .btnPrimary:hover:not(:disabled) {
+    transform: translateY(-2px);
+  }
+  .btnPrimary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  
+  .formError {
+    color: var(--danger-strong);
+    font-size: 0.8rem;
+    margin: -6px 0 12px;
+    font-weight: 600;
+  }
+  

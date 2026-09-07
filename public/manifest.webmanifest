@@ -1,0 +1,42 @@
+{
+  "name": "Daily Pilot — مدیریت هوشمند کارهای روزانه",
+  "short_name": "Daily Pilot",
+  "description": "برنامه‌ریز هوشمند کارهای روزانه با هوش مصنوعی؛ اولویت‌بندی، زمان‌بندی و پیگیری عادت‌ها",
+  "lang": "fa",
+  "dir": "rtl",
+  "id": "/",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#f8fafc",
+  "theme_color": "#4f46e5",
+  "categories": ["productivity", "lifestyle", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

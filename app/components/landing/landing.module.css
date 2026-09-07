@@ -1,0 +1,596 @@
+/* ====== Design tokens & پس‌زمینه صفحه ====== */
+.landingPage {
+    --bg: #f6f7fb;
+    --surface: #ffffff;
+    --text: #101828;
+    --muted: #667085;
+    --primary: #4f46e5;
+    --primary-2: #7c3aed;
+    --primary-soft: #eef2ff;
+    --success: #12b76a;
+    --border: #e4e7ec;
+    --shadow-sm: 0 1px 2px rgba(16, 24, 40, .05), 0 4px 12px -4px rgba(16, 24, 40, .06);
+    --shadow-lg: 0 12px 24px -8px rgba(16, 24, 40, .08), 0 32px 64px -16px rgba(79, 70, 229, .22);
+
+    min-height: 100vh;
+    overflow-x: hidden;
+    color: var(--text);
+    font-family: var(--font-vazir, "Vazirmatn", "Segoe UI", Tahoma, sans-serif);
+    background:
+        radial-gradient(52rem 26rem at 88% -10%, rgba(124, 58, 237, .12), transparent 65%),
+        radial-gradient(44rem 24rem at -8% 2%, rgba(79, 70, 229, .10), transparent 60%),
+        var(--bg);
+}
+
+/* ====== هدر لندینگ ====== */
+.landingPage .app-header {
+    margin: 20px auto 0;
+}
+
+.landingPage .header-user-btn {
+    background: var(--surface);
+}
+
+.landingPage .header-menu-item {
+    color: var(--text);
+}
+
+/* ====== Hero ====== */
+.hero {
+    padding: 110px 20px 70px;
+    text-align: center;
+}
+
+.heroContent {
+    max-width: 860px;
+    margin-inline: auto;
+}
+
+.heroLogo {
+    width: 68px;
+    height: 68px;
+    margin: 0 auto 26px;
+    display: grid;
+    place-items: center;
+    font-size: 30px;
+    font-weight: 800;
+    color: #fff;
+    background: linear-gradient(135deg, var(--primary), var(--primary-2));
+    border-radius: 20px;
+    box-shadow: 0 16px 34px -12px rgba(79, 70, 229, .55);
+}
+
+.hero h1 {
+    margin: 0 0 22px;
+    font-size: clamp(2rem, 5vw, 3.4rem);
+    line-height: 1.4;
+    font-weight: 800;
+    letter-spacing: -.5px;
+}
+
+.brand {
+    background: linear-gradient(120deg, var(--primary), var(--primary-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    margin-inline-start: 8px;
+}
+
+.hero p {
+    margin: 0 auto 40px;
+    max-width: 620px;
+    color: var(--muted);
+    font-size: clamp(1rem, 2vw, 1.15rem);
+    line-height: 2.1;
+}
+
+.heroActions {
+    display: flex;
+    gap: 14px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+/* ====== دکمه‌ها ====== */
+.primaryBtn,
+.secondaryBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 14px 32px;
+    border-radius: 999px;
+    font-size: 1rem;
+    font-weight: 700;
+    font-family: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    border: none;
+    transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease, color .2s ease;
+}
+
+.primaryBtn {
+    color: #fff;
+    background: linear-gradient(135deg, var(--primary), var(--primary-2));
+    box-shadow: 0 12px 26px -12px rgba(79, 70, 229, .65);
+}
+
+.primaryBtn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 34px -12px rgba(79, 70, 229, .75);
+}
+
+.secondaryBtn {
+    color: var(--text);
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+}
+
+.secondaryBtn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+    transform: translateY(-2px);
+}
+
+.primaryBtn:focus-visible,
+.secondaryBtn:focus-visible {
+    outline: 3px solid rgba(79, 70, 229, .35);
+    outline-offset: 3px;
+}
+
+/* ====== پیش‌نمایش داشبورد (مک‌آپ مرورگر) ====== */
+.previewSection {
+    padding: 26px 20px 0;
+}
+
+.previewCard {
+    max-width: 640px;
+    margin-inline: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+}
+
+.previewBar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    direction: ltr;
+    padding: 12px 16px;
+    background: #eef1f8;
+    border-bottom: 1px solid var(--border);
+}
+
+.previewDots {
+    display: flex;
+    gap: 6px;
+}
+
+.previewDots i {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: block;
+}
+
+.previewDots i:nth-child(1) {
+    background: #f97066;
+}
+
+.previewDots i:nth-child(2) {
+    background: #fdb022;
+}
+
+.previewDots i:nth-child(3) {
+    background: #32d583;
+}
+
+.previewUrl {
+    flex: 1;
+    text-align: center;
+    direction: ltr;
+    background: #fff;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: .78rem;
+    padding: 5px 14px;
+    border-radius: 999px;
+}
+
+.previewBody {
+    padding: 22px;
+    display: grid;
+    gap: 16px;
+}
+
+.previewHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.previewHeader h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 800;
+}
+
+.previewBadge {
+    background: var(--primary-soft);
+    color: var(--primary);
+    font-size: .78rem;
+    font-weight: 700;
+    padding: 5px 12px;
+    border-radius: 999px;
+}
+
+.taskList {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+}
+
+.task {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: #f8f9fc;
+    border: 1px solid var(--border-soft);
+    transition: transform .2s ease, background-color .2s ease, box-shadow .2s ease;
+}
+
+.task:hover {
+    background: var(--primary-soft);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px -8px rgba(79, 70, 229, .35);
+}
+
+.taskCheck {
+    flex: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+    color: #fff;
+    line-height: 1;
+    border: 1.5px solid #d0d5dd;
+    background: #fff;
+    box-shadow: 0 2px 6px -2px rgba(0, 0, 0, .1);
+}
+
+.taskDone .taskCheck {
+    background: var(--success);
+    border-color: var(--success);
+}
+
+.taskLabel {
+    font-size: .95rem;
+    color: var(--ink);
+}
+
+.taskDone .taskLabel {
+    text-decoration: line-through;
+    color: var(--muted);
+}
+
+/* ====== Features ====== */
+.features {
+    display: grid;
+    gap: 22px;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    max-width: 1100px;
+    margin-inline: auto;
+    padding: 110px 20px 40px;
+}
+
+.featureCard {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    padding: 30px 26px;
+    transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+}
+
+.featureCard:hover {
+    transform: translateY(-6px);
+    border-color: rgba(79, 70, 229, .28);
+    box-shadow: var(--shadow-lg);
+}
+
+.featureIcon {
+    width: 54px;
+    height: 54px;
+    border-radius: 16px;
+    display: grid;
+    place-items: center;
+    margin-bottom: 18px;
+    background: var(--primary-soft);
+    color: var(--primary);
+}
+
+.featureTitle {
+    margin: 0 0 8px;
+    font-size: 1.12rem;
+    font-weight: 800;
+}
+
+.featureText {
+    margin: 0;
+    color: var(--muted);
+    line-height: 1.9;
+    font-size: .95rem;
+}
+
+/* ====== بخش نصب روی گوشی (دانلود + QR) ====== */
+.downloadSection {
+    padding: 40px 20px 20px;
+}
+
+.downloadCard {
+    max-width: 920px;
+    margin-inline: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 28px;
+    padding: 48px 32px;
+    box-shadow: var(--shadow-lg);
+    display: grid;
+    gap: 26px;
+}
+
+.downloadTitle {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: clamp(1.4rem, 3.4vw, 2rem);
+    font-weight: 800;
+}
+
+.downloadText {
+    margin: 0 auto;
+    max-width: 560px;
+    text-align: center;
+    color: var(--muted);
+    line-height: 2;
+    font-size: .95rem;
+}
+
+.downloadGrid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 34px;
+    align-items: center;
+}
+
+.qrBox {
+    display: grid;
+    gap: 10px;
+    justify-items: center;
+    padding: 18px;
+    border-radius: 22px;
+    background: var(--primary-soft);
+}
+
+.qrImg {
+    width: 210px;
+    height: 210px;
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: var(--shadow-sm);
+}
+
+.qrPlaceholder {
+    width: 210px;
+    height: 210px;
+    border-radius: 16px;
+    border: 1.5px dashed var(--border);
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: .8rem;
+}
+
+.qrCaption {
+    font-size: .75rem;
+    color: var(--muted);
+    font-weight: 700;
+}
+
+.downloadActions {
+    display: grid;
+    gap: 14px;
+    justify-items: start;
+}
+
+.platformCard {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 14px 18px;
+    background: var(--surface);
+}
+
+.platformCard strong {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: .9rem;
+    color: var(--text);
+}
+
+.platformCard ol {
+    margin: 8px 0 0;
+    padding-inline-start: 18px;
+    color: var(--muted);
+    font-size: .82rem;
+    line-height: 1.9;
+}
+
+.iosHint {
+    font-size: .8rem;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+@media (max-width: 700px) {
+    .downloadCard {
+        padding: 36px 20px;
+    }
+
+    .downloadGrid {
+        grid-template-columns: 1fr;
+        justify-items: center;
+    }
+
+    .downloadActions {
+        justify-items: stretch;
+        width: 100%;
+    }
+}
+
+/* ====== CTA ====== */
+.ctaSection {
+    padding: 110px 20px;
+}
+
+.ctaCard {
+    position: relative;
+    overflow: hidden;
+    max-width: 920px;
+    margin-inline: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 28px;
+    padding: 64px 24px;
+    text-align: center;
+    box-shadow: var(--shadow-lg);
+}
+
+.ctaCard::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(34rem 14rem at 50% -30%, rgba(124, 58, 237, .16), transparent 70%),
+        radial-gradient(24rem 12rem at 90% 120%, rgba(79, 70, 229, .08), transparent 70%);
+}
+
+.ctaTitle {
+    position: relative;
+    margin: 0 0 12px;
+    font-size: clamp(1.6rem, 4vw, 2.3rem);
+    font-weight: 800;
+}
+
+.ctaText {
+    position: relative;
+    margin: 0 auto 30px;
+    max-width: 480px;
+    color: var(--muted);
+    line-height: 2;
+}
+
+.ctaCard .primaryBtn {
+    position: relative;
+}
+
+/* ====== موبایل ====== */
+@media (max-width: 640px) {
+    .hero {
+        padding: 72px 16px 52px;
+    }
+
+    .heroActions {
+        flex-direction: column;
+    }
+
+    .primaryBtn,
+    .secondaryBtn {
+        width: 100%;
+    }
+
+    .features {
+        padding: 90px 16px 24px;
+    }
+
+    .ctaSection {
+        padding: 90px 16px 80px;
+    }
+
+    .ctaCard {
+        padding: 48px 20px;
+    }
+}
+
+/* ====== تم تیره (لندینگ) ====== */
+:global([data-theme="dark"]) .landingPage {
+    --bg: #0b1120;
+    --surface: #11192d;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --primary: #818cf8;
+    --primary-2: #a78bfa;
+    --primary-soft: rgba(99, 102, 241, .18);
+    --success: #34d399;
+    --border: #2b3a55;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 12px -4px rgba(0, 0, 0, .4);
+    --shadow-lg: 0 12px 24px -8px rgba(0, 0, 0, .5), 0 32px 64px -16px rgba(0, 0, 0, .6);
+}
+
+:global([data-theme="dark"]) .landingPage .previewBar {
+    background: #0e1526;
+    border-bottom-color: var(--border);
+}
+
+:global([data-theme="dark"]) .landingPage .previewUrl {
+    background: #0e1526;
+    border-color: var(--border);
+}
+
+:global([data-theme="dark"]) .landingPage .task {
+    background: #0e1526;
+}
+
+:global([data-theme="dark"]) .landingPage .task:hover {
+    background: var(--primary-soft);
+}
+
+:global([data-theme="dark"]) .landingPage .taskCheck {
+    border-color: #475569;
+    background: #0e1526;
+}
+
+:global([data-theme="dark"]) .landingPage .app-header {
+    background: rgba(17, 25, 45, .8);
+}
+
+:global([data-theme="dark"]) .landingPage .platformCard {
+    background: #0e1526;
+}
+
+:global([data-theme="dark"]) .landingPage .header-user-name {
+    color: var(--text);
+}
+
+/* ====== دسترس‌پذیری ====== */
+@media (prefers-reduced-motion: reduce) {
+
+    .primaryBtn,
+    .secondaryBtn,
+    .featureCard,
+    .task {
+        transition: none;
+    }
+}

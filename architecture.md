@@ -4066,6 +4066,8 @@ GET /api/auth/profile
 
 PATCH /api/auth/profile
 
+POST /api/auth/change-password — Pending ADR (۸.۱۲.۱)
+
 GET /api/auth/me در V1 وجود ندارد.
 
 Current getCurrentUser()
@@ -4502,8 +4504,6 @@ Email Verification
 
 Password Reset
 
-Password Change
-
 Refresh Token
 
 Token Revocation
@@ -4518,7 +4518,33 @@ Role-based Authorization
 
 این قابلیت‌ها یا به Email Provider نیاز دارند، یا Complexity مربوط به Session/Security را افزایش می‌دهند، بدون اینکه برای Scope فعلی Product ضروری باشند.
 
-Password Change نیز تا زمان تعریف دقیق Flow امنیتی آن، از V1 خارج است.
+8.12.1 Pending ADR — POST /api/auth/change-password (انحراف عمدی مستند)
+
+این مورد به‌صورت صریح یک Pending ADR / انحراف عمدی مستند است و یک تصمیم معماری نهایی محسوب نمی‌شود.
+
+وضعیت: Active & Hardened در V1 — قبلاً در این بخش به‌عنوان Deferred در V1 مستند شده بود.
+
+دلیل:
+
+Route به‌صورت فعال در Flow فعلی UI استفاده می‌شود.
+
+Route با موارد زیر Hardened شده است:
+
+انتقال changePasswordSchema به app/schema/formSchema.ts
+
+مدیریت malformed JSON (پاسخ 400 با VALIDATION_ERROR)
+
+رفتار Session:
+
+Invalidation حالت‌دار Session/Token عمداً پیاده‌سازی نمی‌شود تا طراحی Stateless JWT فعلی حفظ شود.
+
+هر سیاست Revocation / Invalidation آینده نیازمند یک Auth ADR مستقل است.
+
+اثر این انحراف:
+
+Password Change از فهرست Deferred این بخش خارج می‌شود.
+
+سایر موارد Deferred این بخش بدون تغییر باقی می‌مانند.
 
 8.13 Architecture Gaps / Implementation Tasks
 
@@ -4614,7 +4640,7 @@ Email Verification deferred
 
 Password Reset deferred
 
-Password Change deferred
+Password Change: Active & Hardened در V1 (Pending ADR — ۸.۱۲.۱)
 
 Refresh/Revocation deferred
 

@@ -3,7 +3,7 @@
 import { useMemo } from "react"
 import moment from "moment-jalaali"
 import { useCalendar } from "@/app/contexts/CalenderContext"
-import { todayKey, shiftDayKey, fromDayKey } from "../../lib/jalili"
+import { getCanonicalToday, shiftCanonicalKey } from "../../lib/canonicalDay"
 import { faDigits } from "@/app/lib/time"
 import { useHistoryMarkers } from "@/app/hooks/useHistoryMarkers"
 import styles from "./jalaliCalendar.module.css"
@@ -17,20 +17,20 @@ const PAST_DAYS = 7   // روزهای قبل از امروز که نمایش د�
 const TOTAL_DAYS = 21 // ۷ قبل + امروز + ۱۳ بعد
 
 export default function JalaliCalendar() {
-    const { selectedDate, setSelectedDate } = useCalendar()
-    const today = todayKey()
+    const { selectedDate, setSelectedDate, timezone } = useCalendar()
+    const today = getCanonicalToday(timezone)
 
     // بازهی نمایش = همان محدودهی ۲۱ روز → هم برای ساخت روزها، هم برای کوئری مارکرها
-    const rangeStart = useMemo(() => shiftDayKey(today, -PAST_DAYS), [today])
-    const rangeEnd = useMemo(() => shiftDayKey(today, TOTAL_DAYS - PAST_DAYS - 1), [today])
+    const rangeStart = useMemo(() => shiftCanonicalKey(today, -PAST_DAYS), [today])
+    const rangeEnd = useMemo(() => shiftCanonicalKey(today, TOTAL_DAYS - PAST_DAYS - 1), [today])
     const { markers } = useHistoryMarkers(rangeStart, rangeEnd)
 
     const days: Day[] = useMemo(() => {
         return Array.from({ length: TOTAL_DAYS }, (_, i) => {
-            const key = shiftDayKey(rangeStart, i)
-            const [y, m, d] = key.split("-").map(Number)
-            const weekday = WEEKDAYS[moment(fromDayKey(key)).day()]
-            return { key, weekday, number: d, month: MONTHS[m - 1] }
+            const key = shiftCanonicalKey(rangeStart, i)
+            // تبدیل تقویمی میلادی→جلالی فقط برای نمایش (moment-jalaali لایهی نمایش است)
+            const m = moment(key, "YYYY-MM-DD")
+            return { key, weekday: WEEKDAYS[m.day()], number: m.jDate(), month: MONTHS[m.jMonth()] }
         })
     }, [rangeStart])
 

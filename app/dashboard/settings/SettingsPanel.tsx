@@ -12,6 +12,7 @@ import AvatarUpload from "@/app/components/AvatarUpload"
 import FormInput from "@/app/components/FormInput"
 import { profileSchema } from "@/app/schema/formSchema"
 import { useSettings } from "@/app/contexts/SettingsContext"
+import { api } from "@/app/lib/api/client"
 import InstallCard from "@/app/components/pwa/InstallCard"
 import styles from "./settings.module.css"
 
@@ -79,21 +80,16 @@ export default function SettingsPanel({ user }: { user: UserData }) {
     const onSaveProfile = async (data: ProfileInput) => {
         try {
             setSaving(true)
-            const res = await fetch("/api/auth/profile", {
+            await api("/api/auth/profile", {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ ...data, birthDate }),
             })
-            const result = await res.json()
-            if (!res.ok) {
-                toast.error(result.message || "ذخیره‌سازی با خطا مواجه شد")
-                return
-            }
-            toast.success(result.message || "حساب کاربری ذخیره شد")
+            toast.success("حساب کاربری ذخیره شد")
             reset({ ...data, birthDate })
             router.refresh()
-        } catch {
-            toast.error("ذخیره‌سازی با خطا مواجه شد")
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "ذخیره‌سازی با خطا مواجه شد")
         } finally {
             setSaving(false)
         }
@@ -125,7 +121,7 @@ export default function SettingsPanel({ user }: { user: UserData }) {
         }
         setPasswordLoading(true)
         try {
-            const res = await fetch("/api/auth/change-password", {
+            await api("/api/auth/change-password", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -134,16 +130,11 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                     newPasswordConfirm: passwordForm.confirmPassword,
                 }),
             })
-            const json = await res.json()
-            if (!res.ok) {
-                setPasswordError(json.message || "خطا در تغییر رمز عبور")
-                return
-            }
-            setPasswordSuccess(json.message || "رمز عبور تغییر یافت ✅")
+            setPasswordSuccess("رمز عبور با موفقیت تغییر یافت ✅")
             setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" })
-            toast.success(json.message || "رمز عبور تغییر یافت ✅")
-        } catch {
-            setPasswordError("خطا در ارتباط با سرور")
+            toast.success("رمز عبور با موفقیت تغییر یافت ✅")
+        } catch (error) {
+            setPasswordError(error instanceof Error ? error.message : "خطا در ارتباط با سرور")
         } finally {
             setPasswordLoading(false)
         }

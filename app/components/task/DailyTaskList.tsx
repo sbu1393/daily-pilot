@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import { useDaySummary, type DaySummary } from "../../hooks/UseDaySummary"
-import { todayKey, shiftDayKey } from "../../lib/jalili"
+import { getCanonicalToday, shiftCanonicalKey } from "../../lib/canonicalDay"
 import { faDigits } from "@/app/lib/time"
 import {
     cacheDay,
@@ -17,6 +17,7 @@ import {
     type QueuedTask,
 } from "@/app/lib/offline"
 import { toast } from "react-toastify"
+import { api } from "@/app/lib/api/client"
 import { type TaskItem, type TaskPriority } from "./taskTypes"
 import TaskCard from "./TaskCard"
 import CreateTaskModal from "./CreateTaskModal"
@@ -28,15 +29,8 @@ import ReanalyzeModal from "./ReanalyzeModal"
 
 const priorityWeight: Record<TaskPriority, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 }
 
-// پارس دفاعی: پاسخ ممکن است { data } یا { tasks } باشد
-function readTasks(json: unknown): TaskItem[] {
-    const obj = (json ?? {}) as { data?: unknown; tasks?: unknown }
-    const list = Array.isArray(obj.data) ? obj.data : Array.isArray(obj.tasks) ? obj.tasks : []
-    return list as TaskItem[]
-}
-
 export default function DailyTaskList() {
-    const { selectedDate } = useCalendar()
+    const { selectedDate, timezone } = useCalendar()
     const { summary, refresh: refreshSummary } = useDaySummary()
 
     const [tasks, setTasks] = useState<TaskItem[]>([])
@@ -71,19 +65,19 @@ export default function DailyTaskList() {
         const seq = ++requestSeq.current
         setLoading(true)
         try {
-            const res = await fetch(`/api/tasks?dayKey=${selectedDate}`)
-            const json = await res.json().catch(() => ({}))
-            if (!res.ok) throw new Error((json as { message?: string }).message || "خطا در دریافت تسک‌ها")
-            const dayTasks = readTasks(json)
+            // ADR-04: { ok, data: { tasks, summary } } → data.tasks
+            const data = await api<{ tasks: TaskItem[]; summary: DaySummary }>(
+                `/api/tasks?dayKey=${selectedDate}`,
+            )
+            const dayTasks = data.tasks
             if (seq === requestSeq.current) {
                 setTasks(dayTasks)
                 setOffline(false)
             }
-            /* کش محلی برای استفاده‌ی آفلاین بعدی */
+            /* کش محلی برای استفاده‌ی آفلاین بعدی — ADR-04: data = summary */
             try {
-                const sumRes = await fetch(`/api/planner/day?dayKey=${selectedDate}`)
-                const sumJson = await sumRes.json().catch(() => ({}))
-                cacheDay(selectedDate, dayTasks, (sumJson as { summary?: DaySummary | null }).summary ?? null)
+                const sum = await api<DaySummary>(`/api/planner/day?dayKey=${selectedDate}`)
+                cacheDay(selectedDate, dayTasks, sum)
             } catch {
                 cacheDay(selectedDate, dayTasks, null)
             }
@@ -109,15 +103,14 @@ export default function DailyTaskList() {
     // تسک‌های ناتمام روزهای قبل — اندپوینت مخصوص بازگرداندنِ تسک‌های عقب‌افتاده
     const loadOverdue = useCallback(async () => {
         try {
-            const res = await fetch("/api/tasks/overdue")
-            const json = await res.json().catch(() => ({}))
-            if (!res.ok) return
-            const limit = shiftDayKey(todayKey(), -6) // فقط ۷ روز اخیر
-            setOverdue(readTasks(json).filter((t) => t.dayKey >= limit))
+            // ADR-04: { ok, data: tasks } → خود data آرایه‌ی تسک‌هاست
+            const data = await api<TaskItem[]>("/api/tasks/overdue")
+            const limit = shiftCanonicalKey(getCanonicalToday(timezone), -6) // فقط ۷ روز اخیر
+            setOverdue(data.filter((t) => t.dayKey >= limit))
         } catch {
             /* بی‌صدا */
         }
-    }, [])
+    }, [timezone])
 
     const refreshAll = useCallback(async () => {
         await Promise.all([loadDay(), loadOverdue()])
@@ -175,9 +168,7 @@ export default function DailyTaskList() {
         if (!deleteTask) return
         setBusy(true)
         try {
-            const res = await fetch(`/api/tasks/${deleteTask.id}`, { method: "DELETE" })
-            const json = await res.json().catch(() => ({}))
-            if (!res.ok) throw new Error((json as { message?: string }).message || "خطا در حذف تسک")
+            await api(`/api/tasks/${deleteTask.id}`, { method: "DELETE" })
             setDeleteTask(null)
             await afterMutation("تسک حذف شد؛ زمانش به استخر روز برگشت 🕊")
         } catch (e) {
@@ -190,13 +181,11 @@ export default function DailyTaskList() {
     const handleRollover = async (ids: number[]) => {
         setBusy(true)
         try {
-            const res = await fetch("/api/tasks/rollover", {
+            await api("/api/tasks/rollover", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ taskIds: ids }),
             })
-            const json = await res.json().catch(() => ({}))
-            if (!res.ok) throw new Error((json as { message?: string }).message || "خطا در انتقال کارها")
             setRolloverOpen(false)
             await afterMutation("کارها به امروز منتقل و دوباره زمان‌بندی شدند ✅")
         } catch (e) {

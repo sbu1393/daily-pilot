@@ -1,41 +1,56 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest } from "next/server"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
-import { getPrisma } from "@/app/lib/getPrisma"
+import { setAvatar, removeAvatar } from "@/app/lib/services/auth.service"
+import {
+    errorResponse,
+    okMessageResponse,
+    okResponse,
+    toServiceErrorResponse,
+    unauthorizedResponse,
+} from "@/app/lib/apiResponse"
 
 const MAX_BYTES = 800 * 1024 // حداکثر حجم payload کدشده (~۶۰۰KB عکس اصلی)
+
+// بررسی ساختار Base64 بدون کتابخانه (فقط کاراکترها و طول — نه محتوای واقعی عکس)
+const BASE64_PAYLOAD_RE = /^[A-Za-z0-9+/]*={0,2}$/
+function isValidBase64Payload(payload: string): boolean {
+    return payload.length % 4 === 0 && BASE64_PAYLOAD_RE.test(payload)
+}
 
 // POST: ذخیره عکس پروفایل — عکس سمت کلاینت به data-URL فشرده تبدیل می‌شود
 export async function POST(req: NextRequest) {
     try {
         const user = await getCurrentUser()
-        if (!user) return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+        if (!user) return unauthorizedResponse()
 
         const body = (await req.json().catch(() => null)) as { image?: unknown } | null
         const image = typeof body?.image === "string" ? body.image : null
 
         if (!image) {
-            return NextResponse.json({ message: "عکسی ارسال نشده است" }, { status: 400 })
+            return errorResponse(400, "VALIDATION_ERROR", "عکسی ارسال نشده است")
         }
 
         if (!/^data:image\/(png|jpeg|jpg|webp);base64,/.test(image)) {
-            return NextResponse.json({ message: "فرمت عکس معتبر نیست (PNG، JPG یا WebP)" }, { status: 400 })
+            return errorResponse(400, "VALIDATION_ERROR", "فرمت عکس معتبر نیست (PNG، JPG یا WebP)")
+        }
+
+        const base64Payload = image.slice(image.indexOf(",") + 1)
+        if (!isValidBase64Payload(base64Payload)) {
+            return errorResponse(400, "VALIDATION_ERROR", "محتوای عکس نامعتبر است")
         }
 
         if (image.length > MAX_BYTES) {
-            return NextResponse.json({ message: "حجم عکس زیاد است؛ عکس کوچک‌تری انتخاب کنید" }, { status: 413 })
+            return errorResponse(413, "VALIDATION_ERROR", "حجم عکس زیاد است؛ عکس کوچک‌تری انتخاب کنید")
         }
 
-        const prisma = getPrisma()
-        const updated = await prisma.user.update({
-            where: { id: user.id },
-            data: { image },
-            select: { id: true, image: true },
-        })
+        const updated = await setAvatar(user.id, image)
 
-        return NextResponse.json({ data: updated, message: "عکس پروفایل به‌روزرسانی شد ✅" })
+        return okResponse(updated, { message: "عکس پروفایل به‌روزرسانی شد ✅" })
     } catch (error) {
+        const mapped = toServiceErrorResponse(error)
+        if (mapped) return mapped
         console.error("AVATAR POST ERROR:", error)
-        return NextResponse.json({ message: "خطای سرور" }, { status: 500 })
+        return errorResponse(500, "INTERNAL_ERROR", "خطای سرور")
     }
 }
 
@@ -43,14 +58,15 @@ export async function POST(req: NextRequest) {
 export async function DELETE() {
     try {
         const user = await getCurrentUser()
-        if (!user) return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+        if (!user) return unauthorizedResponse()
 
-        const prisma = getPrisma()
-        await prisma.user.update({ where: { id: user.id }, data: { image: null } })
+        await removeAvatar(user.id)
 
-        return NextResponse.json({ message: "عکس پروفایل حذف شد" })
+        return okMessageResponse("عکس پروفایل حذف شد")
     } catch (error) {
+        const mapped = toServiceErrorResponse(error)
+        if (mapped) return mapped
         console.error("AVATAR DELETE ERROR:", error)
-        return NextResponse.json({ message: "خطای سرور" }, { status: 500 })
+        return errorResponse(500, "INTERNAL_ERROR", "خطای سرور")
     }
 }

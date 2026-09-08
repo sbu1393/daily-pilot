@@ -4,7 +4,8 @@ import { memo } from "react"
 import { motion } from "framer-motion"
 import { fmtMinutes, faDigits } from "@/app/lib/time"
 import TimeAgo from "../TimeAgo"
-import { todayKey } from "@/app/lib/jalili" // ۱. ایمپورت تابع محاسبه تاریخ امروز
+import { getCanonicalToday } from "@/app/lib/canonicalDay"
+import { useCalendar } from "@/app/contexts/CalenderContext"
 import { categoryInfo, priorityMeta, priorityMissingMeta, type TaskItem } from "./taskTypes"
 import styles from "./task.module.css"
 
@@ -32,6 +33,7 @@ type Props = {
 
 // ۳. اضافه کردن onReanalyze به پارامترهای ورودی کامپوننت
 function TaskCard({ task, onComplete, onDelete, onReanalyze }: Props) {
+    const { timezone } = useCalendar()
     const done = task.status === "DONE"
     const cat = categoryInfo(task.category)
     const pr = task.priority != null ? priorityMeta[task.priority] : priorityMissingMeta
@@ -118,7 +120,7 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze }: Props) {
                     <button className={styles.btnGhost} onClick={() => onDelete(task)} title="حذف تسک">
                         حذف
                     </button>
-                    {task.status === "TODO" && task.dayKey >= todayKey() && (
+                    {task.status === "TODO" && task.dayKey >= getCanonicalToday(timezone) && (
                         <button
                             type="button"
                             className={styles.btnGhost}

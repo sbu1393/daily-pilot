@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { fmtMinutes } from "@/app/lib/time"
 import { toast } from "react-toastify"
 import { useSettings } from "@/app/contexts/SettingsContext"
+import { api } from "@/app/lib/api/client"
 import AnimatedModal from "../motion/AnimatedModal" // مودال با انیمیشن فر머-موشن
 import { type TaskItem } from "./taskTypes"
 import styles from "./task.module.css"
@@ -50,16 +51,15 @@ export default function CompleteTaskModal({ task, onClose, onCompleted }: Props)
         }
         setLoading(true)
         try {
-            const res = await fetch(`/api/tasks/${task.id}/complete`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ durationMinutes: value }),
-            })
-            const json = await res.json().catch(() => ({}))
-            if (!res.ok) throw new Error((json as { message?: string }).message || "خطا در ثبت اتمام")
-
-            // سرور پاسخ را به شکل { result: { savedMinutes, overspentMinutes } } برمی‌گرداند
-            const body = json as { result?: { savedMinutes?: number; overspentMinutes?: number } }
+            // ADR-04: پاسخ { ok, data: { task, result, summaries } } → data.result
+            const body = await api<{ result?: { savedMinutes?: number; overspentMinutes?: number } }>(
+                `/api/tasks/${task.id}/complete`,
+                {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ durationMinutes: value }),
+                },
+            )
             const saved = body.result?.savedMinutes ?? 0
             const overspent = body.result?.overspentMinutes ?? 0
 

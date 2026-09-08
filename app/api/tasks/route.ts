@@ -1,85 +1,59 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getPrisma } from "@/app/lib/getPrisma"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
-import { analyzeTask } from "../../lib/ai/analyzeTask"
-import { rebalanceDay } from "@/app/lib/planner/rebalance"
-import { getDaySummary } from "@/app/lib/planner/summary"
-import { fromDayKey, todayKey } from "../../lib/jalili"
+import { createTask, getDayTasks } from "@/app/lib/services/tasks.service"
+import { getCanonicalToday } from "@/app/lib/canonicalDay"
 import { createTaskSchema } from "@/app/schema/plannerSchema"
+import {
+    errorResponse,
+    toServiceErrorResponse,
+    unauthorizedResponse,
+    validationErrorResponse,
+} from "@/app/lib/apiResponse"
 
-// POST: ساخت تسک → تحلیل AI → ذخیره → بازتوزیع بودجهی روز
+// POST: ساخت تسک → ذخیره → bump (A3) — مستقل از AI
 export async function POST(req: NextRequest) {
     try {
         const user = await getCurrentUser()
-        if (!user) return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+        if (!user) return unauthorizedResponse()
 
         const body = await req.json()
         const parsed = createTaskSchema.safeParse(body)
         if (!parsed.success) {
-            return NextResponse.json(
-                { message: "اطلاعات نامعتبر است", errors: parsed.error.flatten() },
-                { status: 400 },
-            )
+            return validationErrorResponse(parsed.error.flatten())
         }
 
         const { text, dayKey } = parsed.data
-        const prisma = getPrisma()
+        const { task } = await createTask(user.id, user.timezone, { text, dayKey })
 
-        // ۱) تحلیل با هوش مصنوعی (اگه کلید نباشه → Mock)
-        const { source, analysis } = await analyzeTask(text)
-
-        // ۲) ذخیرهی تسک
-        const task = await prisma.task.create({
-            data: {
-                text,
-                dayKey,
-                category: analysis.category,
-                priority: analysis.priority,
-                score: analysis.score,
-                reason: analysis.reason,
-                estimatedTime: analysis.estimatedMinutes,
-                scheduledDate: fromDayKey(dayKey), // لحظهی نیمهشب تهران
-                userId: user.id,
-            },
-        })
-
-        // ۳) بازتوزیع (اگه روز پلن و بودجهی مثبت داشته باشه، وگرنه دست نمیزنه)
-        const summary = await rebalanceDay(user.id, dayKey)
-
-        return NextResponse.json({ data: task, aiSource: source, summary }, { status: 201 })
+        // ADR-04: { ok, data } — aiSource حذف شد (همیشه null بود؛ A5/A6)
+        return NextResponse.json({ ok: true, data: { task } }, { status: 201 })
     } catch (error) {
+        const mapped = toServiceErrorResponse(error)
+        if (mapped) return mapped
         console.error("CREATE TASK ERROR:", error)
-        return NextResponse.json({ message: "Server error" }, { status: 500 })
+        return errorResponse(500, "INTERNAL_ERROR", "Server error")
     }
 }
 
-// GET: تسکهای یک روز + خلاصه (پیشفرض: امروز)
+// GET: تسک‌های یک روز + خلاصه (پیش‌فرض: امروز)
 export async function GET(req: NextRequest) {
     try {
         const user = await getCurrentUser()
-        if (!user) return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+        if (!user) return unauthorizedResponse()
 
-        const dayKey = req.nextUrl.searchParams.get("dayKey") ?? todayKey()
+        const dayKey = req.nextUrl.searchParams.get("dayKey") ?? getCanonicalToday(user.timezone)
         if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
-            return NextResponse.json({ message: "فرمت روز نامعتبر است" }, { status: 400 })
+            return errorResponse(400, "VALIDATION_ERROR", "فرمت روز نامعتبر است")
         }
 
-        const prisma = getPrisma()
-        const tasks = await prisma.task.findMany({ where: { userId: user.id, dayKey } })
+        const { tasks, summary } = await getDayTasks(user.id, dayKey)
 
-        // مرتبسازی: انجامشدهها آخر، بعد بر اساس score نزولی
-        tasks.sort((a, b) => {
-            const doneA = a.status === "DONE" ? 1 : 0
-            const doneB = b.status === "DONE" ? 1 : 0
-            if (doneA !== doneB) return doneA - doneB
-            return (b.score ?? -1) - (a.score ?? -1) || a.createdAt.getTime() - b.createdAt.getTime()
-        })
-
-        const summary = await getDaySummary(user.id, dayKey)
-
-        return NextResponse.json({ data: tasks, summary }, { status: 200 })
+        // ADR-04: { ok, data: { tasks, summary } }
+        return NextResponse.json({ ok: true, data: { tasks, summary } }, { status: 200 })
     } catch (error) {
+        const mapped = toServiceErrorResponse(error)
+        if (mapped) return mapped
         console.error("GET TASKS ERROR:", error)
-        return NextResponse.json({ message: "Server error" }, { status: 500 })
+        return errorResponse(500, "INTERNAL_ERROR", "Server error")
     }
 }

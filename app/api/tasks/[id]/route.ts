@@ -1,7 +1,19 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getPrisma } from "@/app/lib/getPrisma"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
-import { rebalanceDay } from "@/app/lib/planner/rebalance"
+import { deleteTask, updateTask } from "@/app/lib/services/tasks.service"
+import { updateTaskSchema } from "@/app/schema/plannerSchema"
+import {
+    errorResponse,
+    okResponse,
+    toServiceErrorResponse,
+    unauthorizedResponse,
+    validationErrorResponse,
+} from "@/app/lib/apiResponse"
+
+function parseTaskId(raw: string): number | null {
+    const id = Number(raw)
+    return Number.isInteger(id) && id > 0 ? id : null
+}
 
 export async function DELETE(
     _req: NextRequest,
@@ -9,43 +21,53 @@ export async function DELETE(
 ) {
     try {
         const user = await getCurrentUser()
-        if (!user) return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+        if (!user) return unauthorizedResponse()
 
         const { id } = await params
-        const taskId = Number(id)
-        if (!Number.isInteger(taskId) || taskId <= 0) {
-            return NextResponse.json({ message: "شناسه نامعتبر است" }, { status: 400 })
+        const taskId = parseTaskId(id)
+        if (taskId == null) {
+            return errorResponse(400, "VALIDATION_ERROR", "شناسه نامعتبر است")
         }
 
-        const prisma = getPrisma()
-        const task = await prisma.task.findFirst({ where: { id: taskId, userId: user.id } })
-        if (!task) return NextResponse.json({ message: "تسک پیدا نشد" }, { status: 404 })
+        const { id: deletedId, summary } = await deleteTask(user.id, taskId)
 
-        await prisma.task.delete({ where: { id: task.id } })
-
-        // اگه تسک باز بوده، سهمش به استخرِ همون روز برمیگرده
-
-
-        let summary = null
-
-        if (task.status !== "DONE") {
-            if (!task.dayKey) {
-                return NextResponse.json(
-                    { message: "تاریخ برنامه‌ریزی تسک نامعتبر است" },
-                    { status: 400 }
-                )
-            }
-        
-            summary = await rebalanceDay(user.id, task.dayKey)
-        }
-
-
-        return NextResponse.json(
-            { message: "تسک حذف شد", data: { id: task.id, summary } },
-            { status: 200 },
-        )
+        return okResponse({ id: deletedId, summary }, { message: "تسک حذف شد" })
     } catch (error) {
+        const mapped = toServiceErrorResponse(error)
+        if (mapped) return mapped
         console.error("DELETE TASK ERROR:", error)
-        return NextResponse.json({ message: "Server error" }, { status: 500 })
+        return errorResponse(500, "INTERNAL_ERROR", "Server error")
+    }
+}
+
+// A1 — PATCH: ویرایش تسک (Content vs Planning-only — §6.3.5)
+export async function PATCH(
+    req: NextRequest,
+    { params }: { params: Promise<{ id: string }> },
+) {
+    try {
+        const user = await getCurrentUser()
+        if (!user) return unauthorizedResponse()
+
+        const { id } = await params
+        const taskId = parseTaskId(id)
+        if (taskId == null) {
+            return errorResponse(400, "VALIDATION_ERROR", "شناسه نامعتبر است")
+        }
+
+        const body = await req.json().catch(() => ({}))
+        const parsed = updateTaskSchema.safeParse(body)
+        if (!parsed.success) {
+            return validationErrorResponse(parsed.error.flatten())
+        }
+
+        const { task } = await updateTask(user.id, user.timezone, taskId, parsed.data)
+
+        return okResponse(task, { message: "تسک به‌روزرسانی شد" })
+    } catch (error) {
+        const mapped = toServiceErrorResponse(error)
+        if (mapped) return mapped
+        console.error("UPDATE TASK ERROR:", error)
+        return errorResponse(500, "INTERNAL_ERROR", "Server error")
     }
 }

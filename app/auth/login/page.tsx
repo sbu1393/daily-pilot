@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "react-toastify"
 import Link from "next/link"
 import { motion } from "framer-motion"
+import { api } from "@/app/lib/api/client"
 
 export type LoginInput = z.infer<typeof loginSchema>
 
@@ -44,24 +45,17 @@ export default function LoginForm() {
 
     const onCredentialSubmit = async (data: LoginInput) => {
         try {
-            const res = await fetch("/api/auth/login", {
+            await api("/api/auth/login", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(data),
             })
 
-            const json = await res.json()
-
-            if (!res.ok) {
-                toast.error(json.message || "ایمیل یا رمز عبور اشتباه است")
-                return
-            }
-
-            toast.success(json.message || "ورود موفق بود")
+            toast.success("ورود موفق بود")
             router.push("/dashboard")
             router.refresh()
-        } catch {
-            toast.error("خطا در ارتباط با سرور")
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "خطا در ارتباط با سرور")
         }
     }
 

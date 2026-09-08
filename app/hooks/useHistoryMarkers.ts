@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { api } from "@/app/lib/api/client"
 
 export type DayMarker = {
     dayKey: string
@@ -16,11 +17,10 @@ export function useHistoryMarkers(from: string, to: string) {
     const refresh = useCallback(async (silent = false) => {
         if (!silent) setLoading(true)
         try {
-            const res = await fetch(`/api/planner/history?from=${from}&to=${to}`)
-            const json = await res.json()
-            if (!res.ok) throw new Error(json.message || "خطا در دریافت تاریخچه")
+            // ADR-04: { ok, data: markers } → خود data آرایه‌ی مارکرهاست
+            const data = await api<DayMarker[]>(`/api/planner/history?from=${from}&to=${to}`)
             const map: Record<string, DayMarker> = {}
-            for (const m of json.data as DayMarker[]) map[m.dayKey] = m
+            for (const m of data) map[m.dayKey] = m
             setMarkers(map)
         } catch (e) {
             console.error(e)

@@ -2,7 +2,7 @@ import { getPrisma } from "@/app/lib/getPrisma"
 import { savedForTask } from "./summary"
 
 const MIN_ALLOCATION = 15 // کمتر از این → کاندیدای انتقال به فردا
-const GRANULARITY = 5 // همهی تخصیصها مضرب ۵ دقیقه
+const GRANULARITY = 5 // همه‌ی تخصیص‌ها مضرب ۵ دقیقه
 const DEFAULT_ESTIMATE = 30 // وقتی تخمین AI نداریم
 const MAX_ESTIMATE = 480
 const MAX_SCORE = 100
@@ -22,7 +22,7 @@ export function estimateOf(t: Pick<OpenTask, "estimatedTime">): number {
     return Math.min(MAX_ESTIMATE, Math.max(5, v))
 }
 
-// وزن رقابت: فرمول توافقشده — w = تخمین × (0.5 + score/200)
+// وزن رقابت: فرمول توافق‌شده — w = تخمین × (0.5 + score/200)
 export function weightOf(t: OpenTask): number {
     const est = estimateOf(t)
     const score = Math.min(MAX_SCORE, Math.max(0, t.score ?? 50))
@@ -33,15 +33,15 @@ export type DistItem = { id: number; weight: number; cap: number }
 export type DistResult = {
     allocations: Record<number, number> // taskId -> دقیقه (فقط مقادیر مثبت)
     dropped: number[] // سهم زیر ۱۵ دقیقه → کاندیدای rollover
-    pool: number // وقتِ توزیعنشده که به استخر برمیگرده
+    pool: number // وقتِ توزیع‌نشده که به استخر برمی‌گرده
 }
 
 /**
- * توزیع بودجه بین تسکها:
- * - اگه مجموع سقفها ≤ بودجه → هر تسک دقیقاً تخمینش رو میگیره، مازاد → استخر.
+ * توزیع بودجه بین تسک‌ها:
+ * - اگه مجموع سقف‌ها ≤ بودجه → هر تسک دقیقاً تخمینش رو می‌گیره، مازاد → استخر.
  * - اگه کمبود بودجه هست (overbook) → توزیع تناسبیِ وزندار با سقف = تخمین؛
- *   سهمهای زیر ۱۵ دقیقه کنار گذاشته میشن (کماهمیتترین اول) و بودجهشون
- *   بین بقیه پخش میشه. نتیجه به مضرب ۵ گرد میشه.
+ *   سهم‌های زیر ۱۵ دقیقه کنار گذاشته می‌شن (کم‌اهمیت‌ترین اول) و بودجه‌شون
+ *   بین بقیه پخش می‌شه. نتیجه به مضرب ۵ گرد می‌شه.
  */
 export function distribute(budget: number, items: DistItem[]): DistResult {
     const allocations: Record<number, number> = {}
@@ -58,7 +58,7 @@ export function distribute(budget: number, items: DistItem[]): DistResult {
         return { allocations, dropped, pool: budget - totalCap }
     }
 
-    // کسایی که سقفشون از حداقلِ قابل قبول کمتره اصلاً رقابت نمیکنن
+    // کسایی که سقف‌شون از حداقلِ قابل قبول کمتره اصلاً رقابت نمی‌کنن
     for (const it of items) {
         if (it.cap < MIN_ALLOCATION) dropped.push(it.id)
     }
@@ -75,7 +75,7 @@ export function distribute(budget: number, items: DistItem[]): DistResult {
         const proposed = new Map<number, number>()
         for (const it of active) proposed.set(it.id, (remaining * it.weight) / totalW)
 
-        // ۱) سقف = تخمین: هر کی سهمش به سقفش رسید، فقط سقفش رو میگیره
+        // ۱) سقف = تخمین: هر کی سهمش به سقفش رسید، فقط سقفش رو می‌گیره
         let cappedSum = 0
         const capped = new Set<number>()
         for (const it of active) {
@@ -91,7 +91,7 @@ export function distribute(budget: number, items: DistItem[]): DistResult {
             continue
         }
 
-        // ۲) حداقل سهم: زیر ۱۵ → کنار بذار (کمترین وزن اول) و بودجهش رو پخش کن
+        // ۲) حداقل سهم: زیر ۱۵ → کنار بذار (کمترین وزن اول) و بودجه‌ش رو پخش کن
         const small = active
             .filter((it) => proposed.get(it.id)! < MIN_ALLOCATION)
             .sort((a, b) => a.weight - b.weight || a.id - b.id)
@@ -114,7 +114,7 @@ export function distribute(budget: number, items: DistItem[]): DistResult {
         break
     }
 
-    // بودجهی خردِ باقیمانده (< ۱۵) قابل توزیع نیست
+    // بودجه‌ی خردِ باقی‌مانده (< ۱۵) قابل توزیع نیست
     for (const it of active) {
         if (!(it.id in allocations)) {
             dropped.push(it.id)
@@ -140,15 +140,17 @@ export type RebalanceOutput = {
 }
 
 /**
- * بازتوزیع کامل یک روز. صدا زدنش امنه (idempotent):
- * همون ورودی → همون خروجی. بعد از هر رویداد (ساخت/حذف/اتمام/rollover) دوباره صدا زده میشه.
+ * بازتوزیع کامل یک روز (A3 — فقط از مسیر lazy صدا زده می‌شود).
+ * صدا زدنش امنه (idempotent): همون ورودی → همون خروجی.
  *
  * قراردادها:
- * - بودجهی قابل توزیع = availableMinutes − Σ زمانِ واقعیِ مصرفشده (تسکهای DONE همین روز)
- * - تسکهای DONE هرگز تغییر نمیکنن (تخصیصشون سند تاریخیِ «زمان سیو شده»ئه)
- * - تسک IN_PROGRESS که تخصیص گرفته، محافظت میشه و سهمش کم نمیشه
- * - بدون پلن یا بودجهی صفر → دست نمیزنیم (وضعیت «برنامهریزی نشده»)
- * - خروجی `allocatedMinutes` هیچوقت صفر نیست؛ یا مثبته یا null
+ * - بودجه‌ی قابل توزیع = availableMinutes − Σ زمانِ واقعیِ مصرف‌شده (تسک‌های DONE همین روز)
+ * - تسک‌های DONE هرگز تغییر نمی‌کنن (تخصیص‌شون سند تاریخیِ «زمان سیو شده»ئه)
+ * - تسک IN_PROGRESS که تخصیص گرفته، محافظت می‌شه و سهمش کم نمی‌شه
+ * - بدون پلن → دست نمی‌زنیم (وضعیت «برنامه‌ریزی نشده»)
+ * - پلن با بودجه‌ی صفر → توزیعی نیست، ولی rebalancedVersion sync می‌شود
+ * - خروجی `allocatedMinutes` هیچ‌وقت صفر نیست؛ یا مثبته یا null
+ * - پس از ذخیره‌ی تخصیص‌ها، rebalancedVersion = planVersion در همان transaction (§6.3.2)
  */
 export async function rebalanceDay(userId: number, dayKey: string): Promise<RebalanceOutput> {
     const prisma = getPrisma()
@@ -166,8 +168,30 @@ export async function rebalanceDay(userId: number, dayKey: string): Promise<Reba
     const savedMinutes = done.reduce((s, t) => s + savedForTask(t), 0)
     const openBudgetMinutes = Math.max(0, availableMinutes - spentMinutes)
 
-    // بدون پلن یا بودجهی صفر → توزیع معنی نداره
-    if (!plan || availableMinutes <= 0) {
+    // بدون پلن → توزیع معنی نداره (هیچ بودجه‌ای نیست و چیزی persist نمی‌شود)
+    if (!plan) {
+        const committedMinutes = open.reduce((s, t) => s + (t.allocatedMinutes ?? 0), 0)
+        return {
+            dayKey,
+            availableMinutes: 0,
+            spentMinutes,
+            savedMinutes,
+            openBudgetMinutes,
+            committedMinutes,
+            poolMinutes: 0,
+            overCommittedMinutes: Math.max(0, committedMinutes - openBudgetMinutes),
+            droppedTaskIds: [],
+            allocations: open.map((t) => ({ taskId: t.id, allocatedMinutes: t.allocatedMinutes })),
+        }
+    }
+
+    // پلن هست ولی بودجه‌ی صفر → چیزی توزیع نمی‌شود، ولی نسخه sync می‌شود
+    // تا روز دائماً stale نماند (A3 — §6.3.2 Rebalance Completion)
+    if (availableMinutes <= 0) {
+        await prisma.dailyPlan.update({
+            where: { userId_dayKey: { userId, dayKey } },
+            data: { rebalancedVersion: plan.planVersion },
+        })
         const committedMinutes = open.reduce((s, t) => s + (t.allocatedMinutes ?? 0), 0)
         return {
             dayKey,
@@ -183,7 +207,7 @@ export async function rebalanceDay(userId: number, dayKey: string): Promise<Reba
         }
     }
 
-    // حفاظت از تسکهای در حال اجرا (سهم فعلیشون ثابت میمونه)
+    // حفاظت از تسک‌های در حال اجرا (سهم فعلی‌شون ثابت می‌مونه)
     const protectedIds = new Set(
         open
             .filter((t) => t.status === "IN_PROGRESS" && t.allocatedMinutes != null)
@@ -203,7 +227,8 @@ export async function rebalanceDay(userId: number, dayKey: string): Promise<Reba
         todoItems,
     )
 
-    // ذخیرهی نتیجه فقط برای تسکهای بازِ غیرمحافظتشده
+    // ذخیره‌ی نتیجه فقط برای تسک‌های بازِ غیرمحافظت‌شده + هماهنگ‌سازی rebalancedVersion
+    // در همان transaction (A3 — §6.3.2: Rebalance Completion باید اتمیک باشد)
     const updates = open
         .filter((t) => !protectedIds.has(t.id))
         .map((t) =>
@@ -212,7 +237,13 @@ export async function rebalanceDay(userId: number, dayKey: string): Promise<Reba
                 data: { allocatedMinutes: allocations[t.id] ? allocations[t.id] : null },
             }),
         )
-    if (updates.length > 0) await prisma.$transaction(updates)
+    await prisma.$transaction([
+        ...updates,
+        prisma.dailyPlan.update({
+            where: { userId_dayKey: { userId, dayKey } },
+            data: { rebalancedVersion: plan.planVersion },
+        }),
+    ])
 
     const finalAllocations = open.map((t) => ({
         taskId: t.id,
@@ -237,4 +268,38 @@ export async function rebalanceDay(userId: number, dayKey: string): Promise<Reba
         droppedTaskIds: dropped,
         allocations: finalAllocations,
     }
+}
+
+/**
+ * A3 — mutation bump (ADR-03 / §6.3.2): هر mutation مؤثر بر برنامه باید planVersion
+ * روز را به‌صورت اتمیک افزایش دهد (SET planVersion = planVersion + 1 — بدون read-modify-write).
+ * اگر رکورد DailyPlan وجود نداشته باشد (روز برنامه‌ریزی‌نشده) کاری نمی‌کند:
+ * نبود رکورد = stale است، ولی بودجه‌ای وجود ندارد که توزیع شود (بدون ساخت رکورد اضافه).
+ */
+export async function markDayStale(userId: number, dayKey: string): Promise<void> {
+    await getPrisma().dailyPlan.updateMany({
+        where: { userId, dayKey },
+        data: { planVersion: { increment: 1 } },
+    })
+}
+
+/**
+ * A3 — lazy rebalance (ADR-03 / §6.3.2): هنگام ورود به نمای روز، بررسی می‌کند که آیا
+ * برنامه stale است و فقط در این صورت Rebalance را اجرا می‌کند.
+ * stale ⇔ rebalancedVersion IS NULL یا planVersion > rebalancedVersion.
+ * نبود رکورد DailyPlan = stale، ولی چون بودجه‌ای نیست، هیچ تخصیصی بازتوزیع نمی‌شود.
+ */
+export async function ensureDayRebalanced(
+    userId: number,
+    dayKey: string,
+): Promise<RebalanceOutput | null> {
+    const plan = await getPrisma().dailyPlan.findUnique({
+        where: { userId_dayKey: { userId, dayKey } },
+    })
+    if (!plan) return null
+
+    const stale = plan.rebalancedVersion == null || plan.planVersion > plan.rebalancedVersion
+    if (!stale) return null
+
+    return rebalanceDay(userId, dayKey)
 }

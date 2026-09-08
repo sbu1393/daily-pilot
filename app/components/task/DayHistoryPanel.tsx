@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useCalendar } from "@/app/contexts/CalenderContext"
-import { todayKey } from "../../lib/jalili"
+import { getCanonicalToday } from "../../lib/canonicalDay"
+import { api } from "@/app/lib/api/client"
 import { faDigits, fmtMinutes } from "@/app/lib/time"
 import { toast } from "react-toastify"
 import styles from "./history.module.css"
@@ -20,20 +21,19 @@ const savedOf = (t: TaskItem) => Math.max(0, (t.allocatedMinutes ?? 0) - (t.spen
 const overspentOf = (t: TaskItem) => Math.max(0, (t.spentMinutes ?? 0) - (t.allocatedMinutes ?? 0))
 
 export default function DayHistoryPanel() {
-    const { selectedDate } = useCalendar()
+    const { selectedDate, timezone } = useCalendar()
     const [tasks, setTasks] = useState<TaskItem[]>([])
     const [loading, setLoading] = useState(false)
     const [rolling, setRolling] = useState(false)
 
-    const isPast = selectedDate < todayKey()
+    const isPast = selectedDate < getCanonicalToday(timezone)
 
     const load = useCallback(async () => {
         setLoading(true)
         try {
-            const res = await fetch(`/api/tasks?dayKey=${selectedDate}`)
-            const json = await res.json()
-            if (!res.ok) throw new Error(json.message || "خطا در دریافت تاریخچه")
-            setTasks(json.data ?? [])
+            // ADR-04: { ok, data: { tasks, summary } } → data.tasks
+            const data = await api<{ tasks: TaskItem[] }>(`/api/tasks?dayKey=${selectedDate}`)
+            setTasks(data.tasks ?? [])
         } catch (e) {
             console.error(e)
             toast.error(e instanceof Error ? e.message : "خطا در دریافت تاریخچه")
@@ -66,13 +66,11 @@ export default function DayHistoryPanel() {
         if (!leftovers.length || rolling) return
         setRolling(true)
         try {
-            const res = await fetch("/api/tasks/rollover", {
+            await api("/api/tasks/rollover", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ taskIds: leftovers.map((t) => t.id) }),
             })
-            const json = await res.json()
-            if (!res.ok) throw new Error(json.message || "خطا در انتقال")
             toast.success(`${faDigits(leftovers.length)} کار به امروز منتقل شد`)
             window.dispatchEvent(new Event("planner:mutated"))
         } catch (e) {

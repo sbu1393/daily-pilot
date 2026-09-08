@@ -13,7 +13,7 @@ import type { DaySummary } from "@/app/hooks/UseDaySummary"
  * - در حالت آفلاین فیلدهای هوش مصنوعی (اولویت/امتیاز/دلیل/زمان) «—» نشان داده می‌شوند.
  */
 
-const DAY_CACHE = "dp:offline:day:" // + dayKey
+const DAY_CACHE = "dp:offline:v2:day:" // + dayKey — v2: کلیدهای canonical میلادی (جدا از کش قدیمی جلالی)
 const QUEUE_KEY = "dp:offline:queue"
 
 export type QueuedTask = {

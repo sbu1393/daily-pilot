@@ -7,6 +7,17 @@
 
 type DayParts = { year: string; month: string; day: string }
 
+const CANONICAL_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/** اعتبارسنجی تقویمی (ماه ۱–۱۲، روز ۱–۳۱) تا Date.UTC مقدار خارج از محدوده را بیصدا نرمالایز نکند. */
+function assertValidKeyParts(key: string): [number, number, number] {
+    const [year, month, day] = key.split("-").map(Number)
+    if (month < 1 || month > 12 || day < 1 || day > 31) {
+        throw new RangeError(`Invalid canonical dayKey: "${key}"`)
+    }
+    return [year, month, day]
+}
+
 function dayParts(date: Date, timezone: string): DayParts {
     const parts = new Intl.DateTimeFormat("en", {
         timeZone: timezone,
@@ -77,4 +88,43 @@ export function getLocalMidnight(date: Date, timezone: string): Date {
     ts = midnightUtc - timeZoneOffsetMs(new Date(ts), timezone)
 
     return new Date(ts)
+}
+
+/**
+ * کلید canonical "YYYY-MM-DD" → نیمهشب محلی همان روز در timezone دادهشده (instant UTC).
+ * نقش معادل fromDayKey در jalili.ts — ولی برای کلیدهای canonical.
+ * کلید نامعتبر → RangeError صریح.
+ */
+export function canonicalKeyToLocalMidnight(key: string, timezone: string): Date {
+    if (!CANONICAL_KEY_RE.test(key)) {
+        throw new RangeError(`Invalid canonical dayKey: "${key}"`)
+    }
+
+    const [year, month, day] = assertValidKeyParts(key)
+    const midnightUtc = Date.UTC(year, month - 1, day)
+
+    let ts = midnightUtc - timeZoneOffsetMs(new Date(midnightUtc), timezone)
+    ts = midnightUtc - timeZoneOffsetMs(new Date(ts), timezone)
+
+    return new Date(ts)
+}
+
+/**
+ * جابهجایی کلید canonical به تعداد روز (مثبت = فردا، منفی = دیروز).
+ * کلید یک برچسب تقویمی مستقل از timezone است؛ جابهجایی روی خود کلید انجام میشود.
+ */
+export function shiftCanonicalKey(key: string, days: number): string {
+    if (!CANONICAL_KEY_RE.test(key)) {
+        throw new RangeError(`Invalid canonical dayKey: "${key}"`)
+    }
+
+    const [year, month, day] = assertValidKeyParts(key)
+    const shifted = new Date(Date.UTC(year, month - 1, day + days))
+
+    return shifted.toISOString().slice(0, 10)
+}
+
+/** امروزِ canonical در timezone دادهشده — جایگزین todayKey() در فاز cutover. */
+export function getCanonicalToday(timezone: string): string {
+    return getCanonicalDayKey(new Date(), timezone)
 }

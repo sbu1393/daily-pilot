@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { toast } from "react-toastify"
+import { api } from "@/app/lib/api/client"
 import { TaskItem, priorityMeta, priorityMissingMeta, categoryInfo } from "./taskTypes"
 import { faDigits, fmtMinutes } from "@/app/lib/time"
 import AnimatedModal from "../motion/AnimatedModal"
@@ -51,25 +52,21 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
         setError(null)
         try {
             // اگه متن عوض نشده، بدنه خالی بفرست (سرور خودش از task.text استفاده می‌کنه)
-            const body = changed ? { text: trimmed } : {}
-            const res = await fetch(`/api/tasks/${task.id}/analyze`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body),
-            })
-            const json = (await res.json().catch(() => ({}))) as {
-                data?: unknown
-                task?: unknown
-                updated?: unknown
-                message?: string
-                aiSource?: string
-            }
-            if (!res.ok) throw new Error(json.message || "خطا در تحلیل مجدد")
+            const payload = changed ? { text: trimmed } : {}
+            // ADR-04: پاسخ { ok, data: { task, aiSource } } → data.task / data.aiSource
+            const body = await api<{ task: TaskItem; aiSource?: string }>(
+                `/api/tasks/${task.id}/analyze`,
+                {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                },
+            )
 
-            const next = (json.data ?? json.task ?? json.updated) as TaskItem | undefined
+            const next = body.task
             if (!next) throw new Error("پاسخ سرور نامعتبر است")
 
-            setResult({ old: { ...task }, next, source: json.aiSource ?? "" })
+            setResult({ old: { ...task }, next, source: body.aiSource ?? "" })
             onDone() // رفرش لیست و نوار آمار (بازتوزیع بودجه)
         } catch (e) {
             setError(e instanceof Error ? e.message : "خطا در تحلیل مجدد")

@@ -6,6 +6,7 @@ import { toast } from "react-toastify"
 import { motion } from "framer-motion"
 import { useRouter } from "next/navigation"
 import Avatar, { type AvatarUser } from "./Avatar"
+import { api } from "@/app/lib/api/client"
 
 /* فشرده‌سازی عکس سمت کلاینت: حداکثر ۲۵۶px و کیفیت ۰٫۸ → data-URL سبک برای ذخیره */
 function compressImage(file: File): Promise<string> {
@@ -56,14 +57,12 @@ export default function AvatarUpload({ user }: { user: AvatarUser }) {
         setBusy(true)
         try {
             const dataUrl = await compressImage(file)
-            const res = await fetch("/api/auth/avatar", {
+            await api("/api/auth/avatar", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ image: dataUrl }),
             })
-            const json = await res.json().catch(() => ({}))
-            if (!res.ok) throw new Error((json as { message?: string }).message || "آپلود ناموفق بود")
-            toast.success((json as { message?: string }).message || "عکس پروفایل به‌روزرسانی شد ✅")
+            toast.success("عکس پروفایل به‌روزرسانی شد ✅")
             router.refresh()
         } catch (e) {
             toast.error(e instanceof Error ? e.message : "آپلود ناموفق بود")
@@ -76,9 +75,7 @@ export default function AvatarUpload({ user }: { user: AvatarUser }) {
     const remove = async () => {
         setBusy(true)
         try {
-            const res = await fetch("/api/auth/avatar", { method: "DELETE" })
-            const json = await res.json().catch(() => ({}))
-            if (!res.ok) throw new Error((json as { message?: string }).message || "حذف عکس ناموفق بود")
+            await api("/api/auth/avatar", { method: "DELETE" })
             toast.success("عکس پروفایل حذف شد")
             router.refresh()
         } catch (e) {

@@ -26,7 +26,7 @@ const fmtScore = (n: number | null) => (n == null ? "—" : faDigits(n))
 const fmtEst = (n: number | null) => (n == null ? "—" : fmtMinutes(n))
 
 export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
-    const [text, setText] = useState(task?.text ?? "")
+    const [text, setText] = useState(task?.title ?? "")
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState<string | null>(null)
     // اسنپشاتِ وضعیت قبل — چون والد تا بسته شدن مودال، آبجکت قدیمی رو نگه می‌داره
@@ -43,7 +43,7 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
     if (!task) return null
 
     const trimmed = text.trim()
-    const changed = trimmed !== task.text
+    const changed = trimmed !== task.title
     const canRun = !busy && (changed ? trimmed.length >= 3 : true)
 
     const run = async () => {
@@ -51,7 +51,7 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
         setBusy(true)
         setError(null)
         try {
-            // اگه متن عوض نشده، بدنه خالی بفرست (سرور خودش از task.text استفاده می‌کنه)
+            // اگه متن عوض نشده، بدنه خالی بفرست (سرور خودش از task.title استفاده می‌کنه)
             const payload = changed ? { text: trimmed } : {}
             // ADR-04: پاسخ { ok, data: { task, aiSource } } → data.task / data.aiSource
             const body = await api<{ task: TaskItem; aiSource?: string }>(
@@ -189,9 +189,9 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
                             </div>
                         )}
 
-                        {next && old && next.text !== old.text && (
+                        {next && old && next.title !== old.title && (
                             <p className={styles.hint}>
-                                عنوان به «{next.text}» تغییر کرد.
+                                عنوان به «{next.title}» تغییر کرد.
                             </p>
                         )}
 

@@ -10,7 +10,7 @@ import styles from "./history.module.css"
 
 type TaskItem = {
     id: number
-    text: string
+    title: string
     category: string | null
     status: "TODO" | "IN_PROGRESS" | "DONE"
     allocatedMinutes: number | null
@@ -129,7 +129,7 @@ export default function DayHistoryPanel() {
                                     return (
                                         <li key={t.id} className={styles.item}>
                                             <div className={styles.itemMain}>
-                                                <span className={styles.itemText}>{t.text}</span>
+                                                <span className={styles.itemText}>{t.title}</span>
                                                 <span className={styles.itemCat}>{t.category ?? "بدون دسته"}</span>
                                             </div>
                                             <div className={styles.itemMeta}>

@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 
 /* ------------------------------------------------------------------ */
 /* B1 — Route smoke tests: POST/GET /api/tasks (ADR-04 controller).    */
+/* C1: بدنه‌ی ساخت = title + scheduledDate؛ dayKey سمت سرور ساخته می‌شود. */
 /* getCurrentUser + tasks.service + canonicalDay mocked: no DB.        */
 /* ------------------------------------------------------------------ */
 
@@ -21,11 +22,12 @@ vi.mock("@/app/lib/services/tasks.service", () => ({
 vi.mock("@/app/lib/canonicalDay", () => ({ getCanonicalToday: mocks.getCanonicalToday }))
 
 import { GET, POST } from "./route"
-import { MissingDayKeyError } from "@/app/lib/services/errors"
+import { ServiceError } from "@/app/lib/services/errors"
 
 const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran" }
 const DAY_KEY = "2026-01-01"
-const TASK = { id: 10, text: "خرید نان", dayKey: DAY_KEY }
+const SCHEDULED_DATE = "2026-01-01T00:00:00.000Z"
+const TASK = { id: 10, title: "خرید نان", dayKey: DAY_KEY }
 
 describe("POST /api/tasks", () => {
     beforeEach(() => {
@@ -33,21 +35,22 @@ describe("POST /api/tasks", () => {
         mocks.getCurrentUser.mockResolvedValue(USER)
     })
 
-    it("returns 201 with the ADR-04 envelope { ok: true, data: { task } }", async () => {
+    it("returns 201 with the ADR-04 envelope { ok: true, data: { task } } and forwards title + scheduledDate", async () => {
         mocks.createTask.mockResolvedValue({ task: TASK })
 
         const res = await POST(
             new NextRequest("http://localhost/api/tasks", {
                 method: "POST",
-                body: JSON.stringify({ text: TASK.text, dayKey: DAY_KEY }),
+                body: JSON.stringify({ title: TASK.title, scheduledDate: SCHEDULED_DATE }),
             }),
         )
 
         expect(res.status).toBe(201)
         await expect(res.json()).resolves.toEqual({ ok: true, data: { task: TASK } })
+        // dayKey از Client پذیرفته نمی‌شود (§6.2.2.1) — فقط title + scheduledDate به سرویس می‌رود
         expect(mocks.createTask).toHaveBeenCalledWith(1, "Asia/Tehran", {
-            text: TASK.text,
-            dayKey: DAY_KEY,
+            title: TASK.title,
+            scheduledDate: new Date(SCHEDULED_DATE),
         })
     })
 
@@ -55,7 +58,7 @@ describe("POST /api/tasks", () => {
         const res = await POST(
             new NextRequest("http://localhost/api/tasks", {
                 method: "POST",
-                body: JSON.stringify({ text: "ab" }), // <3 chars + missing dayKey
+                body: JSON.stringify({ title: "" }), // title خالی + missing scheduledDate
             }),
         )
 
@@ -67,21 +70,51 @@ describe("POST /api/tasks", () => {
         expect(mocks.createTask).not.toHaveBeenCalled()
     })
 
-    it("propagates a ServiceError (MISSING_DAY_KEY) with its status and code", async () => {
-        mocks.createTask.mockRejectedValue(new MissingDayKeyError())
-
+    it("returns 400 VALIDATION_ERROR for an invalid scheduledDate and never calls the service", async () => {
         const res = await POST(
             new NextRequest("http://localhost/api/tasks", {
                 method: "POST",
-                body: JSON.stringify({ text: "خرید نان", dayKey: DAY_KEY }),
+                body: JSON.stringify({ title: "خرید نان", scheduledDate: "not-a-date" }),
             }),
         )
 
         expect(res.status).toBe(400)
         const parsed = await res.json()
+        expect(parsed.ok).toBe(false)
+        expect(parsed.error.code).toBe("VALIDATION_ERROR")
+        expect(mocks.createTask).not.toHaveBeenCalled()
+    })
+
+    it("returns 400 VALIDATION_ERROR for malformed JSON (not 500) and never calls the service", async () => {
+        const res = await POST(
+            new NextRequest("http://localhost/api/tasks", {
+                method: "POST",
+                body: "this is not json",
+            }),
+        )
+
+        expect(res.status).toBe(400)
+        const parsed = await res.json()
+        expect(parsed.ok).toBe(false)
+        expect(parsed.error.code).toBe("VALIDATION_ERROR")
+        expect(mocks.createTask).not.toHaveBeenCalled()
+    })
+
+    it("propagates a ServiceError with its status and code", async () => {
+        mocks.createTask.mockRejectedValue(new ServiceError(409, "PLAN_CONFLICT", "test"))
+
+        const res = await POST(
+            new NextRequest("http://localhost/api/tasks", {
+                method: "POST",
+                body: JSON.stringify({ title: "خرید نان", scheduledDate: SCHEDULED_DATE }),
+            }),
+        )
+
+        expect(res.status).toBe(409)
+        const parsed = await res.json()
         expect(parsed).toEqual({
             ok: false,
-            error: { code: "MISSING_DAY_KEY", message: expect.any(String) },
+            error: { code: "PLAN_CONFLICT", message: expect.any(String) },
         })
     })
 
@@ -91,7 +124,7 @@ describe("POST /api/tasks", () => {
         const res = await POST(
             new NextRequest("http://localhost/api/tasks", {
                 method: "POST",
-                body: JSON.stringify({ text: "خرید نان", dayKey: DAY_KEY }),
+                body: JSON.stringify({ title: "خرید نان", scheduledDate: SCHEDULED_DATE }),
             }),
         )
 

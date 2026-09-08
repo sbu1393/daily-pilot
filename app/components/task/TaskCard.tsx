@@ -57,7 +57,7 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze }: Props) {
             layout
         >
             <div className={styles.topRow}>
-                <span className={styles.text}>{task.text}</span>
+                <span className={styles.text}>{task.title}</span>
                 {done && <span className={styles.doneTag}>✓ انجام شد</span>}
             </div>
 

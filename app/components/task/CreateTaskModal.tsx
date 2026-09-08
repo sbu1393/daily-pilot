@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import { faDigits } from "@/app/lib/time"
 import { enqueueTask, isOffline } from "@/app/lib/offline"
+import { canonicalKeyToLocalMidnight } from "@/app/lib/canonicalDay"
 import { api } from "@/app/lib/api/client"
 import { toast } from "react-toastify"
 import AnimatedModal from "../motion/AnimatedModal"
@@ -16,7 +17,7 @@ type Props = {
 }
 
 export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
-    const { selectedDate } = useCalendar()
+    const { selectedDate, timezone } = useCalendar()
     const [text, setText] = useState("")
     const [loading, setLoading] = useState(false)
     const [offline, setOffline] = useState(false)
@@ -44,8 +45,13 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
     }, [open])
 
     /* ذخیره در صف آفلاین — تحلیل AI بعد از سینک انجام می‌شود */
+    // C1: قرارداد ساخت = title + scheduledDate (ISO نیمه‌شب محلی روز انتخابی)؛ dayKey سمت سرور ساخته می‌شود (§6.2.2.1)
     const saveOffline = (value: string) => {
-        enqueueTask({ text: value, dayKey: selectedDate })
+        enqueueTask({
+            title: value,
+            dayKey: selectedDate,
+            scheduledDate: canonicalKeyToLocalMidnight(selectedDate, timezone).toISOString(),
+        })
         toast.info("🔌 آفلاین هستی — تسک ذخیره شد و بعد از اتصال سینک می‌شود")
         setText("")
         onClose()
@@ -69,7 +75,10 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
             await api("/api/tasks", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: value, dayKey: selectedDate }),
+                body: JSON.stringify({
+                    title: value,
+                    scheduledDate: canonicalKeyToLocalMidnight(selectedDate, timezone).toISOString(),
+                }),
             })
 
             setText("")

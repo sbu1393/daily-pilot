@@ -57,7 +57,7 @@ model User {
 
 model Task {
   id                    Int          @id @default(autoincrement())
-  text                  String
+  title                 String
   category              String?
   priority              TaskPriority?
   score                 Int? // 0 تا 100 — خروجی AI
@@ -65,8 +65,8 @@ model Task {
   estimatedTime         Int? // تخمین خام AI (دقیقه) — ورودی موتور
   allocatedMinutes      Int? // سهم تخصیص‌یافته توسط موتور (دقیقه)
   spentMinutes          Int? // مدت واقعی اعلام‌شده هنگام DONE (دقیقه)
-  scheduledDate         DateTime // لحظه‌ی نیمه‌شب تهرانِ روز برنامه‌ریزی
-  dayKey                String? // کلید روز جلالی "1403-05-17" — مرجع گروه‌بندی
+  scheduledDate         DateTime // لحظه‌ی نیمه‌شب محلیِ روز برنامه‌ریزی (absolute instant)
+  dayKey                String // کلید روز canonical "YYYY-MM-DD" — سمت سرور از user.timezone محاسبه می‌شود (§6.2.2.1)
   previousScheduledDate DateTime? // برای تشخیص rollover
   status                TaskStatus @default(TODO)
   completedAt           DateTime? // لحظه‌ی اتمام

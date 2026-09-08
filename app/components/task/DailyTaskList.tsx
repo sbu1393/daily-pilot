@@ -260,7 +260,7 @@ export default function DailyTaskList() {
                                 layout
                             >
                                 <div className={styles.topRow}>
-                                    <span className={styles.text}>{q.text}</span>
+                                    <span className={styles.text}>{q.title}</span>
                                 </div>
                                 <div className={styles.chips}>
                                     <span className="dp-queued-chip">⏳ در صف سینک — آفلاین</span>
@@ -312,7 +312,7 @@ export default function DailyTaskList() {
                             <h4>حذف تسک</h4>
                         </div>
                         <p className={styles.hint}>
-                            «{deleteTask.text}» حذف شود؟ زمانِ تخصیص‌یافته‌اش به استخر روز برمی‌گردد.
+                            «{deleteTask.title}» حذف شود؟ زمانِ تخصیص‌یافته‌اش به استخر روز برمی‌گردد.
                         </p>
                         <div className={styles.modalActions}>
                             <button

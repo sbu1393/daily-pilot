@@ -3,7 +3,7 @@ export type TaskStatus = "TODO" | "IN_PROGRESS" | "DONE"
 
 export type TaskItem = {
     id: number
-    text: string
+    title: string
     category: string | null
     priority: TaskPriority | null // null = تسک هنوز تحلیل نشده (G-16)
     score: number | null

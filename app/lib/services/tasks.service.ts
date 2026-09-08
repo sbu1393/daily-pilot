@@ -8,10 +8,11 @@ import {
 import { getDaySummary, type DaySummary } from "@/app/lib/planner/summary"
 import {
     canonicalKeyToLocalMidnight,
+    getCanonicalDayKey,
     getCanonicalToday,
     shiftCanonicalKey,
 } from "@/app/lib/canonicalDay"
-import type { Prisma, PrismaPromise, Task, TaskPriority } from "@prisma/client"
+import type { Prisma, PrismaPromise, Task } from "@prisma/client"
 import {
     TaskNotFoundError,
     MissingDayKeyError,
@@ -22,21 +23,26 @@ import {
 } from "./errors"
 
 // ---------- ساخت تسک (مستقل از AI — فیلدهای تحلیل null می‌مانند تا Analyze صریح) ----------
+// §6.2.2.1: dayKey هرگز از Client پذیرفته نمی‌شود — از scheduledDate + user.timezone سمت سرور محاسبه می‌شود.
+// scheduledDate ذخیره‌شده هم به نیمه‌شب محلیِ همان روز (canonicalKeyToLocalMidnight) نرمال می‌شود.
 // A3: ساخت = mutation مؤثر بر برنامه → planVersion روز در همان transaction اتمیک افزایش می‌یابد.
 export async function createTask(
     userId: number,
     timezone: string,
-    input: { text: string; dayKey: string },
+    input: { title: string; scheduledDate: Date },
 ): Promise<{ task: Task }> {
-    const { text, dayKey } = input
+    const { title, scheduledDate } = input
     const prisma = getPrisma()
+
+    const dayKey = getCanonicalDayKey(scheduledDate, timezone)
+    const localMidnight = canonicalKeyToLocalMidnight(dayKey, timezone)
 
     const task = await prisma.$transaction(async (tx) => {
         const created = await tx.task.create({
             data: {
-                text,
+                title,
                 dayKey,
-                scheduledDate: canonicalKeyToLocalMidnight(dayKey, timezone), // نیمه‌شب محلی روز انتخابی در timezone کاربر
+                scheduledDate: localMidnight,
                 userId,
             },
         })
@@ -54,6 +60,13 @@ export async function createTask(
     })
 
     return { task }
+}
+
+// ---------- خواندن تک تسک (Ownership: فقط تسک‌های userId خودش) ----------
+export async function getTask(userId: number, taskId: number): Promise<Task> {
+    const task = await getPrisma().task.findFirst({ where: { id: taskId, userId } })
+    if (!task) throw new TaskNotFoundError()
+    return task
 }
 
 // ---------- تسک‌های یک روز + خلاصه (پیش‌فرض dayKey در Route تعیین می‌شود) ----------
@@ -293,7 +306,7 @@ export async function reanalyzeTask(
         throw new OverdueTaskError()
     }
 
-    const newText = (textOverride ?? task.text).trim()
+    const newText = (textOverride ?? task.title).trim()
     const { source, analysis } = await analyzeTask(newText)
 
     // A3: Analyze = mutation مؤثر بر برنامه (7.7 Analyze ≠ Rebalance) →
@@ -302,7 +315,7 @@ export async function reanalyzeTask(
         prisma.task.update({
             where: { id: task.id },
             data: {
-                text: newText,
+                title: newText,
                 priority: analysis.priority,
                 score: analysis.score,
                 reason: analysis.reason,
@@ -323,68 +336,71 @@ export async function reanalyzeTask(
 }
 
 // ---------- ویرایش تسک (A1 — کلاس‌های Content و Planning-only، §6.3.5) ----------
-// Content (تغییر متن) → گروه AI (score/priority/estimatedTime/reason) null می‌شود + EDITED + bump.
-// Planning-only (dayKey) → فیلدهای AI untouched + bump روزهای affected، بدون EDITED.
+// Content (تغییر title) → گروه AI (score/priority/estimatedTime/reason) null می‌شود + EDITED + bump.
+// Planning-only (scheduledDate / status) → فیلدهای AI untouched + bump روزهای affected، بدون EDITED.
+// dayKey از scheduledDate + user.timezone سمت سرور محاسبه می‌شود (§6.2.2.1)؛ مقدار client هیچ‌وقت source of truth نیست.
 // category فراداده‌ی کاربر است: در Content untouched می‌ماند و ویرایشش bump/EDITED ندارد.
-// priority طبق مصوبه: Planning-only در نظر گرفته می‌شود (بقیه‌ی گروه AI دست نمی‌خورد).
 export async function updateTask(
     userId: number,
     timezone: string,
     taskId: number,
     input: {
-        text?: string
-        dayKey?: string
+        title?: string
+        status?: "TODO" | "IN_PROGRESS"
+        scheduledDate?: Date
         category?: string | null
-        priority?: TaskPriority | null
     },
 ): Promise<{ task: Task }> {
     const prisma = getPrisma()
     const task = await prisma.task.findFirst({ where: { id: taskId, userId } })
     if (!task) throw new TaskNotFoundError()
 
-    const priorityChanged = input.priority !== undefined && input.priority !== task.priority
     const categoryChanged = input.category !== undefined && input.category !== task.category
 
     const data: Prisma.TaskUpdateInput = {}
-    let textChanged = false
+    let titleChanged = false
     let dayChanged = false
+    let statusChanged = false
 
-    if (input.text !== undefined) {
-        const trimmed = input.text.trim()
-        if (trimmed !== task.text) {
-            textChanged = true
-            data.text = trimmed
+    if (input.title !== undefined) {
+        const trimmed = input.title.trim()
+        if (trimmed !== task.title) {
+            titleChanged = true
+            data.title = trimmed
         }
     }
-    if (input.dayKey !== undefined && input.dayKey !== task.dayKey) {
-        dayChanged = true
-        data.dayKey = input.dayKey
-        data.scheduledDate = canonicalKeyToLocalMidnight(input.dayKey, timezone)
-        data.previousScheduledDate = task.scheduledDate
+    if (input.scheduledDate !== undefined) {
+        const dayKey = getCanonicalDayKey(input.scheduledDate, timezone)
+        if (dayKey !== task.dayKey) {
+            dayChanged = true
+            data.dayKey = dayKey
+            data.scheduledDate = canonicalKeyToLocalMidnight(dayKey, timezone)
+            data.previousScheduledDate = task.scheduledDate
+        }
+    }
+    if (input.status !== undefined && input.status !== task.status) {
+        statusChanged = true
+        data.status = input.status
     }
     if (categoryChanged) {
         data.category = input.category
     }
-    if (priorityChanged) {
-        data.priority = input.priority
-    }
 
-    const isContent = textChanged // §6.3.5: تغییر متن = Content Mutation
-    if (!textChanged && !dayChanged && !categoryChanged && !priorityChanged) {
+    const isContent = titleChanged // §6.3.5: تغییر متن = Content Mutation
+    if (!titleChanged && !dayChanged && !statusChanged && !categoryChanged) {
         return { task } // درخواست بدون تغییر واقعی → no-op
     }
 
     if (isContent) {
         // §6.3.5/§7.6: فقط گروه AI null می‌شود؛ category و allocatedMinutes untouched می‌مانند.
-        // اگر خود کاربر در همین درخواست priority داده باشد، مقدار کاربر wins.
         data.score = null
         data.estimatedTime = null
         data.reason = null
-        if (!priorityChanged) data.priority = null
+        data.priority = null
     }
 
     // ویرایش فقط category → فراداده‌ی کاربر: نه اثر برنامه‌ریزی دارد و نه EDITED (§6.3.6)
-    const isPlanningAffecting = textChanged || dayChanged || priorityChanged
+    const isPlanningAffecting = titleChanged || dayChanged || statusChanged
     if (!isPlanningAffecting) {
         const updated = await prisma.task.update({ where: { id: task.id }, data })
         return { task: updated }
@@ -392,8 +408,10 @@ export async function updateTask(
 
     // روزهای affected: روز فعلی + روز مقصد (در صورت reschedule)
     const affectedDays = new Set<string>()
-    if (task.dayKey) affectedDays.add(task.dayKey)
-    if (dayChanged && input.dayKey) affectedDays.add(input.dayKey)
+    affectedDays.add(task.dayKey)
+    if (dayChanged && input.scheduledDate) {
+        affectedDays.add(getCanonicalDayKey(input.scheduledDate, timezone))
+    }
 
     const ops: PrismaPromise<unknown>[] = [prisma.task.update({ where: { id: task.id }, data })]
     for (const dayKey of affectedDays) {

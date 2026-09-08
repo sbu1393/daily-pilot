@@ -80,7 +80,7 @@ export default function CompleteTaskModal({ task, onClose, onCompleted }: Props)
                             <h4>تمام کردن تسک</h4>
                             <button className={styles.closeBtn} onClick={onClose} aria-label="بستن">✕</button>
                         </div>
-                        <p className={styles.taskTitle}>«{task.text}»</p>
+                        <p className={styles.taskTitle}>«{task.title}»</p>
                         {reference != null && (
                             <p className={styles.hint}>سهم این کار {fmtMinutes(reference)} است. چند دقیقه طول کشید؟</p>
                         )}

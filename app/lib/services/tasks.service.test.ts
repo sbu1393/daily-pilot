@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 /* ------------------------------------------------------------------ */
 /* B1-lite — smoke tests لایه سرویس (tasks.service.ts)                 */
 /* Prisma و analyzeTask هر دو mock هستند: بدون DB زنده، بدون AI واقعی. */
+/* C1: createTask dayKey را سمت سرور از scheduledDate + timezone می‌سازد، */
+/*     getTask اضافه شد، updateTask title/status/scheduledDate/category. */
 /* A3: mutationها planVersion را bump می‌کنند.                          */
 /* A2: TaskEventها در همان transaction ثبت می‌شوند.                    */
 /* A1: ویرایش Content vs Planning-only.                               */
@@ -46,8 +48,12 @@ vi.mock("@/app/lib/planner/rebalance", () => ({
     ensureDayRebalanced: vi.fn(),
 }))
 
-import { createTask, reanalyzeTask, updateTask } from "./tasks.service"
-import { getCanonicalToday, shiftCanonicalKey } from "@/app/lib/canonicalDay"
+import { createTask, getTask, reanalyzeTask, updateTask } from "./tasks.service"
+import {
+    canonicalKeyToLocalMidnight,
+    getCanonicalToday,
+    shiftCanonicalKey,
+} from "@/app/lib/canonicalDay"
 
 const TIMEZONE = "Asia/Tehran"
 
@@ -56,15 +62,16 @@ describe("createTask", () => {
         vi.clearAllMocks()
     })
 
-    it("creates a task with AI fields null, bumps planVersion, records CREATED, and returns { task }", async () => {
-        const text = "گزارش مشتری"
-        const dayKey = "2026-03-05"
+    it("derives dayKey from scheduledDate + timezone, stores local midnight, bumps planVersion, records CREATED", async () => {
+        const title = "گزارش مشتری"
+        // 2026-03-04T20:30Z = نیمه‌شب محلی 2026-03-05 در تهران (UTC+3:30)
+        const scheduledDate = new Date("2026-03-04T20:30:00.000Z")
         const createdTask = {
             id: 11,
             userId: 1,
-            text,
-            dayKey,
-            scheduledDate: new Date(),
+            title,
+            dayKey: "2026-03-05",
+            scheduledDate,
             status: "TODO",
             priority: null,
             score: null,
@@ -74,12 +81,12 @@ describe("createTask", () => {
         }
         prismaMock.task.create.mockResolvedValue(createdTask)
 
-        const result = await createTask(1, TIMEZONE, { text, dayKey })
+        const result = await createTask(1, TIMEZONE, { title, scheduledDate })
 
         const createArgs = prismaMock.task.create.mock.calls[0][0]
         expect(createArgs.data).toMatchObject({
-            text,
-            dayKey,
+            title,
+            dayKey: "2026-03-05", // مشتق‌شده از scheduledDate + timezone (§6.2.2.1)
             userId: 1,
             scheduledDate: expect.any(Date),
         })
@@ -92,7 +99,7 @@ describe("createTask", () => {
 
         // A3: bump اتمیک planVersion در همان transaction ساخت (§6.3.2)
         expect(prismaMock.dailyPlan.updateMany).toHaveBeenCalledWith({
-            where: { userId: 1, dayKey },
+            where: { userId: 1, dayKey: "2026-03-05" },
             data: { planVersion: { increment: 1 } },
         })
         // A2: رویداد CREATED با taskId واقعی (§6.3.6)
@@ -102,6 +109,28 @@ describe("createTask", () => {
 
         // قرارداد پاسخ: فقط { task }
         expect(result).toEqual({ task: createdTask })
+    })
+})
+
+describe("getTask", () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+    })
+
+    it("returns the task when it belongs to the user", async () => {
+        const task = { id: 5, userId: 1, title: "گزارش", dayKey: "2026-03-05" }
+        prismaMock.task.findFirst.mockResolvedValue(task)
+
+        const result = await getTask(1, 5)
+
+        expect(prismaMock.task.findFirst).toHaveBeenCalledWith({ where: { id: 5, userId: 1 } })
+        expect(result).toBe(task)
+    })
+
+    it("throws TaskNotFoundError for another user's task (ownership)", async () => {
+        prismaMock.task.findFirst.mockResolvedValue(null)
+
+        await expect(getTask(2, 5)).rejects.toThrow(/پیدا نشد|Task not found/i)
     })
 })
 
@@ -124,7 +153,7 @@ describe("reanalyzeTask", () => {
         const task = {
             id: 1,
             userId: 1,
-            text: "خرید",
+            title: "خرید",
             dayKey: today,
             status: "TODO",
             category: "Work", // دسته‌بندی صریح کاربر
@@ -145,6 +174,7 @@ describe("reanalyzeTask", () => {
         // قانون 7.5: category کاربر بازنویسی نمی‌شود
         expect(updateArgs.data.category).toBe("Work")
         // بقیه فیلدهای AI از تحلیل جدید می‌آیند
+        expect(updateArgs.data.title).toBe("خرید")
         expect(updateArgs.data.priority).toBe("HIGH")
         expect(updateArgs.data.score).toBe(90)
         expect(updateArgs.data.reason).toBe("دلیل جدید")
@@ -170,7 +200,7 @@ describe("reanalyzeTask", () => {
         const task = {
             id: 2,
             userId: 1,
-            text: "ورزش",
+            title: "ورزش",
             dayKey: today,
             status: "TODO",
             category: null,
@@ -198,7 +228,7 @@ describe("updateTask (A1 — Content vs Planning-only)", () => {
     const task = {
         id: 5,
         userId: 1,
-        text: "قدیمی",
+        title: "قدیمی",
         dayKey: today,
         status: "TODO",
         category: "Work",
@@ -221,11 +251,11 @@ describe("updateTask (A1 — Content vs Planning-only)", () => {
         prismaMock.task.update.mockImplementation(mergedUpdate)
     })
 
-    it("content mutation (text): nulls the AI group, preserves category/allocatedMinutes, records EDITED, bumps the day", async () => {
-        const result = await updateTask(1, TIMEZONE, 5, { text: "عنوان جدید" })
+    it("content mutation (title): nulls the AI group, preserves category/allocatedMinutes, records EDITED, bumps the day", async () => {
+        const result = await updateTask(1, TIMEZONE, 5, { title: "عنوان جدید" })
 
         const updateArgs = prismaMock.task.update.mock.calls[0][0]
-        expect(updateArgs.data.text).toBe("عنوان جدید")
+        expect(updateArgs.data.title).toBe("عنوان جدید")
         // §6.3.5: فقط گروه AI null می‌شود
         expect(updateArgs.data.score).toBeNull()
         expect(updateArgs.data.priority).toBeNull()
@@ -244,14 +274,15 @@ describe("updateTask (A1 — Content vs Planning-only)", () => {
             data: { taskId: 5, type: "EDITED" },
         })
 
-        expect(result.task.text).toBe("عنوان جدید")
+        expect(result.task.title).toBe("عنوان جدید")
         expect(result.task.category).toBe("Work") // حفظ شده
         expect(result.task.allocatedMinutes).toBe(30) // حفظ شده
     })
 
-    it("planning-only mutation (dayKey): keeps AI fields, bumps old+new days, records no EDITED", async () => {
+    it("planning-only mutation (scheduledDate reschedule): derives dayKey, keeps AI fields, bumps old+new days, records no EDITED", async () => {
         const next = shiftCanonicalKey(today, 1)
-        const result = await updateTask(1, TIMEZONE, 5, { dayKey: next })
+        const scheduledDate = canonicalKeyToLocalMidnight(next, TIMEZONE)
+        const result = await updateTask(1, TIMEZONE, 5, { scheduledDate })
 
         const updateArgs = prismaMock.task.update.mock.calls[0][0]
         expect(updateArgs.data.dayKey).toBe(next)
@@ -277,6 +308,27 @@ describe("updateTask (A1 — Content vs Planning-only)", () => {
         expect(result.task.dayKey).toBe(next)
     })
 
+    it("status change (TODO → IN_PROGRESS): planning-affecting — bumps the day, no EDITED, AI fields untouched", async () => {
+        const result = await updateTask(1, TIMEZONE, 5, { status: "IN_PROGRESS" })
+
+        const updateArgs = prismaMock.task.update.mock.calls[0][0]
+        expect(updateArgs.data.status).toBe("IN_PROGRESS")
+        // محتوای Task عوض نشده → گروه AI untouched
+        expect(updateArgs.data).not.toHaveProperty("score")
+        expect(updateArgs.data).not.toHaveProperty("priority")
+        expect(updateArgs.data).not.toHaveProperty("estimatedTime")
+        expect(updateArgs.data).not.toHaveProperty("reason")
+
+        expect(prismaMock.dailyPlan.updateMany).toHaveBeenCalledWith({
+            where: { userId: 1, dayKey: today },
+            data: { planVersion: { increment: 1 } },
+        })
+        // §6.3.6: EDITED فقط در Content Mutation
+        expect(prismaMock.taskEvent.create).not.toHaveBeenCalled()
+
+        expect(result.task.status).toBe("IN_PROGRESS")
+    })
+
     it("category-only edit: sets category, no EDITED, no bump", async () => {
         const result = await updateTask(1, TIMEZONE, 5, { category: "Health" })
 
@@ -291,7 +343,7 @@ describe("updateTask (A1 — Content vs Planning-only)", () => {
     })
 
     it("no-op edit (same values): no update, no event, no bump", async () => {
-        const result = await updateTask(1, TIMEZONE, 5, { text: "قدیمی" })
+        const result = await updateTask(1, TIMEZONE, 5, { title: "قدیمی" })
 
         expect(prismaMock.task.update).not.toHaveBeenCalled()
         expect(prismaMock.taskEvent.create).not.toHaveBeenCalled()
@@ -302,7 +354,7 @@ describe("updateTask (A1 — Content vs Planning-only)", () => {
     it("throws TaskNotFoundError for another user's task", async () => {
         prismaMock.task.findFirst.mockResolvedValue(null)
 
-        await expect(updateTask(1, TIMEZONE, 999, { text: "عنوان جدید" })).rejects.toThrow(
+        await expect(updateTask(1, TIMEZONE, 999, { title: "عنوان جدید" })).rejects.toThrow(
             /پیدا نشد|Task not found/i,
         )
     })

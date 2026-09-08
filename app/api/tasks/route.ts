@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
 import { createTask, getDayTasks } from "@/app/lib/services/tasks.service"
 import { getCanonicalToday } from "@/app/lib/canonicalDay"
-import { createTaskSchema } from "@/app/schema/plannerSchema"
+import { createTaskSchema } from "@/app/schema/taskSchema"
 import {
     errorResponse,
     toServiceErrorResponse,
@@ -11,19 +11,21 @@ import {
 } from "@/app/lib/apiResponse"
 
 // POST: ساخت تسک → ذخیره → bump (A3) — مستقل از AI
+// C1: بدنه { title, scheduledDate } — dayKey سمت سرور از user.timezone محاسبه می‌شود (§6.2.2.1)
 export async function POST(req: NextRequest) {
     try {
         const user = await getCurrentUser()
         if (!user) return unauthorizedResponse()
 
-        const body = await req.json()
+        // Malformed JSON → 400 VALIDATION_ERROR (الگوی P2) نه 500
+        const body = await req.json().catch(() => ({}))
         const parsed = createTaskSchema.safeParse(body)
         if (!parsed.success) {
             return validationErrorResponse(parsed.error.flatten())
         }
 
-        const { text, dayKey } = parsed.data
-        const { task } = await createTask(user.id, user.timezone, { text, dayKey })
+        const { title, scheduledDate } = parsed.data
+        const { task } = await createTask(user.id, user.timezone, { title, scheduledDate })
 
         // ADR-04: { ok, data } — aiSource حذف شد (همیشه null بود؛ A5/A6)
         return NextResponse.json({ ok: true, data: { task } }, { status: 201 })

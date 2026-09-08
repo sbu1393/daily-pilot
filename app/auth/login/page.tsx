@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { loginSchema } from "@/app/schema/formSchema"
@@ -10,7 +9,7 @@ import AuthCard from "@/app/components/AuthCard"
 import { useRouter } from "next/navigation"
 import { toast } from "react-toastify"
 import Link from "next/link"
-import { motion, AnimatePresence } from "framer-motion"
+import { motion } from "framer-motion"
 
 export type LoginInput = z.infer<typeof loginSchema>
 
@@ -35,84 +34,36 @@ const loginFields = [
 }[]
 
 export default function LoginForm() {
-    const [step, setStep] = useState<"credential" | "otp">("credential")
-    const [otpLoading, setOtpLoading] = useState(false)
-    const [otpSent, setOtpSent] = useState(false)
-
-    const credentialForm = useForm<LoginInput>({
+    const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginInput>({
         resolver: zodResolver(loginSchema),
         defaultValues: { email: "", password: "" },
         mode: "onSubmit",
     })
 
-    const otpForm = useForm({
-        defaultValues: { code: "" },
-        mode: "onChange",
-    })
-
     const router = useRouter()
 
-    const sendOtp = async (email: string) => {
-        setOtpLoading(true)
+    const onCredentialSubmit = async (data: LoginInput) => {
         try {
-            const res = await fetch("/api/auth/login/otp", {
+            const res = await fetch("/api/auth/login", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email }),
+                body: JSON.stringify(data),
             })
-            const json = await res.json()
-            if (!res.ok) {
-                toast.error(json.message || "ارسال کد ناموفق بود")
-                return false
-            }
-            toast.success("کد تأیید برای ایمیل شما ارسال شد ✅")
-            setOtpSent(true)
-            return true
-        } catch {
-            toast.error("خطا در ارتباط با سرور")
-            return false
-        } finally {
-            setOtpLoading(false)
-        }
-    }
 
-    const verifyOtp = async () => {
-        const code = otpForm.getValues("code").trim()
-        if (code.length < 6) {
-            otpForm.setError("code", { message: "کد را به‌درستی وارد کنید" })
-            return
-        }
-        setOtpLoading(true)
-        try {
-            const res = await fetch("/api/auth/login/otp/verify", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ code }),
-            })
             const json = await res.json()
+
             if (!res.ok) {
-                otpForm.setError("code", { message: json.message || "کد اشتباه است" })
+                toast.error(json.message || "ایمیل یا رمز عبور اشتباه است")
                 return
             }
-            toast.success(json.message || "ورود انجام شد")
+
+            toast.success(json.message || "ورود موفق بود")
             router.push("/dashboard")
             router.refresh()
         } catch {
-            otpForm.setError("code", { message: "خطا در ارتباط با سرور" })
-        } finally {
-            setOtpLoading(false)
+            toast.error("خطا در ارتباط با سرور")
         }
     }
-
-    const onCredentialSubmit = async (data: LoginInput) => {
-        const ok = await sendOtp(data.email)
-        if (ok) {
-            setStep("otp")
-            otpForm.reset()
-        }
-    }
-
-
 
     return (
         <motion.div
@@ -121,127 +72,35 @@ export default function LoginForm() {
             transition={{ duration: .28, ease: "easeOut" }}
         >
             <AuthCard
-                title={step === "otp" ? "کد تأیید" : "ورود به Daily Pilot"}
-                subtitle={
-                    step === "otp"
-                        ? "کد سه‌رقمی را که به ایمیلت فرستادی وارد کن تا وارد شوی"
-                        : "روزت را با خلبان خودکار برنامهریزی کن"
-                }
+                title="ورود به Daily Pilot"
+                subtitle="روزت را با خلبان خودکار برنامهریزی کن"
             >
-                <AnimatePresence mode="wait" initial={false}>
-                    {step === "credential" && (
-                        <motion.div
-                            key="credential"
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -10 }}
-                            transition={{ duration: .24 }}
-                        >
-                            <form
-                                onSubmit={credentialForm.handleSubmit(onCredentialSubmit)}
-                                className="dp-form"
-                            >
-                                <FormInput
-                                    formItem={{
-                                        name: "email",
-                                        type: "email",
-                                        label: "ایمیل",
-                                        placeholder: "example@email.com",
-                                    }}
-                                    register={credentialForm.register}
-                                    errors={credentialForm.formState.errors}
-                                />
+                <form
+                    onSubmit={handleSubmit(onCredentialSubmit)}
+                    className="dp-form"
+                >
+                    {loginFields.map((item) => (
+                        <FormInput
+                            key={item.name}
+                            formItem={item}
+                            register={register}
+                            errors={errors}
+                        />
+                    ))}
 
-                                <FormInput
-                                    formItem={{
-                                        name: "password",
-                                        type: "password",
-                                        label: "رمز عبور",
-                                        placeholder: "رمز عبور را وارد کنید",
-                                    }}
-                                    register={credentialForm.register}
-                                    errors={credentialForm.formState.errors}
-                                />
+                    <button
+                        type="submit"
+                        disabled={isSubmitting}
+                        className="dp-btn dp-btn-primary dp-btn-block"
+                    >
+                        {isSubmitting ? "در حال ورود…" : "ورود"}
+                    </button>
+                </form>
 
-                                <button
-                                    type="submit"
-                                    disabled={otpLoading || credentialForm.formState.isSubmitting}
-                                    className="dp-btn dp-btn-primary dp-btn-block"
-                                >
-                                    {otpLoading || credentialForm.formState.isSubmitting
-                                        ? "در حال ارسال کد…"
-                                        : "ارسال کد تأیید"
-                                    }
-                                </button>
-                            </form>
-
-                            <div className="dp-auth-switch">
-                                حساب کاربری نداری؟{" "}
-                                <Link href="/auth/register">ثبت‌نام کن</Link>
-                            </div>
-                        </motion.div>
-                    )}
-
-                    {step === "otp" && (
-                        <motion.div
-                            key="otp"
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -10 }}
-                            transition={{ duration: .24 }}
-                        >
-                            <p className="otpSub">
-                                به {credentialForm.getValues("email")} کد ارسال شد.
-                            </p>
-
-                            <form
-                                onSubmit={otpForm.handleSubmit(verifyOtp)}
-                                className="dp-form"
-                            >
-                                <div className="dp-field">
-                                    <label className="dp-field-label">کد تأیید ۶ رقمی</label>
-                                    <input
-                                        {...otpForm.register("code", {
-                                            required: "کد را وارد کنید",
-                                            minLength: {
-                                                value: 6,
-                                                message: "کد باید ۶ رقم باشد",
-                                            },
-                                        })}
-                                        type="text"
-                                        inputMode="numeric"
-                                        maxLength={6}
-                                        className={`dp-input ${otpForm.formState.errors.code ? "dp-input-error" : ""}`}
-                                        placeholder="123456"
-                                        autoFocus
-                                    />
-                                    {otpForm.formState.errors.code && (
-                                        <p className="dp-error-text">{otpForm.formState.errors.code.message}</p>
-                                    )}
-                                </div>
-
-                                <button
-                                    type="submit"
-                                    disabled={otpLoading}
-                                    className="dp-btn dp-btn-primary dp-btn-block"
-                                >
-                                    {otpLoading ? "در حال بررسی…" : "تأیید و ورود"}
-                                </button>
-
-                                <button
-                                    type="button"
-                                    className="dp-btn dp-btn-ghost dp-btn-block"
-                                    onClick={() => {
-                                        setStep("credential")
-                                        otpForm.reset()
-                                    }}
-                                >
-                                    برگشت به ورود
-                                </button>
-                            </form>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+                <div className="dp-auth-switch">
+                    حساب کاربری نداری؟{" "}
+                    <Link href="/auth/register">ثبت‌نام کن</Link>
+                </div>
             </AuthCard>
         </motion.div>
     )

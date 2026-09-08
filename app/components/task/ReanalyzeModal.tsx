@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { toast } from "react-toastify"
-import { TaskItem, priorityMeta, categoryInfo } from "./taskTypes"
+import { TaskItem, priorityMeta, priorityMissingMeta, categoryInfo } from "./taskTypes"
 import { faDigits, fmtMinutes } from "@/app/lib/time"
 import AnimatedModal from "../motion/AnimatedModal"
 import styles from "./task.module.css"
@@ -114,7 +114,7 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
                             <div className={styles.aiRow}>
                                 <span className={styles.aiLabel}>تحلیل فعلی</span>
                                 <span className={styles.aiValue}>
-                                    <Chip {...priorityMeta[task.priority]} />
+                                    <Chip {...(task.priority != null ? priorityMeta[task.priority] : priorityMissingMeta)} />
                                     <Chip {...categoryInfo(task.category)} />
                                     <span>امتیاز {fmtScore(task.score)}</span>
                                     <span>{fmtEst(task.estimatedTime)}</span>
@@ -158,9 +158,9 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
                                 <div className={styles.aiRow}>
                                     <span className={styles.aiLabel}>اولویت</span>
                                     <span className={styles.aiValue}>
-                                        <span className={styles.oldVal}>{priorityMeta[old!.priority].label}</span>
+                                        <span className={styles.oldVal}>{old!.priority != null ? priorityMeta[old!.priority].label : "—"}</span>
                                         <span className={styles.vs}>←</span>
-                                        <Chip {...priorityMeta[next!.priority]} />
+                                        <Chip {...(next!.priority != null ? priorityMeta[next!.priority] : priorityMissingMeta)} />
                                     </span>
                                 </div>
                                 <div className={styles.aiRow}>

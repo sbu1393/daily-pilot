@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getPrisma } from "@/app/lib/getPrisma"
 import bcrypt from "bcrypt"
-import jwt from "jsonwebtoken"
+import { createSession } from "@/app/lib/createSession"
 import { loginSchema } from "@/app/schema/formSchema"
 import { isRateLimited, clientIp } from "@/app/lib/rateLimit"
 
@@ -58,21 +58,6 @@ export async function POST(req: NextRequest) {
             )
         }
 
-        const secret = process.env.JWT_SECRET
-
-        if (!secret) {
-            throw new Error("JWT_SECRET missing")
-        }
-
-        const token = jwt.sign(
-            {
-                id: user.id,
-                email: user.email,
-            },
-            secret,
-            { expiresIn: "7d" },
-        )
-
         const response = NextResponse.json(
             {
                 message: "ورود موفق بود",
@@ -85,15 +70,7 @@ export async function POST(req: NextRequest) {
             { status: 200 },
         )
 
-        response.cookies.set("token", token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "lax",
-            maxAge: 60 * 60 * 24 * 7,
-            path: "/",
-        })
-
-        return response
+        return createSession(user, response)
     } catch (error) {
         console.error("LOGIN ERROR:", error)
         return NextResponse.json({ message: "خطای سرور" }, { status: 500 })

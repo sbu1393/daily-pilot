@@ -5,7 +5,7 @@ export type TaskItem = {
     id: number
     text: string
     category: string | null
-    priority: TaskPriority
+    priority: TaskPriority | null // null = تسک هنوز تحلیل نشده (G-16)
     score: number | null
     reason: string | null
     status: TaskStatus
@@ -22,6 +22,13 @@ export const priorityMeta: Record<TaskPriority, { label: string; color: string; 
     HIGH: { label: "بالا", color: "#b42318", bg: "#fee4e2" },
     MEDIUM: { label: "متوسط", color: "#b54708", bg: "#fef0c7" },
     LOW: { label: "کم", color: "#175cd3", bg: "#eff8ff" },
+}
+
+// نمایش اولویتِ تحلیلنشده — همون توکنهای خنثای «بدون دسته»
+export const priorityMissingMeta: { label: string; color: string; bg: string } = {
+    label: "—",
+    color: "#475467",
+    bg: "#f2f4f7",
 }
 
 const categoryMeta: Record<string, { label: string; color: string; bg: string }> = {

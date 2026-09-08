@@ -17,7 +17,7 @@ import {
     type QueuedTask,
 } from "@/app/lib/offline"
 import { toast } from "react-toastify"
-import { type TaskItem } from "./taskTypes"
+import { type TaskItem, type TaskPriority } from "./taskTypes"
 import TaskCard from "./TaskCard"
 import CreateTaskModal from "./CreateTaskModal"
 import CompleteTaskModal from "./CompleteTaskModal"
@@ -26,7 +26,7 @@ import styles from "./task.module.css"
 import ReanalyzeModal from "./ReanalyzeModal"
 
 
-const priorityWeight: Record<TaskItem["priority"], number> = { HIGH: 3, MEDIUM: 2, LOW: 1 }
+const priorityWeight: Record<TaskPriority, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 }
 
 // پارس دفاعی: پاسخ ممکن است { data } یا { tasks } باشد
 function readTasks(json: unknown): TaskItem[] {
@@ -163,7 +163,8 @@ export default function DailyTaskList() {
             if (a.status === "IN_PROGRESS" && b.status !== "IN_PROGRESS") return -1
             if (b.status === "IN_PROGRESS" && a.status !== "IN_PROGRESS") return 1
             const d = scoreOf(b) - scoreOf(a)
-            return d !== 0 ? d : priorityWeight[b.priority] - priorityWeight[a.priority]
+            // null = تحلیلنشده → مثل LOW در صف میماند
+            return d !== 0 ? d : priorityWeight[b.priority ?? "LOW"] - priorityWeight[a.priority ?? "LOW"]
         })
     }, [tasks])
 

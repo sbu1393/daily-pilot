@@ -19,6 +19,24 @@ enum TaskPriority {
   MEDIUM
 }
 
+enum CalendarType {
+  JALALI
+  GREGORIAN
+}
+
+enum UserPlan {
+  FREE
+  PRO
+}
+
+enum TaskEventType {
+  CREATED
+  ANALYZED
+  EDITED
+  ROLLED_OVER
+  COMPLETED
+}
+
 model User {
   id         Int         @id @default(autoincrement())
   username   String
@@ -29,6 +47,10 @@ model User {
   birthDate  DateTime?
   phone      String?
   image      String?
+  timezone   String      @default("Asia/Tehran")
+  locale     String      @default("fa")
+  calendar   CalendarType @default(JALALI)
+  plan       UserPlan    @default(FREE)
   tasks      Task[]
   dailyPlans DailyPlan[]
 }
@@ -37,7 +59,7 @@ model Task {
   id                    Int          @id @default(autoincrement())
   text                  String
   category              String?
-  priority              TaskPriority @default(MEDIUM)
+  priority              TaskPriority?
   score                 Int? // 0 تا 100 — خروجی AI
   reason                String? // دلیل اولویت‌بندی — خروجی AI
   estimatedTime         Int? // تخمین خام AI (دقیقه) — ورودی موتور
@@ -53,9 +75,11 @@ model Task {
   updatedAt             DateTime @updatedAt
   userId                Int
   user                  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events                TaskEvent[]
 
   @@index([userId, dayKey])
   @@index([userId, status])
+  @@index([userId, completedOn])
 }
 
 model DailyPlan {
@@ -64,7 +88,20 @@ model DailyPlan {
   availableMinutes Int      @default(0) // ظرفیت روز اعلام‌شده توسط کاربر
   userId           Int
   createdAt        DateTime @default(now())
+  planVersion      Int      @default(0) // G-03: نسخهی برنامه — مبنای stale detection
+  rebalancedVersion Int? // آخرین نسخهای که rebalance روی آن اجرا شده
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, dayKey])
+}
+
+model TaskEvent {
+  id        String        @id @default(cuid())
+  taskId    Int
+  type      TaskEventType
+  payload   Json?
+  createdAt DateTime      @default(now())
+  task      Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
 }

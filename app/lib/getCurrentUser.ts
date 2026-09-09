@@ -72,7 +72,9 @@ export async function getCurrentUser(){
 
                 birthDate:true,
 
-                phone:true
+                phone:true,
+
+                timezone:true
 
             }
 

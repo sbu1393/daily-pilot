@@ -1,0 +1,40 @@
+{
+  "phase": "4B-3A",
+  "timestamp": "2026-09-08T04:49:52Z",
+  "status": "SUCCESS_EMPTY_DATABASE",
+  "database": {
+    "connection": "OK — DATABASE_URL resolved from project .env (loaded by Prisma CLI and analyzer via npm script analyze:daykey)",
+    "host": "ep-gentle-sky-b1zvg5w5.c-5.eu-central-1.aws.neon.tech",
+    "database": "neondb",
+    "note": "Confirmed by user as the intended primary database with no existing production data. Read-only analyzer only; no data written or modified."
+  },
+  "migrationStatus": {
+    "applied": [
+      "20260902064524_add_task_schedule_date",
+      "20260902110002_",
+      "20260902113104_add_task_updated_at",
+      "20260903140424_add_habits",
+      "20260907183514_add_user_prefs_task_priority_nullable_history_index",
+      "20260907190952_add_dailyplan_versioning_and_task_event"
+    ],
+    "pending": [],
+    "note": "All 6 migrations applied via approved `npx prisma migrate deploy` (Option A) immediately before this dry-run. `prisma migrate status` reports: Database schema is up to date!"
+  },
+  "dryRunMetrics": {
+    "usersAnalyzed": 0,
+    "tasksRequiringConversion": 0,
+    "dailyPlansRequiringConversion": 0,
+    "missingDayKey": 0,
+    "invalidDayKeys": 0,
+    "collisionCount": 0,
+    "totalRowsToRewrite": 0
+  },
+  "collisions": [],
+  "blockers": [],
+  "warnings": [
+    "Database is empty (0 users, 0 tasks, 0 daily plans). The Phase 4B-2 data rewrite is MOOT for this database — there is no legacy Jalali dayKey data to convert. G-02 adoption proceeds directly via Phase 4C (canonical producer cutover) with no data migration required."
+  ],
+  "writesPerformed": 0,
+  "migrationsAppliedByThisReport": 0,
+  "applicationCodeChanged": "none (package.json analyze:daykey script added in the earlier blocked attempt; no application code changed)"
+}

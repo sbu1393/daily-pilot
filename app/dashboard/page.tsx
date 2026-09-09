@@ -9,7 +9,7 @@ import DayStartModal from "./DayStarModal"
 import { useDaySummary } from "../hooks/UseDaySummary"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import DayTaskArea from "../components/task/DayTaskArea"
-import { todayKey } from "@/app/lib/jalili"
+import { getCanonicalToday } from "@/app/lib/canonicalDay"
 
 interface ModalState {
     open: boolean
@@ -17,13 +17,13 @@ interface ModalState {
 }
 
 export default function Dashboard() {
-    const { selectedDate } = useCalendar()
+    const { selectedDate, timezone } = useCalendar()
     const { summary, loading, refresh } = useDaySummary()
     const [modal, setModal] = useState<ModalState>({ open: false, isEdit: false })
     const askedFor = useRef<string | null>(null)
 
     // بررسی اینکه آیا روز انتخاب شده امروز است و هنوز برنامه‌ای ندارد
-    const isToday = selectedDate === todayKey()
+    const isToday = selectedDate === getCanonicalToday(timezone)
     const isRequired = isToday && summary !== null && !summary.hasPlan
 
     // اولین بار که روز جاری بدون بودجه لود می‌شود -> باز شدن خودکار مودال

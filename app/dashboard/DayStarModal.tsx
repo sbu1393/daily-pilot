@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react"
 import { X } from "lucide-react"
 import { useCalendar } from "@/app/contexts/CalenderContext"
-import { todayKey } from "../lib/jalili"
+import { getCanonicalToday } from "../lib/canonicalDay"
+import { api } from "@/app/lib/api/client"
 import { faDigits } from "@/app/lib/time"
 import AnimatedModal from "../components/motion/AnimatedModal"
 import styles from "./dashboard.module.css"
@@ -32,7 +33,7 @@ export default function DayStartModal({
     onClose: () => void
     onSaved: (json: unknown) => void
 }) {
-    const { selectedDate } = useCalendar()
+    const { selectedDate, timezone } = useCalendar()
     const [minutes, setMinutes] = useState(initialMinutes)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -43,7 +44,7 @@ export default function DayStartModal({
 
     if (!open) return null
 
-    const isToday = selectedDate === todayKey()
+    const isToday = selectedDate === getCanonicalToday(timezone)
 
     const submit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -54,14 +55,12 @@ export default function DayStartModal({
         setLoading(true)
         setError(null)
         try {
-            const res = await fetch("/api/planner/day", {
+            await api("/api/planner/day", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ dayKey: selectedDate, availableMinutes: minutes }),
             })
-            const json = await res.json()
-            if (!res.ok) throw new Error(json.message || "خطا در ثبت وقت روز")
-            onSaved(json)
+            onSaved(null)
             onClose()
         } catch (err) {
             setError(err instanceof Error ? err.message : "خطای ناشناخته")

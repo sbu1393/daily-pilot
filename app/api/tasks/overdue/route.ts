@@ -1,7 +1,12 @@
-import { NextRequest, NextResponse } from "next/server"
-import { getPrisma } from "@/app/lib/getPrisma"
+import { NextRequest } from "next/server"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
-import { todayKey } from "../../../lib/jalili"
+import { getOverdueTasks } from "@/app/lib/services/tasks.service"
+import {
+    errorResponse,
+    okResponse,
+    toServiceErrorResponse,
+    unauthorizedResponse,
+} from "@/app/lib/apiResponse"
 
 // GET /api/tasks/overdue → تسک‌های بازِ روزهای گذشته (کاندیدای انتقال به امروز)
 // برخلاف GET /api/tasks که بدون dayKey فقط «امروز» را می‌دهد، این اندپوینت
@@ -9,21 +14,15 @@ import { todayKey } from "../../../lib/jalili"
 export async function GET(_req: NextRequest) {
     try {
         const user = await getCurrentUser()
-        if (!user) return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+        if (!user) return unauthorizedResponse()
 
-        const today = todayKey()
-        const tasks = await getPrisma().task.findMany({
-            where: {
-                userId: user.id,
-                status: { not: "DONE" },
-                dayKey: { lt: today },
-            },
-            orderBy: { dayKey: "desc" },
-        })
+        const tasks = await getOverdueTasks(user.id, user.timezone)
 
-        return NextResponse.json({ data: tasks }, { status: 200 })
+        return okResponse(tasks)
     } catch (error) {
+        const mapped = toServiceErrorResponse(error)
+        if (mapped) return mapped
         console.error("GET OVERDUE TASKS ERROR:", error)
-        return NextResponse.json({ message: "Server error" }, { status: 500 })
+        return errorResponse(500, "INTERNAL", "Server error")
     }
 }

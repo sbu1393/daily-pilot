@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import { readCachedDay } from "@/app/lib/offline"
+import { api } from "@/app/lib/api/client"
 
 export type DaySummary = {
     dayKey: string
@@ -29,10 +30,9 @@ export function useDaySummary() {
         async (silent = false) => {
             if (!silent) setLoading(true)
             try {
-                const res = await fetch(`/api/planner/day?dayKey=${selectedDate}`)
-                const json = await res.json()
-                if (!res.ok) throw new Error(json.message || "خطا در دریافت خلاصه روز")
-                setSummary(json.summary)
+                // ADR-04: { ok, data: summary } → خود data خلاصه است
+                const summary = await api<DaySummary>(`/api/planner/day?dayKey=${selectedDate}`)
+                setSummary(summary)
                 setError(null)
             } catch (e) {
                 /* آفلاین: نمایش خلاصه‌ی کش‌شده تا نوار آمار از بین نرود */

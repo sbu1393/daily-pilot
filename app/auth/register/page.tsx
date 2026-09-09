@@ -11,6 +11,7 @@ import AuthCard from "@/app/components/AuthCard"
 import { useRouter } from "next/navigation"
 import { toast } from "react-toastify"
 import Link from "next/link"
+import { api } from "@/app/lib/api/client"
 
 export type RegisterInput = z.infer<typeof registerSchema>
 
@@ -58,29 +59,18 @@ export default function RegisterForm() {
         try {
             setLoading(true)
 
-            const res = await fetch(
-                "/api/auth/register",
-                {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(data)
-                }
-            )
-
-            const result = await res.json()
-
-            if (!res.ok) {
-                toast.error(result.message)
-                return
-            }
+            await api("/api/auth/register", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data)
+            })
 
             toast.success("ثبت نام با موفقیت انجام شد")
             router.push("/dashboard")
             router.refresh()
         }
         catch (error) {
-            console.log(error)
-            toast.error("ثبت نام با شکست مواجه شد")
+            toast.error(error instanceof Error ? error.message : "ثبت نام با شکست مواجه شد")
         }
         finally {
             setLoading(false)

@@ -4,6 +4,8 @@ import { useEffect, useState } from "react"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import { faDigits } from "@/app/lib/time"
 import { enqueueTask, isOffline } from "@/app/lib/offline"
+import { canonicalKeyToLocalMidnight } from "@/app/lib/canonicalDay"
+import { api } from "@/app/lib/api/client"
 import { toast } from "react-toastify"
 import AnimatedModal from "../motion/AnimatedModal"
 import styles from "./task.module.css"
@@ -15,7 +17,7 @@ type Props = {
 }
 
 export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
-    const { selectedDate } = useCalendar()
+    const { selectedDate, timezone } = useCalendar()
     const [text, setText] = useState("")
     const [loading, setLoading] = useState(false)
     const [offline, setOffline] = useState(false)
@@ -43,9 +45,14 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
     }, [open])
 
     /* ذخیره در صف آفلاین — تحلیل AI بعد از سینک انجام می‌شود */
+    // C1: قرارداد ساخت = title + scheduledDate (ISO نیمه‌شب محلی روز انتخابی)؛ dayKey سمت سرور ساخته می‌شود (§6.2.2.1)
     const saveOffline = (value: string) => {
-        enqueueTask({ text: value, dayKey: selectedDate })
-        toast.info("🔌 آفلاین هستی — تسک ذخیره شد و بعد از اتصال، سینک و تحلیل می‌شود")
+        enqueueTask({
+            title: value,
+            dayKey: selectedDate,
+            scheduledDate: canonicalKeyToLocalMidnight(selectedDate, timezone).toISOString(),
+        })
+        toast.info("🔌 آفلاین هستی — تسک ذخیره شد و بعد از اتصال سینک می‌شود")
         setText("")
         onClose()
         onCreated()
@@ -65,23 +72,19 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
 
         setLoading(true)
         try {
-            const res = await fetch("/api/tasks", {
+            await api("/api/tasks", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: value, dayKey: selectedDate }),
+                body: JSON.stringify({
+                    title: value,
+                    scheduledDate: canonicalKeyToLocalMidnight(selectedDate, timezone).toISOString(),
+                }),
             })
-            const json = await res.json().catch(() => ({}))
-            if (!res.ok) throw new Error((json as { message?: string }).message || "خطا در ساخت تسک")
 
             setText("")
             onClose()
             onCreated()
-
-            if ((json as { aiSource?: string }).aiSource === "mock") {
-                toast.info("هوش مصنوعی در دسترس نبود؛ تحلیل آزمایشی اعمال شد")
-            } else {
-                toast.success("تسک ساخته شد و زمان‌بندی شد ✅")
-            }
+            toast.success("تسک ساخته شد و زمان‌بندی شد ✅")
         } catch (e) {
             /* خطای شبکه حین ارسال → ذخیره در صف آفلاین */
             if (e instanceof TypeError) {
@@ -105,8 +108,8 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
                 </div>
             )}
             <p className={styles.hint}>
-                برای روز <b>{faDigits(selectedDate.replaceAll("-", "/"))}</b> — هوش مصنوعی اولویت، امتیاز،
-                دلیل و زمان تخمینی را مشخص می‌کند.
+                برای روز <b>{faDigits(selectedDate.replaceAll("-", "/"))}</b> — تسک بدون تحلیل ساخته می‌شود؛
+                بعداً با «تحلیل مجدد» می‌توانی اولویت، امتیاز، دلیل و زمان تخمینی را با هوش مصنوعی تعیین کنی.
             </p>
             <input
                 autoFocus
@@ -121,7 +124,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
             />
             <div className={styles.modalActions}>
                 <button className={styles.btnPrimary} onClick={submit} disabled={loading}>
-                    {loading ? "⏳ در حال تحلیل با هوش مصنوعی…" : "تحلیل و ساخت تسک"}
+                    {loading ? "⏳ در حال ساخت…" : "ساخت تسک"}
                 </button>
                 <button className={styles.btnGhost} onClick={onClose} disabled={loading}>
                     انصراف

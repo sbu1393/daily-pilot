@@ -13,13 +13,14 @@ import type { DaySummary } from "@/app/hooks/UseDaySummary"
  * - در حالت آفلاین فیلدهای هوش مصنوعی (اولویت/امتیاز/دلیل/زمان) «—» نشان داده می‌شوند.
  */
 
-const DAY_CACHE = "dp:offline:day:" // + dayKey
+const DAY_CACHE = "dp:offline:v2:day:" // + dayKey — v2: کلیدهای canonical میلادی (جدا از کش قدیمی جلالی)
 const QUEUE_KEY = "dp:offline:queue"
 
 export type QueuedTask = {
     id: string // شناسه محلی موقت
-    text: string
-    dayKey: string
+    title: string
+    dayKey: string // برای نمایش محلی تسک زیر روز درست
+    scheduledDate: string // ISO instant نیمه‌شب محلی روز — قرارداد API (C1): سرور dayKey را از آن می‌سازد
     createdAt: string
 }
 
@@ -122,7 +123,7 @@ export async function syncQueue(): Promise<number> {
             const res = await fetch("/api/tasks", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: item.text, dayKey: item.dayKey }),
+                body: JSON.stringify({ title: item.title, scheduledDate: item.scheduledDate }),
             })
             if (!res.ok) break // خطای سرور → بعداً دوباره تلاش می‌کنیم
             removeFromQueue(item.id)

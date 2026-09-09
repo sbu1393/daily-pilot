@@ -54,7 +54,7 @@ export default function RolloverDialog({ tasks, onClose, onConfirm, busy }: Prop
                     {tasks.map((t) => (
                         <label key={t.id} className={styles.checkRow}>
                             <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggle(t.id)} />
-                            <span className={styles.checkText}>{t.text}</span>
+                            <span className={styles.checkText}>{t.title}</span>
                             <span className={styles.checkMeta}>{faDigits(t.dayKey.replaceAll("-", "/"))}</span>
                         </label>
                     ))}

@@ -305,6 +305,46 @@
     gap: 10px;
 }
 
+/* C6 — انتخابگر دقیقه (§5.4.1: Ask actual duration) */
+.stepper {
+    flex: 1;
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+}
+
+.stepper .input {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    text-align: center;
+    font-weight: 700;
+    font-size: 1.05rem;
+}
+
+.stepBtn {
+    border: 1.5px solid var(--border);
+    border-radius: 14px;
+    background: var(--input-bg);
+    color: var(--text);
+    font: inherit;
+    font-weight: 800;
+    padding: 0 14px;
+    cursor: pointer;
+    transition: border-color .2s ease, background .2s ease;
+    white-space: nowrap;
+}
+
+.stepBtn:hover:not(:disabled) {
+    border-color: var(--primary);
+    background: var(--surface-solid);
+}
+
+.stepBtn:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+}
+
 .unit {
     color: var(--muted);
     font-weight: 700;

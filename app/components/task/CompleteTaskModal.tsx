@@ -1,9 +1,10 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { fmtMinutes } from "@/app/lib/time"
+import { fmtMinutes, parseSpentMinutes } from "@/app/lib/time"
 import { toast } from "react-toastify"
 import { useSettings } from "@/app/contexts/SettingsContext"
+import { api } from "@/app/lib/api/client"
 import AnimatedModal from "../motion/AnimatedModal" // مودال با انیمیشن فر머-موشن
 import { type TaskItem } from "./taskTypes"
 import styles from "./task.module.css"
@@ -42,24 +43,31 @@ export default function CompleteTaskModal({ task, onClose, onCompleted }: Props)
 
     const reference = task.allocatedMinutes ?? task.estimatedTime
 
+    // ±۵ دقیقه دور مقدار فعلی؛ کف ۱ دقیقه (همان مرز SPENT_MINUTES_MIN)
+    const stepMinutes = (delta: number) => {
+        const current = Number(minutes)
+        const base = Number.isFinite(current) && current > 0 ? current : 0
+        setMinutes(String(Math.max(1, Math.min(600, base + delta))))
+    }
+
     const submit = async () => {
-        const value = Number(minutes)
-        if (!Number.isFinite(value) || value < 1 || value > 600) {
-            toast.error("مدت باید بین ۱ تا ۶۰۰ دقیقه باشد")
+        const parsed = parseSpentMinutes(minutes) // §5.4.1: Validate duration — ورودی نامعتبر هرگز به API نمی‌رسد
+        if (!parsed.ok) {
+            toast.error(parsed.error)
             return
         }
+        const value = parsed.value
         setLoading(true)
         try {
-            const res = await fetch(`/api/tasks/${task.id}/complete`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ durationMinutes: value }),
-            })
-            const json = await res.json().catch(() => ({}))
-            if (!res.ok) throw new Error((json as { message?: string }).message || "خطا در ثبت اتمام")
-
-            // سرور پاسخ را به شکل { result: { savedMinutes, overspentMinutes } } برمی‌گرداند
-            const body = json as { result?: { savedMinutes?: number; overspentMinutes?: number } }
+            // ADR-04: پاسخ { ok, data: { task, result, summaries } } → data.result
+            const body = await api<{ result?: { savedMinutes?: number; overspentMinutes?: number } }>(
+                `/api/tasks/${task.id}/complete`,
+                {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ spentMinutes: value }),
+                },
+            )
             const saved = body.result?.savedMinutes ?? 0
             const overspent = body.result?.overspentMinutes ?? 0
 
@@ -80,23 +88,44 @@ export default function CompleteTaskModal({ task, onClose, onCompleted }: Props)
                             <h4>تمام کردن تسک</h4>
                             <button className={styles.closeBtn} onClick={onClose} aria-label="بستن">✕</button>
                         </div>
-                        <p className={styles.taskTitle}>«{task.text}»</p>
+                        <p className={styles.taskTitle}>«{task.title}»</p>
                         {reference != null && (
                             <p className={styles.hint}>سهم این کار {fmtMinutes(reference)} است. چند دقیقه طول کشید؟</p>
                         )}
                         <div className={styles.minutesRow}>
-                            <input
-                                autoFocus
-                                className={styles.input}
-                                type="number"
-                                min={1}
-                                max={600}
-                                value={minutes}
-                                onChange={(e) => setMinutes(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter" && !loading) submit()
-                                }}
-                            />
+                            <div className={styles.stepper}>
+                                <button
+                                    type="button"
+                                    className={styles.stepBtn}
+                                    onClick={() => stepMinutes(-5)}
+                                    aria-label="کاهش ۵ دقیقه‌ای"
+                                    disabled={loading}
+                                >
+                                    −۵
+                                </button>
+                                <input
+                                    autoFocus
+                                    className={styles.input}
+                                    type="number"
+                                    min={1}
+                                    max={600}
+                                    step={5}
+                                    value={minutes}
+                                    onChange={(e) => setMinutes(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter" && !loading) submit()
+                                    }}
+                                />
+                                <button
+                                    type="button"
+                                    className={styles.stepBtn}
+                                    onClick={() => stepMinutes(5)}
+                                    aria-label="افزایش ۵ دقیقه‌ای"
+                                    disabled={loading}
+                                >
+                                    +۵
+                                </button>
+                            </div>
                             <span className={styles.unit}>دقیقه</span>
                         </div>
                         <div className={styles.modalActions}>

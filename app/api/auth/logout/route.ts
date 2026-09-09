@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server"
+import { okMessageResponse } from "@/app/lib/apiResponse"
 
 // POST /api/auth/logout → حذف کوکی سشن
 export async function POST() {
-    const response = NextResponse.json({ message: "خروج انجام شد" }, { status: 200 })
+    const response = okMessageResponse("خروج انجام شد")
 
     response.cookies.set("token", "", {
         httpOnly: true,

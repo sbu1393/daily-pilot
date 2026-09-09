@@ -1,17 +1,22 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getPrisma } from "@/app/lib/getPrisma"
-import bcrypt from "bcrypt"
 import { createSession } from "@/app/lib/createSession"
 import { loginSchema } from "@/app/schema/formSchema"
 import { isRateLimited, clientIp } from "@/app/lib/rateLimit"
+import { authenticate } from "@/app/lib/services/auth.service"
+import {
+    errorResponse,
+    toServiceErrorResponse,
+    validationErrorResponse,
+} from "@/app/lib/apiResponse"
 
 export async function POST(req: NextRequest) {
     try {
         // محدودیت نرخ: به ازای IP (قبل از خواندن بدنه) و به ازای ایمیل (بعد از اعتبارسنجی)
         if (isRateLimited(`login:ip:${clientIp(req)}`)) {
-            return NextResponse.json(
-                { message: "تلاش‌های زیادی انجام شده؛ کمی بعد دوباره تلاش کن" },
-                { status: 429 },
+            return errorResponse(
+                429,
+                "RATE_LIMITED",
+                "تلاش‌های زیادی انجام شده؛ کمی بعد دوباره تلاش کن",
             )
         }
 
@@ -20,51 +25,30 @@ export async function POST(req: NextRequest) {
         const validation = loginSchema.safeParse(body)
 
         if (!validation.success) {
-            return NextResponse.json(
-                {
-                    message: "اطلاعات نامعتبر است",
-                    errors: validation.error.flatten(),
-                },
-                { status: 400 },
-            )
+            return validationErrorResponse(validation.error.flatten())
         }
 
         const { email, password } = validation.data
 
         if (isRateLimited(`login:email:${email}`, 5)) {
-            return NextResponse.json(
-                { message: "تلاش‌های زیادی برای این حساب انجام شده؛ کمی بعد دوباره تلاش کن" },
-                { status: 429 },
+            return errorResponse(
+                429,
+                "RATE_LIMITED",
+                "تلاش‌های زیادی برای این حساب انجام شده؛ کمی بعد دوباره تلاش کن",
             )
         }
 
-        const user = await getPrisma().user.findUnique({
-            where: { email },
-        })
-
-        if (!user) {
-            return NextResponse.json(
-                { message: "ایمیل یا رمز عبور اشتباه است" },
-                { status: 401 },
-            )
-        }
-
-        const passwordMatch = await bcrypt.compare(password, user.password)
-
-        if (!passwordMatch) {
-            return NextResponse.json(
-                { message: "ایمیل یا رمز عبور اشتباه است" },
-                { status: 401 },
-            )
-        }
+        const user = await authenticate(email, password)
 
         const response = NextResponse.json(
             {
-                message: "ورود موفق بود",
-                user: {
-                    id: user.id,
-                    username: user.username,
-                    email: user.email,
+                ok: true,
+                data: {
+                    user: {
+                        id: user.id,
+                        username: user.username,
+                        email: user.email,
+                    },
                 },
             },
             { status: 200 },
@@ -72,7 +56,9 @@ export async function POST(req: NextRequest) {
 
         return createSession(user, response)
     } catch (error) {
+        const mapped = toServiceErrorResponse(error)
+        if (mapped) return mapped
         console.error("LOGIN ERROR:", error)
-        return NextResponse.json({ message: "خطای سرور" }, { status: 500 })
+        return errorResponse(500, "INTERNAL", "خطای سرور")
     }
 }

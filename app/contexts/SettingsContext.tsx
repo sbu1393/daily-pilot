@@ -116,8 +116,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             if (key !== settings.reminderTime) return
 
             // فقط یک بار در هر دقیقه
-            const todayKey = new Date().toDateString()
-            const fired = `${todayKey}|${key}`
+            const dateStamp = new Date().toDateString()
+            const fired = `${dateStamp}|${key}`
             if (firedRef.current === fired) return
             firedRef.current = fired
             try {

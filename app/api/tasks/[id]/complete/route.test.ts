@@ -128,14 +128,14 @@ describe("PATCH /api/tasks/[id]/complete", () => {
         expect(mocks.completeTask).not.toHaveBeenCalled()
     })
 
-    it("returns 500 INTERNAL_ERROR without details for unmapped service failures", async () => {
+    it("returns 500 INTERNAL without details for unmapped service failures", async () => {
         mocks.completeTask.mockRejectedValue(new Error("db down"))
 
         const res = await callPATCH({ spentMinutes: 40 })
 
         expect(res.status).toBe(500)
         const parsed = await res.json()
-        expect(parsed.error.code).toBe("INTERNAL_ERROR")
+        expect(parsed.error.code).toBe("INTERNAL")
         expect(parsed.error.message).not.toContain("db down")
     })
 })

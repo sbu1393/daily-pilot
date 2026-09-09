@@ -48,6 +48,6 @@ export async function POST(req: NextRequest) {
     } catch (error) {
         const mapped = toServiceErrorResponse(error)
         if (mapped) return mapped
-        return errorResponse(500, "INTERNAL_ERROR", "خطای سرور")
+        return errorResponse(500, "INTERNAL", "خطای سرور")
     }
 }

@@ -69,11 +69,11 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
 
         const res = await GET()
 
-        // خطای عمومی → 500 INTERNAL_ERROR با همان ساختار envelope
+        // خطای عمومی → 500 INTERNAL با همان ساختار envelope
         expect(res.status).toBe(500)
         const parsed = await res.json()
         expect(parsed.ok).toBe(false)
-        expect(parsed.error.code).toBe("INTERNAL_ERROR")
+        expect(parsed.error.code).toBe("INTERNAL")
         expect(parsed.error.message).toEqual(expect.any(String))
     })
 })

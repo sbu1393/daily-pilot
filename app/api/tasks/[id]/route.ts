@@ -37,7 +37,7 @@ export async function GET(
         const mapped = toServiceErrorResponse(error)
         if (mapped) return mapped
         console.error("GET TASK ERROR:", error)
-        return errorResponse(500, "INTERNAL_ERROR", "Server error")
+        return errorResponse(500, "INTERNAL", "Server error")
     }
 }
 
@@ -62,7 +62,7 @@ export async function DELETE(
         const mapped = toServiceErrorResponse(error)
         if (mapped) return mapped
         console.error("DELETE TASK ERROR:", error)
-        return errorResponse(500, "INTERNAL_ERROR", "Server error")
+        return errorResponse(500, "INTERNAL", "Server error")
     }
 }
 
@@ -96,6 +96,6 @@ export async function PATCH(
         const mapped = toServiceErrorResponse(error)
         if (mapped) return mapped
         console.error("UPDATE TASK ERROR:", error)
-        return errorResponse(500, "INTERNAL_ERROR", "Server error")
+        return errorResponse(500, "INTERNAL", "Server error")
     }
 }

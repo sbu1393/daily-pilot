@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
         const mapped = toServiceErrorResponse(error)
         if (mapped) return mapped
         console.error("AVATAR POST ERROR:", error)
-        return errorResponse(500, "INTERNAL_ERROR", "خطای سرور")
+        return errorResponse(500, "INTERNAL", "خطای سرور")
     }
 }
 
@@ -67,6 +67,6 @@ export async function DELETE() {
         const mapped = toServiceErrorResponse(error)
         if (mapped) return mapped
         console.error("AVATAR DELETE ERROR:", error)
-        return errorResponse(500, "INTERNAL_ERROR", "خطای سرور")
+        return errorResponse(500, "INTERNAL", "خطای سرور")
     }
 }

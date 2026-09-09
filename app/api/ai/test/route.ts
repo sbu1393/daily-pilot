@@ -15,6 +15,6 @@ export async function GET() {
     } catch (error) {
         // C8 — ADR-04: خطای مدیریت‌نشده قبلاً به صفحه‌ی 500 پیش‌فرض Next می‌رسید، نه Envelope خطا
         console.error("AI TEST ERROR:", error)
-        return errorResponse(500, "INTERNAL_ERROR", "Server error")
+        return errorResponse(500, "INTERNAL", "Server error")
     }
 }

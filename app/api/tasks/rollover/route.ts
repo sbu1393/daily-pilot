@@ -29,6 +29,6 @@ export async function POST(req: NextRequest) {
         const mapped = toServiceErrorResponse(error)
         if (mapped) return mapped
         console.error("ROLLOVER TASKS ERROR:", error)
-        return errorResponse(500, "INTERNAL_ERROR", "Server error")
+        return errorResponse(500, "INTERNAL", "Server error")
     }
 }

@@ -20,7 +20,7 @@ export async function GET() {
         const mapped = toServiceErrorResponse(error)
         if (mapped) return mapped
         console.error("PROFILE GET ERROR:", error)
-        return errorResponse(500, "INTERNAL_ERROR", "خطای سرور")
+        return errorResponse(500, "INTERNAL", "خطای سرور")
     }
 }
 
@@ -45,6 +45,6 @@ export async function PATCH(req: NextRequest) {
         const mapped = toServiceErrorResponse(error)
         if (mapped) return mapped
         console.error("PROFILE PATCH ERROR:", error)
-        return errorResponse(500, "INTERNAL_ERROR", "خطای سرور")
+        return errorResponse(500, "INTERNAL", "خطای سرور")
     }
 }

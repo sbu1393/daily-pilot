@@ -40,6 +40,6 @@ export async function PATCH(
         const mapped = toServiceErrorResponse(error)
         if (mapped) return mapped
         console.error("COMPLETE TASK ERROR:", error)
-        return errorResponse(500, "INTERNAL_ERROR", "Server error")
+        return errorResponse(500, "INTERNAL", "Server error")
     }
 }

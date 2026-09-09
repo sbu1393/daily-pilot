@@ -109,7 +109,7 @@ describe("POST /api/auth/register", () => {
         expect(mocks.registerUser).not.toHaveBeenCalled()
     })
 
-    it("maps an unexpected error to 500 INTERNAL_ERROR with the fa fallback message", async () => {
+    it("maps an unexpected error to 500 INTERNAL with the fa fallback message", async () => {
         mocks.registerUser.mockRejectedValue(new Error("db exploded"))
 
         const res = await callPOST(VALID_BODY)
@@ -118,7 +118,7 @@ describe("POST /api/auth/register", () => {
         const parsed = await res.json()
         expect(parsed).toEqual({
             ok: false,
-            error: { code: "INTERNAL_ERROR", message: "خطای سرور" },
+            error: { code: "INTERNAL", message: "خطای سرور" },
         })
     })
 })

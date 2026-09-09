@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
         const mapped = toServiceErrorResponse(error)
         if (mapped) return mapped
         console.error("CREATE TASK ERROR:", error)
-        return errorResponse(500, "INTERNAL_ERROR", "Server error")
+        return errorResponse(500, "INTERNAL", "Server error")
     }
 }
 
@@ -56,6 +56,6 @@ export async function GET(req: NextRequest) {
         const mapped = toServiceErrorResponse(error)
         if (mapped) return mapped
         console.error("GET TASKS ERROR:", error)
-        return errorResponse(500, "INTERNAL_ERROR", "Server error")
+        return errorResponse(500, "INTERNAL", "Server error")
     }
 }

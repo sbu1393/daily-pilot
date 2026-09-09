@@ -1,14 +1,20 @@
-import { NextResponse } from "next/server"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
 import { runAiSamples } from "@/app/lib/services/analysis.service"
-import { unauthorizedResponse } from "@/app/lib/apiResponse"
+import { errorResponse, okResponse, unauthorizedResponse } from "@/app/lib/apiResponse"
 
 export async function GET() {
-    // این اندپوینت هر بار چند فراخوانی AI انجام می‌دهد → فقط برای کاربران واردشده
-    const user = await getCurrentUser()
-    if (!user) return unauthorizedResponse()
+    try {
+        // این اندپوینت هر بار چند فراخوانی AI انجام می‌دهد → فقط برای کاربران واردشده
+        const user = await getCurrentUser()
+        if (!user) return unauthorizedResponse()
 
-    const results = await runAiSamples()
+        const results = await runAiSamples()
 
-    return NextResponse.json(results)
+        // C8 — ADR-04: از پاسخ خام آرایه به Envelope استاندارد { ok, data } رفتیم (§3.11)
+        return okResponse(results)
+    } catch (error) {
+        // C8 — ADR-04: خطای مدیریت‌نشده قبلاً به صفحه‌ی 500 پیش‌فرض Next می‌رسید، نه Envelope خطا
+        console.error("AI TEST ERROR:", error)
+        return errorResponse(500, "INTERNAL_ERROR", "Server error")
+    }
 }

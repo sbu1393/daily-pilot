@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const { analyzeTaskMock } = vi.hoisted(() => ({ analyzeTaskMock: vi.fn() }))
 const { markDayStaleMock } = vi.hoisted(() => ({ markDayStaleMock: vi.fn() }))
+const { ensureDayRebalancedMock } = vi.hoisted(() => ({ ensureDayRebalancedMock: vi.fn() }))
 const { prismaMock, getPrismaMock } = vi.hoisted(() => {
     const prismaMock = {
         task: {
@@ -45,10 +46,10 @@ vi.mock("@/app/lib/getPrisma", () => ({ getPrisma: getPrismaMock }))
 vi.mock("@/app/lib/ai/analyzeTask", () => ({ analyzeTask: analyzeTaskMock }))
 vi.mock("@/app/lib/planner/rebalance", () => ({
     markDayStale: markDayStaleMock,
-    ensureDayRebalanced: vi.fn(),
+    ensureDayRebalanced: ensureDayRebalancedMock,
 }))
 
-import { completeTask, createTask, getTask, reanalyzeTask, updateTask } from "./tasks.service"
+import { completeTask, createTask, getDayTasks, getTask, reanalyzeTask, updateTask } from "./tasks.service"
 import {
     canonicalKeyToLocalMidnight,
     getCanonicalToday,
@@ -479,5 +480,66 @@ describe("completeTask (C2 — Time Tracking)", () => {
 
         await expect(completeTask(1, TIMEZONE, 5, { spentMinutes: 40 })).rejects.toThrow()
         expect(prismaMock.task.update).not.toHaveBeenCalled()
+    })
+})
+
+describe("C4 — ADR-03 lazy wiring (read vs mutation)", () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        ensureDayRebalancedMock.mockResolvedValue(null)
+    })
+
+    it("getDayTasks (read path) invokes the lazy trigger with the user's day", async () => {
+        prismaMock.task.findMany.mockResolvedValue([])
+
+        await getDayTasks(1, "2026-03-05")
+
+        expect(ensureDayRebalancedMock).toHaveBeenCalledWith(1, "2026-03-05")
+    })
+
+    it("createTask (mutation) never triggers the rebalance engine", async () => {
+        prismaMock.task.create.mockResolvedValue({ id: 9 })
+
+        await createTask(1, TIMEZONE, { title: "کار جدید", scheduledDate: new Date("2026-03-05T10:00:00Z") })
+
+        expect(ensureDayRebalancedMock).not.toHaveBeenCalled()
+    })
+
+    it("completeTask (mutation) never triggers the rebalance engine", async () => {
+        const today = getCanonicalToday(TIMEZONE)
+        prismaMock.task.findFirst.mockResolvedValue({
+            id: 5,
+            userId: 1,
+            status: "TODO" as const,
+            dayKey: today,
+            allocatedMinutes: 30,
+            estimatedTime: 30,
+        })
+        prismaMock.task.update.mockResolvedValue({ id: 5 })
+
+        await completeTask(1, TIMEZONE, 5, { spentMinutes: 40 })
+
+        expect(ensureDayRebalancedMock).not.toHaveBeenCalled()
+    })
+
+    it("reanalyzeTask (mutation) never triggers the rebalance engine", async () => {
+        const today = getCanonicalToday(TIMEZONE)
+        prismaMock.task.findFirst.mockResolvedValue({
+            id: 1,
+            userId: 1,
+            title: "خرید",
+            status: "TODO" as const,
+            dayKey: today,
+            category: null,
+        })
+        analyzeTaskMock.mockResolvedValue({
+            source: "mock",
+            analysis: { priority: "LOW", score: 50, reason: "دلیل", category: "Personal", estimatedMinutes: 30 },
+        })
+        prismaMock.task.update.mockResolvedValue({ id: 1 })
+
+        await reanalyzeTask(1, TIMEZONE, 1)
+
+        expect(ensureDayRebalancedMock).not.toHaveBeenCalled()
     })
 })

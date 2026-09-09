@@ -5,7 +5,8 @@
 > Where implementation and architecture disagree, this roadmap records the item as
 > `ARCHITECTURE CONFLICT / DECISION REQUIRED` instead of resolving it silently.
 
-Last synced: after commit `f6f4430` (Phase E2), including Decision 2 (ADR-06: change-password ratified).
+Last synced: after commit `6691a89` (Decision 6: generic 500 error code aligned to §9.3 `INTERNAL`).
+Earlier: Decision 2 (ADR-06: change-password ratified) after `f6f4430` (Phase E2).
 Evidence basis: direct repository inspection (§-references verified in `architecture.md`,
 commit hashes verified via `git log`).
 
@@ -133,9 +134,9 @@ None. No open item prevents correct V1 operation.
 
 | Item | Priority | Required decision | Why it cannot proceed |
 |---|---|---|---|
-| §9.3 doc-vs-code: `500 INTERNAL` vs `INTERNAL_ERROR` | Decision Gate | `ARCHITECTURE CONFLICT / DECISION REQUIRED` — §9.3's locked table says the generic internal code is `INTERNAL`, but every route (and all tests) use `INTERNAL_ERROR` since A6. Resolve by doc-only correction **or** a mass route/error-code refactor (code-only change discouraged: client-facing code churn) | Pre-existing conflict surfaced during E1 pre-coding inspection; explicitly ruled OUTSIDE E1 scope and left untouched in both doc and code |
+| §9.3 doc-vs-code: `500 INTERNAL` vs `INTERNAL_ERROR` | Decision Gate | ~~`ARCHITECTURE CONFLICT / DECISION REQUIRED` — §9.3's locked table says the generic internal code is `INTERNAL`, but every route (and all tests) use `INTERNAL_ERROR` since A6. Resolve by doc-only correction **or** a mass route/error-code refactor (code-only change discouraged: client-facing code churn)~~ **RESOLVED — Decision 6, Option 1: implementation aligned with architecture** — generic 500 code `INTERNAL_ERROR` → `INTERNAL` at all 20 production sites (14 route files) + 3 test files; envelope shape, HTTP statuses, messages, and every other error code unchanged | History: surfaced during E1 pre-coding inspection; ruled OUTSIDE E1 scope; read-only investigation in Decision 6 (26 occurrences inventoried); user approved Option 1. Implementation commit `6691a89` (17 files, +26/−26). Gates: 234/234 tests, typecheck, lint, migrate status — clean. `architecture.md` untouched |
 | G-02 populated-data closeout | Decision Gate | Declare the empty DB the intended production state (retire 4B-2) **or** commit to a populated-data migration run per the synced plan doc | E2 run 3 produced the first non-vacuous populated-data evidence (0 blockers, 0 collisions); the closeout decision itself remains open and is NOT claimed by E2 |
-| §8.12.1 change-password ADR | Decision Gate | ~~Ratify the documented deviation (stateless JWT; no session invalidation on password change) or schedule revocation design~~ **RESOLVED — Decision 2 (2026-09-09): ratification chosen** | ADR-06 created (`ADR-06-change-password.md`): deviation ratified; session invalidation/revocation explicitly excluded and requires a separate ADR. Gap G-§8.12.1 `CLOSED`. Doc-vs-code conflict in the other row (§9.3 `INTERNAL`) remains OPEN |
+| §8.12.1 change-password ADR | Decision Gate | ~~Ratify the documented deviation (stateless JWT; no session invalidation on password change) or schedule revocation design~~ **RESOLVED — Decision 2 (2026-09-09): ratification chosen** | ADR-06 created (`ADR-06-change-password.md`): deviation ratified; session invalidation/revocation explicitly excluded and requires a separate ADR. Gap G-§8.12.1 `CLOSED`. Doc-vs-code conflict in the other row (§9.3 `INTERNAL`) since RESOLVED by Decision 6 (implementation aligned) |
 | `droppedTaskIds` API field | Decision Gate | Approve extending the API contract for §5.6.3 rollover candidates | Contract change; logged in C5 |
 | §7.14 quota / entitlement | Decision Gate | Decide whether AI quota gating enters V1 | §7.14 defers it; entry requires a new ADR |
 

@@ -5,7 +5,7 @@
 > Where implementation and architecture disagree, this roadmap records the item as
 > `ARCHITECTURE CONFLICT / DECISION REQUIRED` instead of resolving it silently.
 
-Last synced: after commit `940f8ac` (Phase E1), including E2 run 3 (secret live, lifecycle executed).
+Last synced: after commit `f6f4430` (Phase E2), including Decision 2 (ADR-06: change-password ratified).
 Evidence basis: direct repository inspection (§-references verified in `architecture.md`,
 commit hashes verified via `git log`).
 
@@ -100,7 +100,7 @@ Statuses: `CLOSED` / `PARTIALLY CLOSED` / `OPEN` / `DEFERRED` / `NEEDS PRODUCT D
 | G-§9.10-7 | Client retry / duplicate mutation | `CLOSED` | C7: manual retry, idempotent-analyze only | No | — | — |
 | G-§11.4 | Test/typecheck tooling | `CLOSED` | vitest + scripts exist and run | No | — | — |
 | G-G-02 | DayKey data migration | `PARTIALLY CLOSED` | Code cutover verified; populated-data evidence now AVAILABLE (E2 run 3 analyzer: 1 user / 3 tasks / 2 plans — 0 blockers, 0 collisions, 0 invalid keys; smoke data cleaned after evidence) | No | — | See Decision Gate |
-| G-§8.12.1 | Change-password ratification | `NEEDS ADR` | Feature live & hardened; deviation documented (§8.12.1) | No | — | Ratify or retire |
+| G-§8.12.1 | Change-password ratification | `CLOSED` (ADR-06) | Decision 2 (2026-09-09): deviation **KEPT** — `ADR-06-change-password.md` ratifies §8.12.1's pending state: stateless JWT retained; password change does NOT invalidate issued tokens; no revocation/session store/refresh tokens; session invalidation requires a separate future ADR. `architecture.md` untouched (§8.12.1 preserved as history) | No | — | — |
 | G-§8.13 | **Registration auto-login** | `CLOSED` / architecture-conformant | §8.2 "Auto Login — بعد از Registration موفق، کاربر در همان Flow به‌صورت خودکار Login می‌شود" (arch:4149); §8.14 contract list (arch:4603). Code: register → `createSession` cookie → client redirect to `/dashboard` | No | — | None — conformant |
 | G-§8.13 (rest) | Session helper / defaults / hash-exposure / no-middleware | `CLOSED` | `createSession.ts`; schema defaults `plan/timezone/locale/calendar`; `getCurrentUser` select omits `password`; no middleware file | No | — | — |
 | G-§7.14 | Quota / entitlement / payment | `DEFERRED` | §7.14 LOCKED; §13.1 "PRO ... Entitlement/Quota فقط با نیاز واقعی" | No | Product decision | Post-V1 |
@@ -135,7 +135,7 @@ None. No open item prevents correct V1 operation.
 |---|---|---|---|
 | §9.3 doc-vs-code: `500 INTERNAL` vs `INTERNAL_ERROR` | Decision Gate | `ARCHITECTURE CONFLICT / DECISION REQUIRED` — §9.3's locked table says the generic internal code is `INTERNAL`, but every route (and all tests) use `INTERNAL_ERROR` since A6. Resolve by doc-only correction **or** a mass route/error-code refactor (code-only change discouraged: client-facing code churn) | Pre-existing conflict surfaced during E1 pre-coding inspection; explicitly ruled OUTSIDE E1 scope and left untouched in both doc and code |
 | G-02 populated-data closeout | Decision Gate | Declare the empty DB the intended production state (retire 4B-2) **or** commit to a populated-data migration run per the synced plan doc | E2 run 3 produced the first non-vacuous populated-data evidence (0 blockers, 0 collisions); the closeout decision itself remains open and is NOT claimed by E2 |
-| §8.12.1 change-password ADR | Decision Gate | Ratify the documented deviation (stateless JWT; no session invalidation on password change) or schedule revocation design | §8.12.1 is explicitly a Pending ADR, not a ratified decision |
+| §8.12.1 change-password ADR | Decision Gate | ~~Ratify the documented deviation (stateless JWT; no session invalidation on password change) or schedule revocation design~~ **RESOLVED — Decision 2 (2026-09-09): ratification chosen** | ADR-06 created (`ADR-06-change-password.md`): deviation ratified; session invalidation/revocation explicitly excluded and requires a separate ADR. Gap G-§8.12.1 `CLOSED`. Doc-vs-code conflict in the other row (§9.3 `INTERNAL`) remains OPEN |
 | `droppedTaskIds` API field | Decision Gate | Approve extending the API contract for §5.6.3 rollover candidates | Contract change; logged in C5 |
 | §7.14 quota / entitlement | Decision Gate | Decide whether AI quota gating enters V1 | §7.14 defers it; entry requires a new ADR |
 

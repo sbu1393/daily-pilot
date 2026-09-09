@@ -26,7 +26,7 @@ export async function PATCH(
             return errorResponse(400, "VALIDATION_ERROR", "شناسه نامعتبر است")
         }
 
-        const body = await req.json().catch(() => ({}))
+        const body = (await req.json().catch(() => null)) as unknown
         const parsed = reanalyzeTaskSchema.safeParse(body)
         if (!parsed.success) {
             return validationErrorResponse(parsed.error.flatten())

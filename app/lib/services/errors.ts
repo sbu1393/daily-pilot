@@ -17,16 +17,53 @@ export class ServiceError extends Error {
 }
 
 // A6 — بدنه‌ی خالص Envelope خطا (بدون NextResponse — قابل تست در vitest)
+// ترتیب: ابتدا ServiceError دامنه؛ سپس نگاشت زیرساخت (Prisma known errors) — E1/§9.11.
+// خطاهای ناشناخته → null تا مسیر 500 عمومی بدون تغییر بماند.
 export function toServiceErrorBody(
     error: unknown,
 ): { ok: false; error: { code: string; message: string; errors?: unknown } } | null {
-    if (!(error instanceof ServiceError)) return null
-    const body: { ok: false; error: { code: string; message: string; errors?: unknown } } = {
-        ok: false,
-        error: { code: error.code, message: error.message },
+    if (error instanceof ServiceError) {
+        const body: { ok: false; error: { code: string; message: string; errors?: unknown } } = {
+            ok: false,
+            error: { code: error.code, message: error.message },
+        }
+        if (error.errors !== undefined) body.error.errors = error.errors
+        return body
     }
-    if (error.errors !== undefined) body.error.errors = error.errors
-    return body
+
+    const infra = toServiceErrorFromInfrastructure(error)
+    if (infra) return toServiceErrorBody(infra)
+
+    return null
+}
+
+// ---------- Infrastructure: known Prisma error mapping (E1 — §9.11 boundary) ----------
+// طبق §9.11: Domain هرگز نباید به کد خطای Prisma وابسته باشد؛ شناخت کد Prisma فقط
+// در همین مرز خطا/زیرساخت انجام می‌شود. تشخیص با duck-typing روی error.code است —
+// بدون import از @prisma/client (وابستگی ساختاری، نه نوعی).
+// جدول کدها از §9.3/§9.4 معماری: 409 CONFLICT / 404 NOT_FOUND.
+
+const PRISMA_UNIQUE_VIOLATION = "P2002"
+const PRISMA_RECORD_NOT_FOUND = "P2025"
+
+/**
+ * اگر خطا یک Prisma known-request error شناخته‌شده باشد، معادل ServiceError را برمی‌گرداند؛
+ * در غیر این صورت null — تا مسیر خطای عمومی فعلی بدون تغییر ادامه یابد.
+ * جزئیات خام Prisma هرگز به Client نمی‌رسد.
+ */
+export function toServiceErrorFromInfrastructure(error: unknown): ServiceError | null {
+    if (typeof error !== "object" || error === null) return null
+    const code = (error as { code?: unknown }).code
+    if (typeof code !== "string") return null
+
+    switch (code) {
+        case PRISMA_UNIQUE_VIOLATION:
+            return new ServiceError(409, "CONFLICT", "این مقدار قبلاً ثبت شده است")
+        case PRISMA_RECORD_NOT_FOUND:
+            return new ServiceError(404, "NOT_FOUND", "رکورد موردنظر پیدا نشد")
+        default:
+            return null
+    }
 }
 
 // ---------- Tasks ----------

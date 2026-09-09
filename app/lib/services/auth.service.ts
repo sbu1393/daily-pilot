@@ -5,6 +5,7 @@ import {
     EmailTakenError,
     InvalidCredentialsError,
     SamePasswordError,
+    toServiceErrorFromInfrastructure,
     UserNotFoundError,
     UsernameTakenError,
     WrongPasswordError,
@@ -26,13 +27,22 @@ export async function registerUser(input: {
 
     const hashedPassword = await bcrypt.hash(password, BCRYPT_COST)
 
-    return prisma.user.create({
-        data: {
-            username,
-            email,
-            password: hashedPassword,
-        },
-    })
+    try {
+        return await prisma.user.create({
+            data: {
+                username,
+                email,
+                password: hashedPassword,
+            },
+        })
+    } catch (error) {
+        // E1 — §9.11: race دو ثبت‌نام همزمان روی email @unique → Prisma P2002.
+        // تشخیص کد Prisma فقط در مرز خطا انجام می‌شود (toServiceErrorFromInfrastructure)
+        // تا Domain وابسته به کد Prisma نشود. نتیجه: همان 409 CONFLICT که مسیر همیشگی هم می‌دهد.
+        const infra = toServiceErrorFromInfrastructure(error)
+        if (infra) throw infra
+        throw error
+    }
 }
 
 // ---------- ورود (خطای یکسان برای جلوگیری از User Enumeration) ----------

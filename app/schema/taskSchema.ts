@@ -67,3 +67,14 @@ export const updateTaskSchema = z
             d.category !== undefined,
         { message: "هیچ تغییری ارسال نشده است" },
     )
+
+// C2 — اتمام تسک و Time Tracking (§3.10-C / §5.4.1)
+// spentMinutes = مدت واقعی اعلام‌شده؛ عدد صحیح نامنفی.
+// (بدون coerce — ورودی غیرعددی مثل "40" باید 400 برگرداند؛ سقف ۶۰۰ دقیقه = گارد موجود)
+export const completeTaskSchema = z.object({
+    spentMinutes: z
+        .number()
+        .int("مدت باید عدد صحیح باشد")
+        .min(0, "مدت نمی‌تواند منفی باشد")
+        .max(600, "مدت نمی‌تواند بیشتر از ۱۰ ساعت باشد"),
+})

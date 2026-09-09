@@ -48,7 +48,7 @@ vi.mock("@/app/lib/planner/rebalance", () => ({
     ensureDayRebalanced: vi.fn(),
 }))
 
-import { createTask, getTask, reanalyzeTask, updateTask } from "./tasks.service"
+import { completeTask, createTask, getTask, reanalyzeTask, updateTask } from "./tasks.service"
 import {
     canonicalKeyToLocalMidnight,
     getCanonicalToday,
@@ -357,5 +357,127 @@ describe("updateTask (A1 — Content vs Planning-only)", () => {
         await expect(updateTask(1, TIMEZONE, 999, { title: "عنوان جدید" })).rejects.toThrow(
             /پیدا نشد|Task not found/i,
         )
+    })
+})
+
+/* ------------------------------------------------------------------ */
+/* C2 — completeTask (§3.10-C / §5.4.1): DONE + spentMinutes +          */
+/* completedOn سمت سرور + رویداد COMPLETED + bump planVersion روزها.    */
+/* ------------------------------------------------------------------ */
+
+describe("completeTask (C2 — Time Tracking)", () => {
+    const today = getCanonicalToday(TIMEZONE)
+    const otherDay = shiftCanonicalKey(today, -1)
+    const baseTask = {
+        id: 5,
+        userId: 1,
+        title: "گزارش",
+        status: "TODO" as const,
+        dayKey: today,
+        scheduledDate: new Date(),
+        allocatedMinutes: 30 as number | null,
+        estimatedTime: 45 as number | null,
+    }
+
+    const mergedUpdate = async (args: unknown) => {
+        const { data } = args as { data: Record<string, unknown> }
+        return { ...baseTask, ...data }
+    }
+
+    beforeEach(() => {
+        vi.clearAllMocks()
+        prismaMock.task.findFirst.mockResolvedValue(baseTask)
+        prismaMock.task.update.mockImplementation(mergedUpdate)
+    })
+
+    it("sets DONE, persists spentMinutes, sets completedAt/completedOn server-side, records COMPLETED with spentMinutes payload", async () => {
+        const result = await completeTask(1, TIMEZONE, 5, { spentMinutes: 40 })
+
+        const updateArgs = prismaMock.task.update.mock.calls[0][0]
+        expect(updateArgs.data.status).toBe("DONE")
+        expect(updateArgs.data.spentMinutes).toBe(40)
+        expect(updateArgs.data.completedAt).toBeInstanceOf(Date)
+        // completedOn سمت سرور از timezone کاربر — هرگز از client
+        expect(updateArgs.data.completedOn).toBe(today)
+
+        expect(prismaMock.taskEvent.create).toHaveBeenCalledWith({
+            data: {
+                taskId: 5,
+                type: "COMPLETED",
+                payload: { spentMinutes: 40, savedMinutes: 0, overspentMinutes: 10 },
+            },
+        })
+
+        // تسک روی همان روز بوده → فقط همان روز bump می‌شود
+        expect(prismaMock.dailyPlan.updateMany).toHaveBeenCalledTimes(1)
+        expect(prismaMock.dailyPlan.updateMany).toHaveBeenCalledWith({
+            where: { userId: 1, dayKey: today },
+            data: { planVersion: { increment: 1 } },
+        })
+
+        expect(result.task.status).toBe("DONE")
+        expect(result.task.spentMinutes).toBe(40)
+        expect(result.result).toEqual({ savedMinutes: 0, overspentMinutes: 10 })
+    })
+
+    it("spends zero minutes without an allocation → spentMinutes=0, allocated baseline stored, no overspend", async () => {
+        prismaMock.task.findFirst.mockResolvedValue({ ...baseTask, allocatedMinutes: null, estimatedTime: null })
+
+        const result = await completeTask(1, TIMEZONE, 5, { spentMinutes: 0 })
+
+        const updateArgs = prismaMock.task.update.mock.calls[0][0]
+        expect(updateArgs.data.spentMinutes).toBe(0)
+        // §5.4.1: بدون تخصیص، پایه = مقدار واقعی ذخیره میشود
+        expect(updateArgs.data.allocatedMinutes).toBe(0)
+        expect(result.result).toEqual({ savedMinutes: 0, overspentMinutes: 0 })
+    })
+
+    it("completion on a past-day task moves it to the completion day (dayKey/scheduledDate/previousScheduledDate) and bumps both days", async () => {
+        prismaMock.task.findFirst.mockResolvedValue({ ...baseTask, dayKey: otherDay })
+
+        const result = await completeTask(1, TIMEZONE, 5, { spentMinutes: 25 })
+
+        const updateArgs = prismaMock.task.update.mock.calls[0][0]
+        expect(updateArgs.data.dayKey).toBe(today)
+        expect(updateArgs.data.completedOn).toBe(today)
+        expect(updateArgs.data.scheduledDate).toEqual(canonicalKeyToLocalMidnight(today, TIMEZONE))
+        expect(updateArgs.data.previousScheduledDate).toEqual(canonicalKeyToLocalMidnight(otherDay, TIMEZONE))
+
+        expect(prismaMock.dailyPlan.updateMany).toHaveBeenCalledTimes(2)
+        expect(prismaMock.dailyPlan.updateMany).toHaveBeenCalledWith({
+            where: { userId: 1, dayKey: today },
+            data: { planVersion: { increment: 1 } },
+        })
+        expect(prismaMock.dailyPlan.updateMany).toHaveBeenCalledWith({
+            where: { userId: 1, dayKey: otherDay },
+            data: { planVersion: { increment: 1 } },
+        })
+        expect(result.task.dayKey).toBe(today)
+    })
+
+    it("throws TaskNotFoundError (404) for a missing task or another user's task — ownership via userId filter", async () => {
+        prismaMock.task.findFirst.mockResolvedValue(null)
+
+        await expect(completeTask(1, TIMEZONE, 999, { spentMinutes: 40 })).rejects.toThrow(
+            /پیدا نشد|Task not found/i,
+        )
+        expect(prismaMock.task.update).not.toHaveBeenCalled()
+        expect(prismaMock.taskEvent.create).not.toHaveBeenCalled()
+    })
+
+    it("throws TaskAlreadyDoneError for an already-DONE task and writes nothing", async () => {
+        prismaMock.task.findFirst.mockResolvedValue({ ...baseTask, status: "DONE" as const })
+
+        await expect(completeTask(1, TIMEZONE, 5, { spentMinutes: 40 })).rejects.toThrow(/تمام شده/i)
+        expect(prismaMock.task.update).not.toHaveBeenCalled()
+        expect(prismaMock.taskEvent.create).not.toHaveBeenCalled()
+        expect(prismaMock.dailyPlan.updateMany).not.toHaveBeenCalled()
+    })
+
+    it("throws MissingDayKeyError for a task without dayKey (defensive) and writes nothing", async () => {
+        prismaMock.task.findFirst.mockResolvedValue({ ...baseTask, dayKey: null })
+
+        await expect(completeTask(1, TIMEZONE, 5, { spentMinutes: 40 })).rejects.toThrow()
+        expect(prismaMock.task.update).not.toHaveBeenCalled()
     })
 })

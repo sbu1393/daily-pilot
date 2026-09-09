@@ -132,12 +132,13 @@ export async function deleteTask(
     return { id: task.id, summary }
 }
 
-// ---------- اتمام تسک و Time Tracking ----------
+// ---------- اتمام تسک و Time Tracking (§3.10-C / §5.4.1) ----------
+// §5.4.1: spentMinutes = مدت واقعی صرف‌شده روی Task ذخیره می‌شود (پایهی مقایسهی planned vs actual).
 export async function completeTask(
     userId: number,
     timezone: string,
     taskId: number,
-    durationMinutes: number,
+    input: { spentMinutes: number },
 ): Promise<{
     task: Task
     result: { savedMinutes: number; overspentMinutes: number }
@@ -153,10 +154,12 @@ export async function completeTask(
 
     const targetDayKey = getCanonicalToday(timezone) // تسک همیشه روی «روز اتمامِ واقعی» بسته می‌شود
 
+    const { spentMinutes } = input
+
     // مقایسه با تخصیص → سیو شده یا بیش‌مصرفی
-    const allocated = task.allocatedMinutes ?? task.estimatedTime ?? durationMinutes
-    const savedMinutes = Math.max(0, allocated - durationMinutes)
-    const overspentMinutes = Math.max(0, durationMinutes - allocated)
+    const allocated = task.allocatedMinutes ?? task.estimatedTime ?? spentMinutes
+    const savedMinutes = Math.max(0, allocated - spentMinutes)
+    const overspentMinutes = Math.max(0, spentMinutes - allocated)
 
     const data: {
         status: "DONE"
@@ -169,7 +172,7 @@ export async function completeTask(
         previousScheduledDate?: Date
     } = {
         status: "DONE",
-        spentMinutes: durationMinutes,
+        spentMinutes,
         completedAt: new Date(),
         completedOn: targetDayKey,
     }
@@ -201,7 +204,7 @@ export async function completeTask(
             data: {
                 taskId: task.id,
                 type: "COMPLETED",
-                payload: { spentMinutes: durationMinutes, savedMinutes, overspentMinutes },
+                payload: { spentMinutes, savedMinutes, overspentMinutes },
             },
         }),
     ])

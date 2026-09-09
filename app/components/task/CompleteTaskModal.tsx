@@ -57,7 +57,7 @@ export default function CompleteTaskModal({ task, onClose, onCompleted }: Props)
                 {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ durationMinutes: value }),
+                    body: JSON.stringify({ spentMinutes: value }),
                 },
             )
             const saved = body.result?.savedMinutes ?? 0

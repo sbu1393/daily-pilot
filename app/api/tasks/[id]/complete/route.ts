@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
 import { completeTask } from "@/app/lib/services/tasks.service"
-import { completeTaskSchema } from "@/app/schema/plannerSchema"
+import { completeTaskSchema } from "@/app/schema/taskSchema"
 import {
     errorResponse,
     toServiceErrorResponse,
@@ -23,19 +23,16 @@ export async function PATCH(
             return errorResponse(400, "VALIDATION_ERROR", "شناسه نامعتبر است")
         }
 
-        const body = await req.json()
+        const body = (await req.json().catch(() => null)) as unknown
         const parsed = completeTaskSchema.safeParse(body)
         if (!parsed.success) {
             return validationErrorResponse(parsed.error.flatten())
         }
-        const { durationMinutes } = parsed.data
+        const { spentMinutes } = parsed.data
 
-        const { task, result, summaries } = await completeTask(
-            user.id,
-            user.timezone,
-            taskId,
-            durationMinutes,
-        )
+        const { task, result, summaries } = await completeTask(user.id, user.timezone, taskId, {
+            spentMinutes,
+        })
 
         // ADR-04: { ok, data: { task, result, summaries } }
         return NextResponse.json({ ok: true, data: { task, result, summaries } }, { status: 200 })

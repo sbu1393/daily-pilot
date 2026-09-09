@@ -5,8 +5,8 @@
 > Where implementation and architecture disagree, this roadmap records the item as
 > `ARCHITECTURE CONFLICT / DECISION REQUIRED` instead of resolving it silently.
 
-Last synced: G-02 closeout — CLOSED, no legacy data migration required (docs-only; last implementation commit `6691a89`).
-Earlier: Decision 6 (§9.3 `INTERNAL` alignment) and Decision 2 (ADR-06: change-password ratified) after `f6f4430` (Phase E2).
+Last synced: Decision Gate CLOSED (2026-09-09) — all seven decisions recorded; no required implementation decisions blocking V1 MVP.
+Implementation baseline: `6691a89` (Decision 6: §9.3 `INTERNAL` alignment) · G-02 closeout `4481bee` · DayKey plan-doc sync `7e86a10` · earlier: Decision 2 (ADR-06) after `f6f4430` (Phase E2).
 Evidence basis: direct repository inspection (§-references verified in `architecture.md`,
 commit hashes verified via `git log`).
 
@@ -135,10 +135,26 @@ None. No open item prevents correct V1 operation.
 | Item | Priority | Required decision | Why it cannot proceed |
 |---|---|---|---|
 | §9.3 doc-vs-code: `500 INTERNAL` vs `INTERNAL_ERROR` | Decision Gate | ~~`ARCHITECTURE CONFLICT / DECISION REQUIRED` — §9.3's locked table says the generic internal code is `INTERNAL`, but every route (and all tests) use `INTERNAL_ERROR` since A6. Resolve by doc-only correction **or** a mass route/error-code refactor (code-only change discouraged: client-facing code churn)~~ **RESOLVED — Decision 6, Option 1: implementation aligned with architecture** — generic 500 code `INTERNAL_ERROR` → `INTERNAL` at all 20 production sites (14 route files) + 3 test files; envelope shape, HTTP statuses, messages, and every other error code unchanged | History: surfaced during E1 pre-coding inspection; ruled OUTSIDE E1 scope; read-only investigation in Decision 6 (26 occurrences inventoried); user approved Option 1. Implementation commit `6691a89` (17 files, +26/−26). Gates: 234/234 tests, typecheck, lint, migrate status — clean. `architecture.md` untouched |
-| G-02 populated-data closeout | Decision Gate | ~~Declare the empty DB the intended production state (retire 4B-2) **or** commit to a populated-data migration run per the synced plan doc~~ **RESOLVED — G-02 CLOSED: No Legacy Data Migration Required** | History: E2 run 3 produced the first non-vacuous populated-data evidence (0 blockers, 0 collisions; 1 user / 3 tasks / 2 DailyPlans; 0 invalid/Jalali-looking stored keys; analyzer exit 0). Decision: **no historical data migration was required** — the populated DB environment contained no legacy records needing rewrite; none was manufactured. Closing rationale is absence of legacy data, NOT an executed migration. `docs/daykey-canonical-migration-plan.md` intentionally left untouched (outside closeout scope): its historical preparation status (`CODE CUTOVER COMPLETE — DATA REWRITE NOT EXECUTED` / `closeout NOT CLAIMED`) is now factually stale and awaits its own doc-sync if desired |
+| G-02 populated-data closeout | Decision Gate | ~~Declare the empty DB the intended production state (retire 4B-2) **or** commit to a populated-data migration run per the synced plan doc~~ **RESOLVED — G-02 CLOSED: No Legacy Data Migration Required** | History: E2 run 3 produced the first non-vacuous populated-data evidence (0 blockers, 0 collisions; 1 user / 3 tasks / 2 DailyPlans; 0 invalid/Jalali-looking stored keys; analyzer exit 0). Decision: **no historical data migration was required** — the populated DB environment contained no legacy records needing rewrite; none was manufactured. Closing rationale is absence of legacy data, NOT an executed migration. References: closeout commit `4481bee` (roadmap); plan-doc sync `7e86a10` (`docs/daykey-canonical-migration-plan.md` now carries the same closeout with history preserved) |
 | §8.12.1 change-password ADR | Decision Gate | ~~Ratify the documented deviation (stateless JWT; no session invalidation on password change) or schedule revocation design~~ **RESOLVED — Decision 2 (2026-09-09): ratification chosen** | ADR-06 created (`ADR-06-change-password.md`): deviation ratified; session invalidation/revocation explicitly excluded and requires a separate ADR. Gap G-§8.12.1 `CLOSED`. Doc-vs-code conflict in the other row (§9.3 `INTERNAL`) since RESOLVED by Decision 6 (implementation aligned) |
-| `droppedTaskIds` API field | Decision Gate | Approve extending the API contract for §5.6.3 rollover candidates | Contract change; logged in C5 |
-| §7.14 quota / entitlement | Decision Gate | Decide whether AI quota gating enters V1 | §7.14 defers it; entry requires a new ADR |
+| `droppedTaskIds` API field | Decision Gate | ~~Approve extending the API contract for §5.6.3 rollover candidates~~ **RESOLVED — DEFERRED: NOT PART OF V1 API** | History: contract change flagged during C5 (rollover candidates are derivable from task allocation state). Final decision (2026-09-09): do NOT add `droppedTaskIds` to the V1 API contract; no new API field for this gate; revisit only if a future product/API requirement makes it necessary. No implementation change |
+| §7.14 quota / entitlement | Decision Gate | ~~Decide whether AI quota gating enters V1~~ **RESOLVED — DEFERRED: POST-V1** | History: §7.14 LOCKED; §13.1 "PRO … Entitlement/Quota فقط با نیاز واقعی"; entry would require a new ADR. Final decision (2026-09-09): no quota entity, no quota counters, no payment/billing integration, no entitlement enforcement, no new database model, no V1 implementation. Explicitly Post-V1 |
+
+### Decision Gate — Closure (2026-09-09)
+
+**DECISION GATE: CLOSED** — there are no remaining required implementation decisions blocking V1 MVP completion. The remaining deferred items are intentionally outside V1 scope.
+
+Final status of every gate item (history preserved above; nothing rewritten as if always decided):
+
+| # | Item | Final status | Evidence / reference |
+|---|---|---|---|
+| 1 | Registration auto-login | `CLOSED — RATIFIED / ARCHITECTURE-CONFORMANT` | Implementation consistent with §8.2 auto-login requirement (gap G-§8.13); no implementation change |
+| 2 | Change password | `CLOSED — RATIFIED via ADR-06` | `ADR-06-change-password.md`; stateless JWT kept; no invalidation of issued JWTs; revocation needs a separate future ADR; no implementation change |
+| 3 | G-02 Canonical DayKey Migration | `CLOSED — No Legacy Data Migration Required` | Code cutover complete; populated smoke verification complete (1 user / 3 tasks / 2 DailyPlans — 0 blockers, 0 collisions, 0 invalid/Jalali-looking keys, `analyze:daykey` exit 0); **G-02 is closed because no legacy data requiring migration was present, not because a historical migration was executed**; no rewrite was executed. Refs: `4481bee` (closeout), `7e86a10` (plan-doc sync) |
+| 4 | `droppedTaskIds` | `DEFERRED — NOT PART OF V1 API` | Derivable from allocation state; no API field added; revisit only on future product/API need |
+| 5 | Quota / entitlement (§7.14) | `DEFERRED — POST-V1` | No quota entity/counters/billing/entitlement enforcement/new DB model in V1 |
+| 6 | Hosting | `DEFERRED` | `freebuff-deploy check` establishes deployability (`deployable=true`), not a hosting-provider decision; no provider selected or implemented |
+| 7 | Generic 500 error code conflict | `CLOSED — RESOLVED via Decision 6, Option 1` | Architecture requires `INTERNAL`; implementation aligned (`INTERNAL_ERROR` → `INTERNAL`, 20 sites + tests); ref `6691a89`; conflict history preserved above |
 
 ### Post-V1 / Deferred
 
@@ -147,6 +163,11 @@ analytics, PRO/Payment, external calendars, analytics dashboard, timezone change
 planning, TimeEntry, General Offline Sync, push notifications, native apps,
 moment-jalaali→Intl, Next.js upgrade, i18n-by-code, refresh tokens, object-storage avatars,
 centralized logging/monitoring, distributed rate limiting.
+
+Deferred by Decision Gate closure (2026-09-09): `droppedTaskIds` API field (revisit on future
+product/API need), §7.14 quota/entitlement (Post-V1), final hosting-provider selection.
+Release-readiness phases E3 (component/integration tests) and E4 (observability) remain `OPEN`
+as planned P2 work — intentionally outside the Decision Gate.
 
 ---
 

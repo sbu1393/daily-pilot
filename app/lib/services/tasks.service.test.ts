@@ -49,7 +49,16 @@ vi.mock("@/app/lib/planner/rebalance", () => ({
     ensureDayRebalanced: ensureDayRebalancedMock,
 }))
 
-import { completeTask, createTask, getDayTasks, getTask, reanalyzeTask, updateTask } from "./tasks.service"
+import {
+    completeTask,
+    createTask,
+    getDayTasks,
+    getOverdueTasks,
+    getTask,
+    reanalyzeTask,
+    rolloverTasks,
+    updateTask,
+} from "./tasks.service"
 import {
     canonicalKeyToLocalMidnight,
     getCanonicalToday,
@@ -540,6 +549,179 @@ describe("C4 — ADR-03 lazy wiring (read vs mutation)", () => {
 
         await reanalyzeTask(1, TIMEZONE, 1)
 
+        expect(ensureDayRebalancedMock).not.toHaveBeenCalled()
+    })
+})
+
+describe("C5 — rolloverTasks (§5.6.3 / §6.3.2 / §6.3.5)", () => {
+    const today = getCanonicalToday(TIMEZONE)
+    const yesterday = shiftCanonicalKey(today, -1)
+    const tomorrow = shiftCanonicalKey(today, 1)
+
+    beforeEach(() => {
+        vi.clearAllMocks()
+        prismaMock.task.findMany.mockResolvedValue([])
+    })
+
+    it("moves an overdue task to today and a today-task to tomorrow; resets allocatedMinutes and preserves AI fields (§6.3.5)", async () => {
+        prismaMock.task.findMany.mockResolvedValue([
+            {
+                id: 1,
+                userId: 1,
+                status: "TODO",
+                dayKey: yesterday,
+                scheduledDate: new Date("2026-03-04T00:00:00Z"),
+                allocatedMinutes: 30,
+                score: 80,
+                priority: "HIGH",
+            },
+            {
+                id: 2,
+                userId: 1,
+                status: "TODO",
+                dayKey: today,
+                scheduledDate: new Date("2026-03-05T00:00:00Z"),
+                allocatedMinutes: 20,
+                score: 60,
+                priority: "MEDIUM",
+            },
+        ])
+        prismaMock.task.update.mockResolvedValue({})
+
+        const { moved } = await rolloverTasks(1, TIMEZONE, [1, 2])
+
+        expect(moved).toEqual([
+            { id: 1, from: yesterday, to: today },
+            { id: 2, from: today, to: tomorrow },
+        ])
+        // تسک عقب‌افتاده → امروز؛ تسک امروز → فردا؛ تخصیص صفر می‌شود (بازتوزیع با rebalance روز مقصد)
+        expect(prismaMock.task.update).toHaveBeenCalledWith({
+            where: { id: 1 },
+            data: expect.objectContaining({ dayKey: today, allocatedMinutes: null }),
+        })
+        expect(prismaMock.task.update).toHaveBeenCalledWith({
+            where: { id: 2 },
+            data: expect.objectContaining({ dayKey: tomorrow, allocatedMinutes: null }),
+        })
+        // §6.3.5: Planning-only → AI fields هرگز دست نمی‌خورند
+        const firstCall = prismaMock.task.update.mock.calls[0][0]
+        expect(firstCall.data).not.toHaveProperty("score")
+        expect(firstCall.data).not.toHaveProperty("priority")
+        expect(firstCall.data).not.toHaveProperty("estimatedTime")
+        expect(firstCall.data).not.toHaveProperty("reason")
+    })
+
+    it("records a ROLLED_OVER event per task with from/to payload in the same transaction (§5.6.3)", async () => {
+        prismaMock.task.findMany.mockResolvedValue([
+            {
+                id: 1,
+                userId: 1,
+                status: "TODO",
+                dayKey: yesterday,
+                scheduledDate: new Date("2026-03-04T00:00:00Z"),
+            },
+        ])
+        prismaMock.task.update.mockResolvedValue({})
+
+        await rolloverTasks(1, TIMEZONE, [1])
+
+        expect(prismaMock.taskEvent.create).toHaveBeenCalledWith({
+            data: { taskId: 1, type: "ROLLED_OVER", payload: { fromDayKey: yesterday, toDayKey: today } },
+        })
+        // همه‌ی عملیات در یک transaction انجام می‌شود
+        expect(prismaMock.$transaction).toHaveBeenCalledTimes(1)
+    })
+
+    it("bumps planVersion for every affected day — source and destination (§6.3.2 multi-day)", async () => {
+        prismaMock.task.findMany.mockResolvedValue([
+            {
+                id: 1,
+                userId: 1,
+                status: "TODO",
+                dayKey: yesterday,
+                scheduledDate: new Date("2026-03-04T00:00:00Z"),
+            },
+        ])
+        prismaMock.task.update.mockResolvedValue({})
+
+        await rolloverTasks(1, TIMEZONE, [1])
+
+        const bumpedDays = prismaMock.dailyPlan.updateMany.mock.calls.map(
+            (c) => (c[0] as { where: { dayKey: string } }).where.dayKey,
+        )
+        expect(bumpedDays).toEqual(expect.arrayContaining([yesterday, today]))
+        for (const call of prismaMock.dailyPlan.updateMany.mock.calls) {
+            expect(call[0].data).toEqual({ planVersion: { increment: 1 } })
+        }
+    })
+
+    it("filters candidates by userId and excludes DONE tasks (ownership + history preservation)", async () => {
+        prismaMock.task.findMany.mockClear()
+        prismaMock.task.findMany.mockResolvedValue([
+            { id: 1, userId: 1, status: "TODO", dayKey: today, scheduledDate: new Date("2026-03-05T00:00:00Z") },
+        ])
+        prismaMock.task.update.mockResolvedValue({})
+
+        await rolloverTasks(1, TIMEZONE, [1, 2, 3])
+
+        expect(prismaMock.task.findMany).toHaveBeenCalledWith({
+            where: { id: { in: [1, 2, 3] }, userId: 1, status: { not: "DONE" } },
+        })
+    })
+
+    it("throws NoRolloverCandidatesError and writes nothing when no schedulable task remains (incl. null dayKey)", async () => {
+        prismaMock.task.findMany.mockResolvedValue([
+            { id: 1, userId: 1, status: "TODO", dayKey: null }, // غیرقابل زمان‌بندی
+        ])
+
+        await expect(rolloverTasks(1, TIMEZONE, [1])).rejects.toThrow(/انتقال پیدا نشد|NO_ROLLOVER/i)
+        expect(prismaMock.task.update).not.toHaveBeenCalled()
+        expect(prismaMock.taskEvent.create).not.toHaveBeenCalled()
+        expect(prismaMock.dailyPlan.updateMany).not.toHaveBeenCalled()
+    })
+
+    it("never triggers the rebalance engine (ADR-03 — destination day is rebalanced lazily on read)", async () => {
+        prismaMock.task.findMany.mockResolvedValue([
+            {
+                id: 1,
+                userId: 1,
+                status: "TODO",
+                dayKey: yesterday,
+                scheduledDate: new Date("2026-03-04T00:00:00Z"),
+            },
+        ])
+        prismaMock.task.update.mockResolvedValue({})
+
+        await rolloverTasks(1, TIMEZONE, [1])
+
+        expect(ensureDayRebalancedMock).not.toHaveBeenCalled()
+    })
+})
+
+describe("C5 — getOverdueTasks (§2.9 definition: open tasks with dayKey < today)", () => {
+    const today = getCanonicalToday(TIMEZONE)
+
+    beforeEach(() => {
+        vi.clearAllMocks()
+        prismaMock.task.findMany.mockResolvedValue([])
+    })
+
+    it("queries open tasks scheduled before the user's local today, newest first, scoped to the user", async () => {
+        await getOverdueTasks(1, TIMEZONE)
+
+        expect(prismaMock.task.findMany).toHaveBeenCalledWith({
+            where: { userId: 1, status: { not: "DONE" }, dayKey: { lt: today } },
+            orderBy: { dayKey: "desc" },
+        })
+    })
+
+    it("returns the service result unchanged (thin pass-through, no rebalance side effects)", async () => {
+        const rows = [{ id: 1 }, { id: 2 }]
+        prismaMock.task.findMany.mockResolvedValue(rows)
+
+        const out = await getOverdueTasks(1, TIMEZONE)
+
+        expect(out).toBe(rows)
         expect(ensureDayRebalancedMock).not.toHaveBeenCalled()
     })
 })

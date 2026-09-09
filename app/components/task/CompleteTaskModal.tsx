@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { fmtMinutes } from "@/app/lib/time"
+import { fmtMinutes, parseSpentMinutes } from "@/app/lib/time"
 import { toast } from "react-toastify"
 import { useSettings } from "@/app/contexts/SettingsContext"
 import { api } from "@/app/lib/api/client"
@@ -43,12 +43,20 @@ export default function CompleteTaskModal({ task, onClose, onCompleted }: Props)
 
     const reference = task.allocatedMinutes ?? task.estimatedTime
 
+    // ±۵ دقیقه دور مقدار فعلی؛ کف ۱ دقیقه (همان مرز SPENT_MINUTES_MIN)
+    const stepMinutes = (delta: number) => {
+        const current = Number(minutes)
+        const base = Number.isFinite(current) && current > 0 ? current : 0
+        setMinutes(String(Math.max(1, Math.min(600, base + delta))))
+    }
+
     const submit = async () => {
-        const value = Number(minutes)
-        if (!Number.isFinite(value) || value < 1 || value > 600) {
-            toast.error("مدت باید بین ۱ تا ۶۰۰ دقیقه باشد")
+        const parsed = parseSpentMinutes(minutes) // §5.4.1: Validate duration — ورودی نامعتبر هرگز به API نمی‌رسد
+        if (!parsed.ok) {
+            toast.error(parsed.error)
             return
         }
+        const value = parsed.value
         setLoading(true)
         try {
             // ADR-04: پاسخ { ok, data: { task, result, summaries } } → data.result
@@ -85,18 +93,39 @@ export default function CompleteTaskModal({ task, onClose, onCompleted }: Props)
                             <p className={styles.hint}>سهم این کار {fmtMinutes(reference)} است. چند دقیقه طول کشید؟</p>
                         )}
                         <div className={styles.minutesRow}>
-                            <input
-                                autoFocus
-                                className={styles.input}
-                                type="number"
-                                min={1}
-                                max={600}
-                                value={minutes}
-                                onChange={(e) => setMinutes(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter" && !loading) submit()
-                                }}
-                            />
+                            <div className={styles.stepper}>
+                                <button
+                                    type="button"
+                                    className={styles.stepBtn}
+                                    onClick={() => stepMinutes(-5)}
+                                    aria-label="کاهش ۵ دقیقه‌ای"
+                                    disabled={loading}
+                                >
+                                    −۵
+                                </button>
+                                <input
+                                    autoFocus
+                                    className={styles.input}
+                                    type="number"
+                                    min={1}
+                                    max={600}
+                                    step={5}
+                                    value={minutes}
+                                    onChange={(e) => setMinutes(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter" && !loading) submit()
+                                    }}
+                                />
+                                <button
+                                    type="button"
+                                    className={styles.stepBtn}
+                                    onClick={() => stepMinutes(5)}
+                                    aria-label="افزایش ۵ دقیقه‌ای"
+                                    disabled={loading}
+                                >
+                                    +۵
+                                </button>
+                            </div>
                             <span className={styles.unit}>دقیقه</span>
                         </div>
                         <div className={styles.modalActions}>

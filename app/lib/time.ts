@@ -12,6 +12,38 @@ export function fmtMinutes(minutes: number): string {
     return r === 0 ? `${faDigits(h)} ساعت` : `${faDigits(h)} ساعت و ${faDigits(r)} دقیقه`
 }
 
+// ---------- C6 — Time Tracking input parsing (§5.4.1 «Validate duration») ----------
+// مرز اعتبارسنجی سمت سرور: completeTaskSchema → عدد صحیح ۰ تا ۶۰۰ دقیقه.
+// این تابع همان قرارداد را سمت client اعمال می‌کند تا ورودی نامعتبر هرگز به API نرسد.
+export const SPENT_MINUTES_MIN = 1
+export const SPENT_MINUTES_MAX = 600
+
+export type SpentMinutesParse =
+    | { ok: true; value: number }
+    | { ok: false; error: string }
+
+/**
+ * پارس و اعتبارسنجی «مدت واقعی» ورودی کاربر (§5.4.1: Validate duration).
+ * ورودی متنی از فیلد عددی → عدد صحیح ۱ تا ۶۰۰؛ در غیر این صورت پیام خطای فارسی.
+ */
+export function parseSpentMinutes(raw: string): SpentMinutesParse {
+    const trimmed = raw.trim()
+    if (trimmed === "") {
+        return { ok: false, error: "مدت را وارد کنید" }
+    }
+    const value = Number(trimmed)
+    if (!Number.isFinite(value) || !Number.isInteger(value)) {
+        return { ok: false, error: "مدت باید عدد صحیح باشد" }
+    }
+    if (value < SPENT_MINUTES_MIN) {
+        return { ok: false, error: `مدت باید حداقل ${SPENT_MINUTES_MIN} دقیقه باشد` }
+    }
+    if (value > SPENT_MINUTES_MAX) {
+        return { ok: false, error: `مدت نمی‌تواند بیشتر از ${SPENT_MINUTES_MAX} دقیقه باشد` }
+    }
+    return { ok: true, value }
+}
+
 /**
  * زمان نسبی فارسی: «چند لحظه پیش»، «۵ دقیقه پیش»، «۳ ساعت پیش»،
  * «۲ روز پیش»، «۱ هفته پیش»، «۴ ماه پیش» و «۲ سال پیش»

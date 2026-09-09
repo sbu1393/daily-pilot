@@ -5,6 +5,7 @@ import { toast } from "react-toastify"
 import { api } from "@/app/lib/api/client"
 import { TaskItem, priorityMeta, priorityMissingMeta, categoryInfo } from "./taskTypes"
 import { faDigits, fmtMinutes } from "@/app/lib/time"
+import { aiSourceNotice } from "@/app/lib/ai/aiSource" // C7 — §7.13: تشخیص‌پذیری mock در UI
 import AnimatedModal from "../motion/AnimatedModal"
 import styles from "./task.module.css"
 
@@ -29,6 +30,8 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
     const [text, setText] = useState(task?.title ?? "")
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    // §9.6 Retry: شناسه تسکِ آخرین تلاش ناموفق — پس از هر تلاش موفق پاک می‌شود
+    const [lastFailedId, setLastFailedId] = useState<number | null>(null)
     // اسنپشاتِ وضعیت قبل — چون والد تا بسته شدن مودال، آبجکت قدیمی رو نگه می‌داره
     const [result, setResult] = useState<{ old: TaskItem; next: TaskItem; source: string } | null>(null)
 
@@ -50,6 +53,7 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
         if (!task || busy) return
         setBusy(true)
         setError(null)
+        setLastFailedId(null)
         try {
             // اگه متن عوض نشده، بدنه خالی بفرست (سرور خودش از task.title استفاده می‌کنه)
             const payload = changed ? { text: trimmed } : {}
@@ -69,7 +73,10 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
             setResult({ old: { ...task }, next, source: body.aiSource ?? "" })
             onDone() // رفرش لیست و نوار آمار (بازتوزیع بودجه)
         } catch (e) {
-            setError(e instanceof Error ? e.message : "خطا در تحلیل مجدد")
+            const message = e instanceof Error ? e.message : "خطا در تحلیل مجدد"
+            setError(message) // §9.6: عملیات مهم → Inline Error State، نه فقط Toast
+            toast.error(message) // §9.6: Toast فقط برای Feedback غیرمسدودکننده
+            setLastFailedId(task.id) // §9.6 Retry: دستی، با احتیاط — بدون duplicate mutation مخرب
         } finally {
             setBusy(false)
         }
@@ -131,6 +138,17 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
                                 انصراف
                             </button>
                         </div>
+
+                        {lastFailedId != null && (
+                            <button
+                                type="button"
+                                className={styles.btnGhost}
+                                onClick={run} // تحلیل idempotent است (Read-only AI + stale bump) → Retry تکرار مutation مخرب ایجاد نمی‌کند
+                                disabled={busy}
+                            >
+                                🔄 تلاش دوباره
+                            </button>
+                        )}
                     </>
                 ) : (
                     <>
@@ -144,9 +162,9 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
                                 <p className={styles.hint} style={{ margin: 0 }}>
                                     تحلیل تغییری نکرد — کارها سر جاشون موندن.
                                 </p>
-                                {result.source === "mock" && (
+                                {aiSourceNotice(result.source) && (
                                     <p className={styles.muted} style={{ margin: 0 }}>
-                                        ⚠️ کلید API موجود نیست؛ نتیجه از تحلیل پیش‌فرض است.
+                                        {aiSourceNotice(result.source)}
                                     </p>
                                 )}
                             </div>
@@ -195,8 +213,8 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
                             </p>
                         )}
 
-                        {result.source === "1xai" && !unchanged && (
-                            <p className={styles.muted}>منبع: تحلیل هوش مصنوعی</p>
+                        {!unchanged && aiSourceNotice(result.source) && (
+                            <p className={styles.muted}>{aiSourceNotice(result.source)}</p>
                         )}
 
                         <div className={styles.modalActions}>

@@ -5,8 +5,9 @@
 > Where implementation and architecture disagree, this roadmap records the item as
 > `ARCHITECTURE CONFLICT / DECISION REQUIRED` instead of resolving it silently.
 
-Last synced: after commit `3c83122` (Phase D1.1). Evidence basis: direct repository inspection
-(§-references verified in `architecture.md`, commit hashes verified via `git log`).
+Last synced: after commit `940f8ac` (Phase E1), including E2 run 3 (secret live, lifecycle executed).
+Evidence basis: direct repository inspection (§-references verified in `architecture.md`,
+commit hashes verified via `git log`).
 
 ---
 
@@ -17,9 +18,9 @@ Last synced: after commit `3c83122` (Phase D1.1). Evidence basis: direct reposit
 | **Overall V1 status** | `PARTIALLY COMPLETE` | Core domains complete and architecture-conformant; release-readiness items open (P1/P2 below) |
 | **Core V1 implementation** | `COMPLETE` | Tasks, Daily Planning/Rebalance, AI analysis, Time Tracking, Auth, Rollover, Offline Queue (limited), PWA — all implemented and regression-tested |
 | **Architecture alignment** | `COMPLETE` | All §6.4 / §7.12 / §9.10 / §11.4 registered gaps closed; 226 tests green across 24 files; typecheck + lint clean |
-| **Release readiness** | `OPEN` | Real-data verification and deployment configuration not yet exercised end-to-end |
-| **G-02 DayKey** | `PARTIALLY COMPLETE` | Code cutover COMPLETE · data rewrite NOT EXECUTED · current-DB evidence EMPTY/VACUOUS · populated-data evidence NOT AVAILABLE · formal closeout NOT CLAIMED |
-| **Test/typecheck/lint** | `COMPLETE` | 24 files / 226 tests green · `tsc --noEmit` 0 errors · ESLint clean · `prisma migrate status`: schema up to date |
+| **Release readiness** | `COMPLETE` (E2 run 3) | Full authenticated lifecycle verified over real HTTP with live `JWT_SECRET`: register+auto-session, login, task create (server-derived dayKey = Tehran-midnight instant), day budget, mock-AI analyze (attribution `aiSource=mock`), explicit-category preservation, complete+spentMinutes=90 (status DONE, completedOn=today), day summary (spent=90), stale detection (v2 > rv=1), lazy rebalance proven via read-only rv advance (2→3), overdue list, rollover (past→today), history markers, logout cookie-clear, negatives (400/404/401, ADR-04 codes incl. domain `TASK_NOT_FOUND`). Analyzer on populated data: 1 user / 3 tasks / 2 plans — 0 blockers, 0 collisions, 0 invalid keys; 2 expected pre-cutover `dayKey-scheduledDate-drift` warnings (canonical keys re-read as Jalali → year 2647), which itself evidences canonical storage. Smoke data cleaned guarded; DB back to exact baseline zeros. Deploy check `deployable=true`, 0 problems. Gates: 234/234 tests, typecheck, lint, migrate status — all clean; `architecture.md` untouched. Run-1 landing-500 was diagnosed as the missing-secret throw (not SSR); its one-line `"use client"` in DashboardPreview was proven redundant (framer-motion ships its own boundary) and excluded from E2 commit |
+| **G-02 DayKey** | `PARTIALLY COMPLETE` | Code cutover COMPLETE · data rewrite NOT EXECUTED · current-DB evidence EMPTY/VACUOUS · populated-data evidence AVAILABLE (E2 run 3: analyzer on 1 user / 3 tasks / 2 plans — 0 blockers, 0 collisions, 0 invalid keys; canonical keys flagged only by pre-cutover drift warnings, exit 0) · formal closeout NOT CLAIMED (Decision Gate pending) |
+| **Test/typecheck/lint** | `COMPLETE` | 25 files / 234 tests green · `tsc --noEmit` 0 errors · ESLint clean · `prisma migrate status`: schema up to date |
 
 ---
 
@@ -72,6 +73,7 @@ Invariants every future phase must preserve:
 | C8 | ADR-04 envelope conformance sweep | `COMPLETE` | `4ad22ec` | Last raw route fixed + missing error mapping closed |
 | D1 | DayKey migration dry-run (read-only) | `COMPLETE` | — (read-only) | 0 blockers, 0 collisions; evidence vacuous (empty DB) |
 | D1.1 | Migration plan doc sync (docs only) | `COMPLETE` | `3c83122` | Stale preconditions annotated; closeout not claimed |
+| E2 | V1 end-to-end production readiness pass | `COMPLETE` | — (this phase: evidence run, commit records roadmap) | Run 3 (secret live): 35-check lifecycle + 4-check rebalance evidence over real HTTP — register 201 + auto-session, login 200, create 201 (dayKey server-derived `2026-09-09`, scheduledDate = Tehran midnight `2026-09-08T20:30:00Z`), budget 200 (planVersion 1), analyze 200 `aiSource=mock`, category `Work` preserved across re-analyze, complete 200 DONE spent=90 completedOn=today, summary spent=90 done=1, stale v2>rv1, lazy rebalance proven by read-only rv advance 2→3, overdue lists past task, rollover past→today, history markers `{dayKey, doneCount, savedMinutes, overspentMinutes}`, logout clears cookie (Max-Age=0), negatives: 400 `VALIDATION_ERROR` ×2, 404 domain `TASK_NOT_FOUND` (per §9.3/9.4 code table; generic `NOT_FOUND` is the P2025 mapper code), 401 `UNAUTHORIZED` ×2. Analyzer populated: 1/3/2 rows, 0 blockers/collisions/invalid; 2 expected pre-cutover drift warnings; exit 0. Cleanup guarded exact-match: BEFORE 1/3/8/2 → AFTER 0/0/0/0. Deploy check `deployable=true` 0 problems. Gates: 234/234 tests (25 files), typecheck/lint clean, migrations up-to-date, `architecture.md` diff empty. Temp smoke scripts deleted pre-commit. Run-1 `"use client"` in DashboardPreview proven redundant (framer-motion ships own client boundary) → excluded from commit |
 
 Pre-session baseline: `b41be92` (auth hardening B2+P2) and earlier repo history.
 
@@ -97,7 +99,7 @@ Statuses: `CLOSED` / `PARTIALLY CLOSED` / `OPEN` / `DEFERRED` / `NEEDS PRODUCT D
 | G-§9.10-6 | Offline-UI honesty | `CLOSED` | Queue is Create-only; syncs `{title, scheduledDate}`; canonical v2 cache | No | — | — |
 | G-§9.10-7 | Client retry / duplicate mutation | `CLOSED` | C7: manual retry, idempotent-analyze only | No | — | — |
 | G-§11.4 | Test/typecheck tooling | `CLOSED` | vitest + scripts exist and run | No | — | — |
-| G-G-02 | DayKey data migration | `PARTIALLY CLOSED` | Code cutover verified; DB empty → evidence vacuous | No | Populated data | See Decision Gate |
+| G-G-02 | DayKey data migration | `PARTIALLY CLOSED` | Code cutover verified; populated-data evidence now AVAILABLE (E2 run 3 analyzer: 1 user / 3 tasks / 2 plans — 0 blockers, 0 collisions, 0 invalid keys; smoke data cleaned after evidence) | No | — | See Decision Gate |
 | G-§8.12.1 | Change-password ratification | `NEEDS ADR` | Feature live & hardened; deviation documented (§8.12.1) | No | — | Ratify or retire |
 | G-§8.13 | **Registration auto-login** | `CLOSED` / architecture-conformant | §8.2 "Auto Login — بعد از Registration موفق، کاربر در همان Flow به‌صورت خودکار Login می‌شود" (arch:4149); §8.14 contract list (arch:4603). Code: register → `createSession` cookie → client redirect to `/dashboard` | No | — | None — conformant |
 | G-§8.13 (rest) | Session helper / defaults / hash-exposure / no-middleware | `CLOSED` | `createSession.ts`; schema defaults `plan/timezone/locale/calendar`; `getCurrentUser` select omits `password`; no middleware file | No | — | — |
@@ -118,7 +120,7 @@ None. No open item prevents correct V1 operation.
 | Phase | Title | Priority | Objective | Scope | Non-goals | Dependencies | Expected verification | Architecture refs | Status |
 |---|---|---|---|---|---|---|---|---|---|
 | **E1** | **Prisma Infrastructure Error Mapping** | P1 | Close the last OPEN §9.10 gap: known Prisma errors mapped to ADR-04 envelopes at the infrastructure/error boundary, without coupling Domain logic to Prisma codes (§9.11) | Centralized mapper for `P2002` → 409 `CONFLICT`, `P2025` → 404 `NOT_FOUND` (Persian messages) inside the existing ServiceError/response channel; wire at service call sites where unique-constraint races are realistic (e.g. auth register); unit tests per code | No new endpoints; no schema changes; no Domain-layer Prisma coupling; no UI changes; no new deps | None | Mapper unit tests; full suite green; typecheck + lint; no migration | §9.10, §9.11, ADR-04 | `COMPLETE` — 8 tests (mapper ×4, registerUser race ×4); 25 files / 234 tests green; typecheck/lint clean; no schema/migration |
-| E2 | V1 end-to-end production readiness pass | P1 | Exercise every core flow on a populated database and verify deployment configuration | Real-data smoke of register → create → budget → analyze → complete → rollover → history; `freebuff-deploy check`; fix what surfaces | No new features; no architecture changes | Populated DB / real usage | Analyzer + full suite on populated data; deploy check clean | §12, §13 | `OPEN` |
+| E2 | V1 end-to-end production readiness pass | P1 | Exercise every core flow on a populated database and verify deployment configuration | Real-data smoke of register → create → budget → analyze → complete → rollover → history; `freebuff-deploy check`; fix what surfaces | No new features; no architecture changes | Populated DB / real usage | Analyzer + full suite on populated data; deploy check clean | §12, §13 | `COMPLETE` (run 3) — all lifecycle checks PASS over live HTTP; populated analyzer evidence recorded (G-02 evidence only, closeout stays at Decision Gate); deploy check clean; all gates green; smoke data cleaned to exact baseline; roadmap-only commit |
 
 ### P2 — Release Readiness / Hardening
 
@@ -132,7 +134,7 @@ None. No open item prevents correct V1 operation.
 | Item | Priority | Required decision | Why it cannot proceed |
 |---|---|---|---|
 | §9.3 doc-vs-code: `500 INTERNAL` vs `INTERNAL_ERROR` | Decision Gate | `ARCHITECTURE CONFLICT / DECISION REQUIRED` — §9.3's locked table says the generic internal code is `INTERNAL`, but every route (and all tests) use `INTERNAL_ERROR` since A6. Resolve by doc-only correction **or** a mass route/error-code refactor (code-only change discouraged: client-facing code churn) | Pre-existing conflict surfaced during E1 pre-coding inspection; explicitly ruled OUTSIDE E1 scope and left untouched in both doc and code |
-| G-02 populated-data closeout | Decision Gate | Declare the empty DB the intended production state (retire 4B-2) **or** commit to a populated-data migration run per the synced plan doc | Evidence is vacuous; the plan doc explicitly forbids claiming closeout from an empty DB |
+| G-02 populated-data closeout | Decision Gate | Declare the empty DB the intended production state (retire 4B-2) **or** commit to a populated-data migration run per the synced plan doc | E2 run 3 produced the first non-vacuous populated-data evidence (0 blockers, 0 collisions); the closeout decision itself remains open and is NOT claimed by E2 |
 | §8.12.1 change-password ADR | Decision Gate | Ratify the documented deviation (stateless JWT; no session invalidation on password change) or schedule revocation design | §8.12.1 is explicitly a Pending ADR, not a ratified decision |
 | `droppedTaskIds` API field | Decision Gate | Approve extending the API contract for §5.6.3 rollover candidates | Contract change; logged in C5 |
 | §7.14 quota / entitlement | Decision Gate | Decide whether AI quota gating enters V1 | §7.14 defers it; entry requires a new ADR |

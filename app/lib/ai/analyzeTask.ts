@@ -12,7 +12,7 @@ export interface AiResult {
 }
 
 const BASE_URL = process.env.AIXAI_BASE_URL ?? "https://1xai.ir/v1"
-const MODEL = process.env.AIXAI_MODEL ?? "deepseek-chat"
+const MODEL = process.env.AIXAI_MODEL ?? "gpt-4o-mini"
 
 // حداکثر تلاش: پیش‌فرض ۳ (اول + ۲ تلاش مجدد)
 const MAX_ATTEMPTS = Math.max(1, Number(process.env.AI_MAX_ATTEMPTS ?? 3))

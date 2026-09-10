@@ -22,8 +22,12 @@
 }
 
 #dp-splash img {
+    /* همان قاب ۴٫۴:۱ لوگو — پس‌زمینهی خالی PNG را حذف میکند تا متن روزچین درشت بماند */
     height: 110px;
-    width: auto;
+    aspect-ratio: 4.4 / 1;
+    max-width: calc(100vw - 48px);
+    object-fit: cover;
+    object-position: 50% 47%;
     padding: 12px 30px;
     background: var(--primary-soft, #eef2ff);
     border-radius: 999px;

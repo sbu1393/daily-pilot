@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Home } from "lucide-react"
 import Logo from "./Logo"
 import Avatar, { type AvatarUser } from "./Avatar"
 
@@ -47,15 +46,6 @@ export default function Header({ user }: { user: AvatarUser | null }) {
                 </Link>
 
                 <div className="header-actions">
-                    <Link
-                        href="/"
-                        className="dp-header-link"
-                        aria-label="خانه"
-                        title="خانه"
-                    >
-                        <Home size={16} aria-hidden="true" />
-                    </Link>
-
                     <Link href="/dashboard" className="dp-header-link">
                         📅 برنامه امروز
                     </Link>

@@ -1,13 +1,15 @@
-export default function Logo() {
+"use client"
+
+type LogoProps = {
+    size?: number
+}
+
+export default function Logo({ size = 32 }: LogoProps) {
     return (
-        <div className="dp-logo">
-            <div className="dp-logo-mark">D</div>
-            <div className="dp-logo-text">
-                <span className="dp-logo-name">
-                    Daily <em>Pilot</em>
-                </span>
-                <small className="dp-logo-sub">Productivity OS</small>
-            </div>
-        </div>
+        <img
+            src="/logo.png"
+            alt="روزچین"
+            style={{ height: size, width: "auto" }}
+        />
     )
 }

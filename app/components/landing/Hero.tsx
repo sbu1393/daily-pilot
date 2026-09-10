@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { motion } from "framer-motion"
 import type { AvatarUser } from "@/app/components/Avatar"
+import Logo from "../Logo"
 import styles from "./landing.module.css"
 
 const container = {
@@ -31,7 +32,7 @@ export default function Hero({ user }: { user: AvatarUser | null }) {
                 animate="visible"
             >
                 <motion.div variants={item} className={styles.heroLogo}>
-                    D
+                    <Logo size={76} />
                 </motion.div>
                 <motion.h1 variants={item}>
                     مدیریت روزهای خودت

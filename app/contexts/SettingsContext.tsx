@@ -127,7 +127,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             if (settings.sound) beep()
 
             if ("Notification" in window && Notification.permission === "granted") {
-                new Notification("یادآور Daily Pilot", {
+                new Notification("یادآور روزچین", {
                     body: "وقت برنامه‌ریزی روزت رسیده است ✨",
                 })
             }

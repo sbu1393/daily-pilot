@@ -44,7 +44,7 @@ export default function DownloadSection() {
                 transition={{ duration: .6, ease: [0.22, 1, 0.36, 1] }}
             >
                 <h2 className={styles.downloadTitle}>
-                    <Smartphone size={22} /> Daily Pilot را روی گوشی‌ات نصب کن
+                    <Smartphone size={22} /> روزچین را روی گوشی‌ات نصب کن
                 </h2>
                 <p className={styles.downloadText}>
                     با دوربین گوشی کد زیر را اسکن کن تا همین صفحه روی گوشی‌ات باز شود؛ بعد طبق راهنما
@@ -55,7 +55,7 @@ export default function DownloadSection() {
                     <div className={styles.qrBox}>
                         {qr ? (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img src={qr} alt="کد QR نصب Daily Pilot" className={styles.qrImg} />
+                            <img src={qr} alt="کد QR نصب روزچین" className={styles.qrImg} />
                         ) : (
                             <div className={styles.qrPlaceholder}>
                                 <QrCode size={34} />

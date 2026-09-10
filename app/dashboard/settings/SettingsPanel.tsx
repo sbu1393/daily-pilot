@@ -386,7 +386,7 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                     <motion.section key="install" className={styles.section} {...tabMotion}>
                         <h2 className={styles.title}>نصب برنامه</h2>
                         <p className={styles.subtitle}>
-                            Daily Pilot را مثل یک اپ واقعی روی گوشی یا کامپیوترت نصب کن.
+                            روزچین را مثل یک اپ واقعی روی گوشی یا کامپیوترت نصب کن.
                         </p>
                         <InstallCard />
                     </motion.section>
@@ -418,9 +418,9 @@ export default function SettingsPanel({ user }: { user: UserData }) {
 
                         {infoTab === "about" && (
                             <div className={styles.card}>
-                                <h3 className={styles.cardTitle}>درباره Daily Pilot</h3>
+                                <h3 className={styles.cardTitle}>درباره روزچین</h3>
                                 <p className={styles.text}>
-                                    Daily Pilot یک برنامه‌ی هوشمند برنامه‌ریزی روزانه است که با کمک هوش مصنوعی
+                                    روزچین یک برنامه‌ی هوشمند برنامه‌ریزی روزانه است که با کمک هوش مصنوعی
                                     به شما کمک می‌کند کارهای روزانه‌تان را اولویت‌بندی کنید، برای هر کار زمان
                                     واقع‌بینانه‌ای تخصیص دهید و عادت‌های بهتری بسازید.
                                 </p>
@@ -475,7 +475,7 @@ function FeedbackForm() {
             toast.error("لطفاً متن پیام را بنویسید")
             return
         }
-        const subject = encodeURIComponent("بازخورد کاربر Daily Pilot")
+        const subject = encodeURIComponent("بازخورد کاربر روزچین")
         const body = encodeURIComponent(`${message.trim()}\\n\\n— از طرف: ${email.trim() || "کاربر ناشناس"}`)
         window.location.href = `mailto:support@dailypilot.app?subject=${subject}&body=${body}`
         toast.success("برنامه‌ی ایمیل شما باز می‌شود؛ فقط کافی است ارسال را بزنید")
@@ -485,7 +485,7 @@ function FeedbackForm() {
         <div className={styles.card}>
             <h3 className={styles.cardTitle}>انتقادات و پیشنهادات</h3>
             <p className={styles.muted}>
-                نظر شما برای بهتر شدن Daily Pilot ارزشمند است. پیام خود را بنویسید تا از طریق ایمیل برای ما ارسال شود.
+                نظر شما برای بهتر شدن روزچین ارزشمند است. پیام خود را بنویسید تا از طریق ایمیل برای ما ارسال شود.
             </p>
             <div className="dp-form">
                 <div className="dp-field">

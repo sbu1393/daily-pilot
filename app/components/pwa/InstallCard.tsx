@@ -38,7 +38,7 @@ export default function InstallCard() {
             <div className="dp-card-soft">
                 <h3 className="dp-card-title">✅ برنامه نصب شده است</h3>
                 <p className="dp-card-text">
-                    Daily Pilot روی این دستگاه نصب است و مثل یک اپ بومی اجرا می‌شود. از همین‌جا با یک لمس
+                    روزچین روی این دستگاه نصب است و مثل یک اپ بومی اجرا می‌شود. از همین‌جا با یک لمس
                     به برنامه‌ریزی روز بپرداز!
                 </p>
             </div>
@@ -48,7 +48,7 @@ export default function InstallCard() {
     const install = async () => {
         const accepted = await promptInstall()
         if (accepted) {
-            toast.success("نصب انجام شد؛ آیکون Daily Pilot روی گوشی‌ات اضافه شد 🎉")
+            toast.success("نصب انجام شد؛ آیکون روزچین روی گوشی‌ات اضافه شد 🎉")
         } else {
             toast.info("می‌توانی بعداً از منوی مرورگر نصب کنی")
         }
@@ -60,7 +60,7 @@ export default function InstallCard() {
                 <QrCode size={20} /> نصب روی گوشی
             </h3>
             <p className="dp-card-text">
-                با دوربین گوشی کد زیر را اسکن کن یا لینک را روی گوشی باز کن تا Daily Pilot مثل یک اپ
+                با دوربین گوشی کد زیر را اسکن کن یا لینک را روی گوشی باز کن تا روزچین مثل یک اپ
                 واقعی نصب شود — آیکون روی صفحه اصلی، اجرای تمام‌صفحه و کارکرد آفلاین.
             </p>
 
@@ -68,7 +68,7 @@ export default function InstallCard() {
                 <div className="dp-qr-wrap">
                     {qrDataUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={qrDataUrl} alt="کد QR نصب Daily Pilot" className="dp-qr-img" />
+                        <img src={qrDataUrl} alt="کد QR نصب روزچین" className="dp-qr-img" />
                     ) : (
                         <div className="dp-qr-placeholder">در حال ساخت کد…</div>
                     )}
@@ -97,7 +97,7 @@ export default function InstallCard() {
                     )}
 
                     <p className="dp-card-hint">
-                        <Smartphone size={14} /> Daily Pilot روی اندروید، iOS، ویندوز و مک قابل نصب است.
+                        <Smartphone size={14} /> روزچین روی اندروید، iOS، ویندوز و مک قابل نصب است.
                     </p>
                 </div>
             </div>

@@ -47,17 +47,14 @@
 }
 
 .heroLogo {
-    width: 68px;
-    height: 68px;
     margin: 0 auto 26px;
-    display: grid;
-    place-items: center;
-    font-size: 30px;
-    font-weight: 800;
-    color: #fff;
-    background: linear-gradient(135deg, var(--primary), var(--primary-2));
-    border-radius: 20px;
-    box-shadow: 0 16px 34px -12px rgba(79, 70, 229, .55);
+    display: flex;
+    justify-content: center;
+}
+
+.heroLogo img {
+    height: 76px;
+    width: auto;
 }
 
 .hero h1 {

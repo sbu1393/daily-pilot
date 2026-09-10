@@ -36,7 +36,7 @@ export default function Hero({ user }: { user: AvatarUser | null }) {
                 <motion.h1 variants={item}>
                     مدیریت روزهای خودت
                     <br />
-                    با <span className={styles.brand}>Daily Pilot</span>
+                    با <span className={styles.brand}>روزچین</span>
                 </motion.h1>
                 <motion.p variants={item}>
                     یک سیستم هوشمند برای برنامه‌ریزی، مدیریت کارها و ساختن عادت‌های بهتر.

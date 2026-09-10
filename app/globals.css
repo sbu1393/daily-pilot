@@ -355,6 +355,7 @@ code, kbd, samp {
 
 .app-header {
   position: relative;
+  z-index: 50;
   margin: 22px auto;
   width: min(1040px, 92%);
   background: var(--surface);
@@ -432,6 +433,7 @@ code, kbd, samp {
   top: calc(100% + 8px);
   inset-inline-start: 0;
   min-width: 240px;
+  max-width: min(240px, 100%);
   background: var(--surface-solid);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -441,6 +443,14 @@ code, kbd, samp {
   gap: 4px;
   z-index: 100;
   animation: dp-pop .16s ease;
+}
+
+@media (max-width: 400px) {
+  .header-menu {
+    inset-inline-end: 0;
+    inset-inline-start: auto;
+    max-width: min(240px, 100vw);
+  }
 }
 
 .header-menu-item {

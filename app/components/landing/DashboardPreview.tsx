@@ -23,7 +23,7 @@ export default function DashboardPreview() {
                     <span className={styles.previewDots} aria-hidden="true">
                         <i /><i /><i />
                     </span>
-                    <span className={styles.previewUrl}>app.dailypilot.ir</span>
+                    <span className={styles.previewUrl}>app.rozchian.ir</span>
                 </div>
                 <div className={styles.previewBody}>
                     <div className={styles.previewHeader}>

@@ -86,12 +86,13 @@ export default function AvatarUpload({ user }: { user: AvatarUser }) {
     }
 
     return (
-        <motion.div
-            className="dp-avatar-upload"
-            initial={{ opacity: 0, scale: .9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: .3, ease: "easeOut" }}
-        >
+    <motion.div
+        className="dp-avatar-upload"
+        initial={{ opacity: 0, scale: .9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: .3, ease: "easeOut" }}
+        style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}
+    >
             <Avatar user={user} size="md" />
             {busy && <div className="dp-avatar-busy">…</div>}
 
@@ -117,12 +118,12 @@ export default function AvatarUpload({ user }: { user: AvatarUser }) {
             />
 
             {user.image && !busy && (
-                <button
-                    type="button"
-                    className="dp-avatar-remove"
-                    style={{ position: "absolute", bottom: -22, insetInlineStart: "50%", transform: "translateX(50%)" }}
-                    onClick={remove}
-                >
+            <button
+                type="button"
+                className="dp-avatar-remove"
+                style={{ marginTop: "4px", display: "flex", alignItems: "center", gap: "4px", fontSize: "12px" }}
+                onClick={remove}
+            >
                     <Trash2 size={12} /> حذف عکس
                 </button>
             )}

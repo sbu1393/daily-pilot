@@ -100,7 +100,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
     return (
         <AnimatedModal open={open} onClose={onClose}>
             <div className={styles.modalHead}>
-                <h4>تسک جدید</h4>                    <button className={styles.closeBtn} onClick={onClose} aria-label="بستن">✕</button>
+                <h4>کار جدید</h4>                    <button className={styles.closeBtn} onClick={onClose} aria-label="بستن">✕</button>
             </div>
             {offline && (
                 <div className="dp-queued-chip" style={{ justifyContent: "center" }}>
@@ -108,7 +108,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
                 </div>
             )}
             <p className={styles.hint}>
-                برای روز <b>{faDigits(selectedDate.replaceAll("-", "/"))}</b> — تسک بدون تحلیل ساخته می‌شود؛
+                برای روز <b>{faDigits(selectedDate.replaceAll("-", "/"))}</b> — کار بدون تحلیل ساخته می‌شود؛
                 بعداً با «تحلیل مجدد» می‌توانی اولویت، امتیاز، دلیل و زمان تخمینی را با هوش مصنوعی تعیین کنی.
             </p>
             <input
@@ -124,7 +124,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
             />
             <div className={styles.modalActions}>
                 <button className={styles.btnPrimary} onClick={submit} disabled={loading}>
-                    {loading ? "⏳ در حال ساخت…" : "ساخت تسک"}
+                    {loading ? "⏳ در حال ساخت…" : "ایجاد کار"}
                 </button>
                 <button className={styles.btnGhost} onClick={onClose} disabled={loading}>
                     انصراف

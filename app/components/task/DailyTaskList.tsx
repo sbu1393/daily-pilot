@@ -6,6 +6,7 @@ import { useCalendar } from "@/app/contexts/CalenderContext"
 import { useDaySummary, type DaySummary } from "../../hooks/UseDaySummary"
 import { getCanonicalToday, shiftCanonicalKey } from "../../lib/canonicalDay"
 import { faDigits } from "@/app/lib/time"
+import { toDayKey } from "@/app/lib/jalili"
 import {
     cacheDay,
     enqueueTask,
@@ -200,7 +201,7 @@ export default function DailyTaskList() {
         <section className={styles.section}>
             <div className={styles.headerRow}>
                 <h3>
-                    برنامه روز {faDigits(selectedDate.replaceAll("-", "/"))}
+                    برنامه روز {faDigits(toDayKey(selectedDate))}
                 </h3>
                 {tasks.length > 0 && (
                     <span className={styles.count}>

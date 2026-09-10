@@ -85,7 +85,7 @@ export default function CompleteTaskModal({ task, onClose, onCompleted }: Props)
             {!result ? (
                     <>
                         <div className={styles.modalHead}>
-                            <h4>تمام کردن تسک</h4>
+                            <h4>تمام کردن کار</h4>
                             <button className={styles.closeBtn} onClick={onClose} aria-label="بستن">✕</button>
                         </div>
                         <p className={styles.taskTitle}>«{task.title}»</p>

@@ -41,7 +41,7 @@ export default function Header({ user }: { user: AvatarUser | null }) {
     return (
         <header className="app-header">
             <div className="header-inner">
-                <Link href="/dashboard" className="dp-link-reset">
+                <Link href="/dashboard" className="dp-link-reset" style={{ flexShrink: 0 }}>
                     <Logo />
                 </Link>
 

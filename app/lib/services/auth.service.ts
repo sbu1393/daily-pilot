@@ -1,5 +1,5 @@
 import { getPrisma } from "@/app/lib/getPrisma"
-import bcrypt from "bcrypt"
+import bcrypt from "bcryptjs"
 import type { User } from "@prisma/client"
 import {
     EmailTakenError,

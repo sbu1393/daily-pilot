@@ -19,7 +19,7 @@ const { prismaMock, getPrismaMock } = vi.hoisted(() => {
 
 vi.mock("@/app/lib/getPrisma", () => ({ getPrisma: getPrismaMock }))
 
-vi.mock("bcrypt", () => ({ default: { hash: vi.fn(async () => "hashed-password") } }))
+vi.mock("bcryptjs", () => ({ default: { hash: vi.fn(async () => "hashed-password") } }))
 
 import { EmailTakenError, ServiceError } from "./errors"
 import { registerUser } from "./auth.service"

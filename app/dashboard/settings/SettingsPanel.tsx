@@ -13,6 +13,8 @@ import FormInput from "@/app/components/FormInput"
 import { profileSchema } from "@/app/schema/formSchema"
 import { useSettings } from "@/app/contexts/SettingsContext"
 import { api } from "@/app/lib/api/client"
+import moment from "moment-jalaali"
+import { faDigits } from "@/app/lib/time"
 import InstallCard from "@/app/components/pwa/InstallCard"
 import styles from "./settings.module.css"
 
@@ -36,6 +38,45 @@ function toDateInput(value: string | Date | null | undefined): string {
     return String(value).slice(0, 10)
 }
 
+/* ===== لایه‌ی نمایش تاریخ تولد (جلالی) — فقط presentation، مقدار ذخیرهشده میلادی می‌ماند ===== */
+const J_MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
+
+function gregorianToJalaliParts(gregorian: string): { jy: number; jm: number; jd: number } | null {
+    const m = moment(gregorian, "YYYY-MM-DD")
+    if (!gregorian || !m.isValid()) return null
+    return { jy: m.jYear(), jm: m.jMonth() + 1, jd: m.jDate() }
+}
+
+function jalaliPartsToGregorian(jy: number, jm: number, jd: number): string {
+    const pad = (n: number) => String(n).padStart(2, "0")
+    return moment(`${jy}-${pad(jm)}-${pad(jd)}`, "jYYYY-jM-jD").format("YYYY-MM-DD")
+}
+
+function jalaliDaysInMonth(jy: number, jm: number): number {
+    return moment.jDaysInMonth(jy, jm - 1) // moment ماه را صفر-مبنا می‌گیرد
+}
+
+type JalaliParts = { jy: number | null; jm: number | null; jd: number | null }
+
+const pad2 = (n: number) => String(n).padStart(2, "0")
+const HOURS_12 = Array.from({ length: 12 }, (_, i) => i + 1)
+const MINUTES_60 = Array.from({ length: 60 }, (_, i) => i)
+
+/* ===== لایه‌ی نمایش زمان یادآور (صبح/شب) — فقط presentation، مقدار ذخیرهشده HH:MM می‌ماند ===== */
+type DayPeriod = "am" | "pm"
+
+function parseReminderTime(value: string): { h12: number; minute: number; period: DayPeriod } {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(value ?? "")
+    const h24 = m ? Math.min(23, Math.max(0, Number(m[1]))) : 9
+    const minute = m ? Math.min(59, Math.max(0, Number(m[2]))) : 0
+    return { h12: h24 % 12 || 12, minute, period: h24 < 12 ? "am" : "pm" }
+}
+
+function reminderTimeToHHMM(h12: number, minute: number, period: DayPeriod): string {
+    const h24 = period === "am" ? (h12 === 12 ? 0 : h12) : h12 === 12 ? 12 : h12 + 12
+    return `${pad2(h24)}:${pad2(minute)}`
+}
+
 type Tab = "account" | "preferences" | "install" | "info"
 
 /* انیمیشن ورود محتوای هر تب */
@@ -55,6 +96,16 @@ export default function SettingsPanel({ user }: { user: UserData }) {
     const [infoTab, setInfoTab] = useState<InfoTab>("about")
     const [saving, setSaving] = useState(false)
     const [birthDate, setBirthDate] = useState<string>(toDateInput(user.birthDate))
+    const [birthJalali, setBirthJalali] = useState<JalaliParts>(() => {
+        const p = gregorianToJalaliParts(toDateInput(user.birthDate))
+        return { jy: p?.jy ?? null, jm: p?.jm ?? null, jd: p?.jd ?? null }
+    })
+    const jYearNow = moment().jYear()
+    const jDayCount =
+        birthJalali.jy != null && birthJalali.jm != null
+            ? jalaliDaysInMonth(birthJalali.jy, birthJalali.jm)
+            : 31
+    const reminder = parseReminderTime(settings.reminderTime)
     // بخش تغییر رمز عبور
     const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" })
     const [passwordLoading, setPasswordLoading] = useState(false)
@@ -93,6 +144,33 @@ export default function SettingsPanel({ user }: { user: UserData }) {
         } finally {
             setSaving(false)
         }
+    }
+
+    /* انتخاب جلالی → فقط وقتی هر سه بخش کامل شد، مقدار میلادی معادل برای ذخیره ساخته می‌شود */
+    const onBirthJalaliChange = (part: keyof JalaliParts, raw: string) => {
+        const value = raw === "" ? null : Number(raw)
+        const next: JalaliParts = { ...birthJalali, [part]: value }
+        if (next.jy != null && next.jm != null) {
+            const days = jalaliDaysInMonth(next.jy, next.jm)
+            if (next.jd != null && next.jd > days) next.jd = days
+        }
+        setBirthJalali(next)
+        setBirthDate(
+            next.jy != null && next.jm != null && next.jd != null
+                ? jalaliPartsToGregorian(next.jy, next.jm, next.jd)
+                : "",
+        )
+    }
+
+    const clearBirthDate = () => {
+        setBirthJalali({ jy: null, jm: null, jd: null })
+        setBirthDate("")
+    }
+
+    /* صبح/شب → HH:MM (ذخیرهسازی بدون تغییر) */
+    const setReminderPart = (part: "h12" | "minute" | "period", value: number | DayPeriod) => {
+        const next = { ...reminder, [part]: value } as typeof reminder
+        update({ reminderTime: reminderTimeToHHMM(next.h12, next.minute, next.period) })
     }
 
     const onToggleReminder = async (enabled: boolean) => {
@@ -230,12 +308,49 @@ export default function SettingsPanel({ user }: { user: UserData }) {
 
                             <div className="dp-field">
                                 <label className="dp-field-label">تاریخ تولد</label>
-                                <input
-                                    type="date"
-                                    value={birthDate}
-                                    onChange={(e) => setBirthDate(e.target.value)}
-                                    className="dp-input"
-                                />
+                                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                                    <select
+                                        className="dp-input"
+                                        aria-label="روز"
+                                        value={birthJalali.jd ?? ""}
+                                        onChange={(e) => onBirthJalaliChange("jd", e.target.value)}
+                                        style={{ flex: "1 1 0", minWidth: "4.5rem" }}
+                                    >
+                                        <option value="">روز</option>
+                                        {Array.from({ length: jDayCount }, (_, i) => i + 1).map((d) => (
+                                            <option key={d} value={d}>{faDigits(d)}</option>
+                                        ))}
+                                    </select>
+                                    <select
+                                        className="dp-input"
+                                        aria-label="ماه"
+                                        value={birthJalali.jm ?? ""}
+                                        onChange={(e) => onBirthJalaliChange("jm", e.target.value)}
+                                        style={{ flex: "1 1 0", minWidth: "6rem" }}
+                                    >
+                                        <option value="">ماه</option>
+                                        {J_MONTHS.map((name, i) => (
+                                            <option key={i + 1} value={i + 1}>{name}</option>
+                                        ))}
+                                    </select>
+                                    <select
+                                        className="dp-input"
+                                        aria-label="سال"
+                                        value={birthJalali.jy ?? ""}
+                                        onChange={(e) => onBirthJalaliChange("jy", e.target.value)}
+                                        style={{ flex: "1 1 0", minWidth: "5rem" }}
+                                    >
+                                        <option value="">سال</option>
+                                        {Array.from({ length: jYearNow - 1300 + 1 }, (_, i) => jYearNow - i).map((y) => (
+                                            <option key={y} value={y}>{faDigits(y)}</option>
+                                        ))}
+                                    </select>
+                                    {birthDate && (
+                                        <button type="button" className="dp-btn dp-btn-ghost" onClick={clearBirthDate}>
+                                            پاک کردن
+                                        </button>
+                                    )}
+                                </div>
                             </div>
 
                             <button type="submit" className="dp-btn dp-btn-primary" disabled={saving}>
@@ -368,12 +483,37 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                             {settings.reminderEnabled && (
                                 <div className={styles.reminderRow}>
                                     <label className="dp-field-label">زمان یادآور</label>
-                                    <input
-                                        type="time"
-                                        value={settings.reminderTime}
-                                        onChange={(e) => update({ reminderTime: e.target.value })}
-                                        className="dp-input"
-                                    />
+                                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                                        <select
+                                            className="dp-input"
+                                            aria-label="ساعت"
+                                            value={reminder.h12}
+                                            onChange={(e) => setReminderPart("h12", Number(e.target.value))}
+                                        >
+                                            {HOURS_12.map((h) => (
+                                                <option key={h} value={h}>{faDigits(h)}</option>
+                                            ))}
+                                        </select>
+                                        <select
+                                            className="dp-input"
+                                            aria-label="دقیقه"
+                                            value={reminder.minute}
+                                            onChange={(e) => setReminderPart("minute", Number(e.target.value))}
+                                        >
+                                            {MINUTES_60.map((m) => (
+                                                <option key={m} value={m}>{faDigits(pad2(m))}</option>
+                                            ))}
+                                        </select>
+                                        <select
+                                            className="dp-input"
+                                            aria-label="صبح یا شب"
+                                            value={reminder.period}
+                                            onChange={(e) => setReminderPart("period", e.target.value as DayPeriod)}
+                                        >
+                                            <option value="am">صبح</option>
+                                            <option value="pm">شب</option>
+                                        </select>
+                                    </div>
                                 </div>
                             )}
                         </div>

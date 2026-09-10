@@ -86,7 +86,7 @@ export default function DayStartModal({
                 </div>
 
                 <p className={styles.modalSub}>
-                    بر اساس این بودجه، هوش مصنوعی زمان هر کار رو تخمین می‌زنه و بین تسک‌ها تخصیص می‌ده.
+                    بر اساس این بودجه، هوش مصنوعی زمان هر کار رو تخمین می‌زنه و بین کارها تخصیص می‌ده.
                 </p>
 
                 <form onSubmit={submit}>

@@ -49,7 +49,7 @@ export default function JalaliCalendar() {
                         className={`${styles.dayBtn} ${isActive ? styles.active : ""} ${isToday ? styles.today : ""}`}
                         onClick={() => setSelectedDate(day.key)}
                     >
-                        {/* نقطه/شمارندهی تاریخچه: فقط روزهایی که تسک انجامشده دارن */}
+                        {/* نقطه/شمارندهی تاریخچه: فقط روزهایی که کار انجامشده دارن */}
                         {marker && marker.doneCount > 0 && (
                             <span className={styles.dayMarker} title={`${faDigits(marker.doneCount)} کار انجام شده`}>
                                 {marker.doneCount > 9 ? "۹+" : faDigits(marker.doneCount)}

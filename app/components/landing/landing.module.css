@@ -52,11 +52,6 @@
     justify-content: center;
 }
 
-.heroLogo img {
-    height: 76px;
-    width: auto;
-}
-
 .hero h1 {
     margin: 0 0 22px;
     font-size: clamp(2rem, 5vw, 3.4rem);

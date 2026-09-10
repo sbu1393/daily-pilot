@@ -52,7 +52,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
             dayKey: selectedDate,
             scheduledDate: canonicalKeyToLocalMidnight(selectedDate, timezone).toISOString(),
         })
-        toast.info("🔌 آفلاین هستی — تسک ذخیره شد و بعد از اتصال سینک می‌شود")
+        toast.info("🔌 آفلاین هستی — کار ذخیره شد و بعد از اتصال سینک می‌شود")
         setText("")
         onClose()
         onCreated()
@@ -84,13 +84,13 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
             setText("")
             onClose()
             onCreated()
-            toast.success("تسک ساخته شد و زمان‌بندی شد ✅")
+            toast.success("کار ساخته شد و زمان‌بندی شد ✅")
         } catch (e) {
             /* خطای شبکه حین ارسال → ذخیره در صف آفلاین */
             if (e instanceof TypeError) {
                 saveOffline(value)
             } else {
-                toast.error(e instanceof Error ? e.message : "خطا در ساخت تسک")
+                toast.error(e instanceof Error ? e.message : "خطا در ایجاد کار")
             }
         } finally {
             setLoading(false)
@@ -104,7 +104,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
             </div>
             {offline && (
                 <div className="dp-queued-chip" style={{ justifyContent: "center" }}>
-                    🔌 آفلاین — تسک محلی ذخیره و بعداً سینک می‌شود
+                    🔌 آفلاین — کار محلی ذخیره و بعداً سینک می‌شود
                 </div>
             )}
             <p className={styles.hint}>

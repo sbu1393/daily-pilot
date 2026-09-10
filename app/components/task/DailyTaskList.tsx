@@ -6,7 +6,6 @@ import { useCalendar } from "@/app/contexts/CalenderContext"
 import { useDaySummary, type DaySummary } from "../../hooks/UseDaySummary"
 import { getCanonicalToday, shiftCanonicalKey } from "../../lib/canonicalDay"
 import { faDigits } from "@/app/lib/time"
-import { toDayKey } from "@/app/lib/jalili"
 import {
     cacheDay,
     enqueueTask,
@@ -50,7 +49,7 @@ export default function DailyTaskList() {
 
     const requestSeq = useRef(0) // محافظ race هنگام تعویض سریع روز
 
-    /* نمایش تسک‌های صف‌شده‌ی آفلاین فقط برای همان روز */
+    /* نمایش کارهای صف‌شدهی آفلاین فقط برای همان روز */
     const visibleQueued = useMemo(
         () => queuedTasks.filter((q) => q.dayKey === selectedDate),
         [queuedTasks, selectedDate],
@@ -93,7 +92,7 @@ export default function DailyTaskList() {
                     setTasks([])
                     setOffline(true)
                 } else {
-                    toast.error(e instanceof Error ? e.message : "خطا در دریافت تسک‌ها")
+                    toast.error(e instanceof Error ? e.message : "خطا در دریافت کارها")
                 }
             }
         } finally {
@@ -101,10 +100,10 @@ export default function DailyTaskList() {
         }
     }, [selectedDate])
 
-    // تسک‌های ناتمام روزهای قبل — اندپوینت مخصوص بازگرداندنِ تسک‌های عقب‌افتاده
+    // کارهای ناتمام روزهای قبل — اندپوینت مخصوص بازگرداندنِ کارهای عقب‌افتاده
     const loadOverdue = useCallback(async () => {
         try {
-            // ADR-04: { ok, data: tasks } → خود data آرایه‌ی تسک‌هاست
+            // ADR-04: { ok, data: tasks } → خود data آرایهی کارهاست
             const data = await api<TaskItem[]>("/api/tasks/overdue")
             const limit = shiftCanonicalKey(getCanonicalToday(timezone), -6) // فقط ۷ روز اخیر
             setOverdue(data.filter((t) => t.dayKey >= limit))
@@ -128,7 +127,7 @@ export default function DailyTaskList() {
             void (async () => {
                 const synced = await syncQueue()
                 if (synced > 0) {
-                    toast.success(`${faDigits(synced)} تسک آفلاین سینک شد ✅`)
+                    toast.success(`${faDigits(synced)} کار آفلاین سینک شد ✅`)
                 }
                 refreshQueue()
                 await refreshAll()
@@ -171,9 +170,8 @@ export default function DailyTaskList() {
         try {
             await api(`/api/tasks/${deleteTask.id}`, { method: "DELETE" })
             setDeleteTask(null)
-            await afterMutation("تسک حذف شد؛ زمانش به استخر روز برگشت 🕊")
-        } catch (e) {
-            toast.error(e instanceof Error ? e.message : "خطا در حذف تسک")
+            await afterMutation("کار حذف شد؛ زمانش به استخر روز برگشت 🕊")
+        } catch (e) {                    toast.error(e instanceof Error ? e.message : "خطا در حذف کار")
         } finally {
             setBusy(false)
         }
@@ -201,7 +199,7 @@ export default function DailyTaskList() {
         <section className={styles.section}>
             <div className={styles.headerRow}>
                 <h3>
-                    برنامه روز {faDigits(toDayKey(selectedDate))}
+                    برنامه‌ی روز {faDigits(selectedDate.replaceAll("-", "/"))}
                 </h3>
                 {tasks.length > 0 && (
                     <span className={styles.count}>
@@ -212,7 +210,7 @@ export default function DailyTaskList() {
 
             {overCommitted && (
                 <div className={styles.warningBar}>
-                    ⚠️ ظرفیت روز پر شده و زمان بعضی کارها کم شده. اگه تسک جدید اضافه کنی، از کارهای
+                    ⚠️ ظرفیت روز پر شده و زمان بعضی کارها کم شده. اگه کار جدید اضافه کنی، از کارهای
                     کم‌اهمیت‌تر کم می‌شود — یا «زمان آزاد» روز را زیاد کن.
                 </div>
             )}
@@ -234,7 +232,7 @@ export default function DailyTaskList() {
                 <div className={styles.empty}>
                     هنوز کاری برای این روز ثبت نشده.
                     <br />
-                    اولین تسک را بساز تا هوش مصنوعی اولویت و زمان‌بندیش را مشخص کند.
+                    اولین کار را بساز تا هوش مصنوعی اولویت و زمان‌بندیش را مشخص کند.
                 </div>
             ) : (
                 <ul className={styles.list}>
@@ -250,7 +248,7 @@ export default function DailyTaskList() {
                             />
                         ))}
 
-                        {/* تسک‌های ساخته‌شده در حالت آفلاین — هنوز سینک نشده‌اند */}
+                        {/* کارهای ساختهشده در حالت آفلاین — هنوز سینک نشدهاند */}
                         {visibleQueued.map((q) => (
                             <motion.li
                                 key={q.id}
@@ -281,7 +279,7 @@ export default function DailyTaskList() {
 
             <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} style={{ width: "fit-content" }}>
                 <button className={styles.btnPrimary} onClick={() => setCreateOpen(true)}>
-                    + تسک جدید
+                    + کار جدید
                 </button>
             </motion.div>
 
@@ -310,7 +308,7 @@ export default function DailyTaskList() {
                 <div className={styles.overlay} onClick={() => setDeleteTask(null)}>
                     <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
                         <div className={styles.modalHead}>
-                            <h4>حذف تسک</h4>
+                            <h4>حذف کار</h4>
                         </div>
                         <p className={styles.hint}>
                             «{deleteTask.title}» حذف شود؟ زمانِ تخصیص‌یافته‌اش به استخر روز برمی‌گردد.

@@ -156,7 +156,7 @@ export default function CompleteTaskModal({ task, onClose, onCompleted }: Props)
                         {result.saved === 0 && result.overspent === 0 && (
                             <div className={styles.resultSaved}>
                                 <div className={styles.resultEmoji}>✅</div>
-                                <h4>تسک تمام شد</h4>
+                                <h4>کار تمام شد</h4>
                                 <p>مدت واقعی: {fmtMinutes(result.spent)}</p>
                             </div>
                         )}

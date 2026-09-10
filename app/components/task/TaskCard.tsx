@@ -117,7 +117,7 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze }: Props) {
                     <button className={styles.btnPrimary} onClick={() => onComplete(task)}>
                         تمام شد ✓
                     </button>
-                    <button className={styles.btnGhost} onClick={() => onDelete(task)} title="حذف تسک">
+                    <button className={styles.btnGhost} onClick={() => onDelete(task)} title="حذف کار">
                         حذف
                     </button>
                     {task.status === "TODO" && task.dayKey >= getCanonicalToday(timezone) && (

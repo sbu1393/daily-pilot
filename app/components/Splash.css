@@ -1,0 +1,31 @@
+/* Splash — only visible before hydration removes #dp-splash from the DOM. */
+
+#dp-splash {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface, #f8fafc);
+    /* Fallback بدون نیاز به JS: حتی اگر hydration شکست بخورد،
+       اسپلش بعد از ۴ ثانیه خودش محو میشود و هرگز روی اپ گیر نمیکند. */
+    animation: dpSplashGone 0s 4s forwards;
+}
+
+@keyframes dpSplashGone {
+    to {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+    }
+}
+
+#dp-splash img {
+    height: 110px;
+    width: auto;
+    padding: 12px 30px;
+    background: var(--primary-soft, #eef2ff);
+    border-radius: 999px;
+    box-shadow: 0 16px 34px -12px rgba(79, 70, 229, .35);
+}

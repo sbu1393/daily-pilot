@@ -84,7 +84,7 @@ export default function DayHistoryPanel() {
         <section className={styles.section}>
             <div className={styles.head}>
                 <h3>تاریخچهی این روز</h3>
-                <span className={styles.date}>{faDigits(selectedDate)}</span>
+                <span className={styles.date}>{faDigits(selectedDate.replaceAll("-", "/"))}</span>
             </div>
 
             {/* جمعبندی روز */}

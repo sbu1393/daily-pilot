@@ -7,6 +7,8 @@ import { motion } from "framer-motion"
 import { useRouter } from "next/navigation"
 import Avatar, { type AvatarUser } from "./Avatar"
 import { api } from "@/app/lib/api/client"
+import AnimatedModal from "./motion/AnimatedModal"
+import styles from "./task/task.module.css"
 
 /* فشرده‌سازی عکس سمت کلاینت: حداکثر ۲۵۶px و کیفیت ۰٫۸ → data-URL سبک برای ذخیره */
 function compressImage(file: File): Promise<string> {
@@ -52,6 +54,7 @@ export default function AvatarUpload({ user }: { user: AvatarUser }) {
     const router = useRouter()
     const inputRef = useRef<HTMLInputElement | null>(null)
     const [busy, setBusy] = useState(false)
+    const [confirmOpen, setConfirmOpen] = useState(false)
 
     const upload = async (file: File) => {
         setBusy(true)
@@ -86,13 +89,12 @@ export default function AvatarUpload({ user }: { user: AvatarUser }) {
     }
 
     return (
-    <motion.div
-        className="dp-avatar-upload"
-        initial={{ opacity: 0, scale: .9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: .3, ease: "easeOut" }}
-        style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}
-    >
+        <motion.div
+            className="dp-avatar-upload"
+            initial={{ opacity: 0, scale: .9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: .3, ease: "easeOut" }}
+        >
             <Avatar user={user} size="md" />
             {busy && <div className="dp-avatar-busy">…</div>}
 
@@ -106,6 +108,18 @@ export default function AvatarUpload({ user }: { user: AvatarUser }) {
                 <Camera size={22} />
             </button>
 
+            {user.image && !busy && (
+                <button
+                    type="button"
+                    className="dp-avatar-trash"
+                    title="حذف عکس پروفایل"
+                    aria-label="حذف عکس پروفایل"
+                    onClick={() => setConfirmOpen(true)}
+                >
+                    <Trash2 size={13} />
+                </button>
+            )}
+
             <input
                 ref={inputRef}
                 type="file"
@@ -117,16 +131,29 @@ export default function AvatarUpload({ user }: { user: AvatarUser }) {
                 }}
             />
 
-            {user.image && !busy && (
-            <button
-                type="button"
-                className="dp-avatar-remove"
-                style={{ marginTop: "4px", display: "flex", alignItems: "center", gap: "4px", fontSize: "12px" }}
-                onClick={remove}
-            >
-                    <Trash2 size={12} /> حذف عکس
-                </button>
-            )}
+            {/* تأییدیه حذف عکس پروفایل — انصراف هیچ کاری نمیکند، حذف همان DELETE موجود را می‌زند */}
+            <AnimatedModal open={confirmOpen} onClose={() => setConfirmOpen(false)}>
+                <div className={styles.modalHead}>
+                    <h4>حذف عکس پروفایل</h4>
+                    <button className={styles.closeBtn} onClick={() => setConfirmOpen(false)} aria-label="بستن">✕</button>
+                </div>
+                <p className={styles.hint}>آیا می‌خواهید عکس پروفایل را حذف کنید؟</p>
+                <div className={styles.modalActions}>
+                    <button
+                        className={styles.btnPrimary}
+                        onClick={() => {
+                            setConfirmOpen(false)
+                            void remove()
+                        }}
+                        disabled={busy}
+                    >
+                        حذف
+                    </button>
+                    <button className={styles.btnGhost} onClick={() => setConfirmOpen(false)} disabled={busy}>
+                        انصراف
+                    </button>
+                </div>
+            </AnimatedModal>
         </motion.div>
     )
 }

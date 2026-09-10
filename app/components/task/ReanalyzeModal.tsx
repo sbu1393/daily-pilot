@@ -30,7 +30,7 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
     const [text, setText] = useState(task?.title ?? "")
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState<string | null>(null)
-    // §9.6 Retry: شناسه تسکِ آخرین تلاش ناموفق — پس از هر تلاش موفق پاک می‌شود
+    // §9.6 Retry: شناسه کارِ آخرین تلاش ناموفق — پس از هر تلاش موفق پاک می‌شود
     const [lastFailedId, setLastFailedId] = useState<number | null>(null)
     // اسنپشاتِ وضعیت قبل — چون والد تا بسته شدن مودال، آبجکت قدیمی رو نگه می‌داره
     const [result, setResult] = useState<{ old: TaskItem; next: TaskItem; source: string } | null>(null)
@@ -106,7 +106,7 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
                             محاسبه شود. این کار زمان تخصیص‌یافته به بقیه کارهای روز را هم بازتوزیع می‌کند.
                         </p>
 
-                        <label className={styles.fieldLabel}>عنوان تسک</label>
+                        <label className={styles.fieldLabel}>عنوان کار</label>
                         <textarea
                             className={styles.textarea}
                             value={text}

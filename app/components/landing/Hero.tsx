@@ -32,7 +32,7 @@ export default function Hero({ user }: { user: AvatarUser | null }) {
                 animate="visible"
             >
                 <motion.div variants={item} className={styles.heroLogo}>
-                    <Logo size={76} />
+                    <Logo size={110} />
                 </motion.div>
                 <motion.h1 variants={item}>
                     مدیریت روزهای خودت

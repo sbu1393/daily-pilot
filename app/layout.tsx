@@ -6,6 +6,7 @@ import { CalendarProvider } from "./contexts/CalenderContext"
 import { SettingsProvider } from "./contexts/SettingsContext"
 import PwaRegister from "./components/PwaRegister"
 import OfflineIndicator from "./components/OfflineIndicator"
+import Splash from "./components/Splash"
 import { ToastContainer } from "react-toastify"
 
 const vazir = Vazirmatn({
@@ -41,6 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
         {/* ===== PWA ===== */}
         <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="preload" as="image" href="/logo.png" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -49,6 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="theme-color" media="(prefers-color-scheme: light)" content="#6366f1" />
         <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b1120" />
       </head>          <body className={vazir.className}>
+        <Splash />
         <CalendarProvider>
           <SettingsProvider>
             {children}

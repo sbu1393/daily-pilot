@@ -49,7 +49,7 @@ export default function RolloverDialog({ tasks, onClose, onConfirm, busy }: Prop
                 </p>
                 <div className={styles.checkList}>
                     {tasks.length === 0 && (
-                        <p className={styles.hint} style={{ margin: 0 }}>هیچ تسکی برای انتقال وجود ندارد.</p>
+                        <p className={styles.hint} style={{ margin: 0 }}>هیچ کاری برای انتقال وجود ندارد.</p>
                     )}
                     {tasks.map((t) => (
                         <label key={t.id} className={styles.checkRow}>

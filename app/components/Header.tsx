@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import Logo from "./Logo"
 import Avatar, { type AvatarUser } from "./Avatar"
+import { CalendarDays, DoorOpen, Settings } from "lucide-react"
 
 export default function Header({ user }: { user: AvatarUser | null }) {
     const router = useRouter()
@@ -42,12 +42,22 @@ export default function Header({ user }: { user: AvatarUser | null }) {
         <header className="app-header">
             <div className="header-inner">
                 <Link href="/" className="dp-link-reset" style={{ flexShrink: 0 }}>
-                    <Logo />
+                <img
+                    src="/logo.png"
+                    alt="روزچین"
+                    style={{
+                        height: "100%",
+                        width: "100%",
+                        objectFit: "contain",
+                        objectPosition: "50% 47%",
+                        display: "block",
+                    }}
+                />
                 </Link>
 
                 <div className="header-actions">
                     <Link href="/dashboard" className="dp-header-link">
-                        📅 برنامه امروز
+                    <CalendarDays />{" "}برنامه امروز
                     </Link>
 
                     {user && (
@@ -60,9 +70,9 @@ export default function Header({ user }: { user: AvatarUser | null }) {
                                 aria-expanded={menuOpen}
                             >
                                 <Avatar user={user} size="sm" />
-                                <span className="header-user-name">
+                                {/* <span className="header-user-name">
                                     {user.firstName || user.username}
-                                </span>
+                                </span> */}
                             </button>
 
                             {menuOpen && (
@@ -72,7 +82,7 @@ export default function Header({ user }: { user: AvatarUser | null }) {
                                         className="header-menu-item"
                                         onClick={() => setMenuOpen(false)}
                                     >
-                                        ⚙️ تنظیمات و حساب کاربری
+                                        <Settings />تنظیمات و حساب کاربری
                                     </Link>
                                     <button
                                         type="button"
@@ -80,7 +90,8 @@ export default function Header({ user }: { user: AvatarUser | null }) {
                                         onClick={logout}
                                         disabled={busy}
                                     >
-                                        {busy ? "…" : "🚪 خروج از حساب"}
+                                        {busy ? "…" : <><DoorOpen/> خروج از حساب</>}
+
                                     </button>
                                 </div>
                             )}

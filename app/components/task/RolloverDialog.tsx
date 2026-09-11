@@ -45,11 +45,11 @@ export default function RolloverDialog({ tasks, onClose, onConfirm, busy }: Prop
                     <button className={styles.closeBtn} onClick={onClose}>✕</button>
                 </div>
                 <p className={styles.hint}>
-                    {faDigits(tasks.length)} کار از روزهای قبل ناتمام مانده. کدام‌ها را به امروز منتقل کنم؟
+                    {faDigits(tasks.length)} کار از روزهای قبل ناتمام مانده. کدوم‌ها رو به امروز منتقل کنم؟
                 </p>
                 <div className={styles.checkList}>
                     {tasks.length === 0 && (
-                        <p className={styles.hint} style={{ margin: 0 }}>هیچ کاری برای انتقال وجود ندارد.</p>
+                        <p className={styles.hint} style={{ margin: 0 }}>هیچ کاری برای انتقال وجود نداره.</p>
                     )}
                     {tasks.map((t) => (
                         <label key={t.id} className={styles.checkRow}>

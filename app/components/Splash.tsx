@@ -19,7 +19,7 @@ export default function Splash() {
 
     return (
         <div id="dp-splash" aria-hidden="true">
-            <img src="/logo.png" alt="روزچین" />
+            <img src="/animated-logo.gif" alt="روزچین" />
         </div>
     )
 }

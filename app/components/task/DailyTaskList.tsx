@@ -25,6 +25,9 @@ import CompleteTaskModal from "./CompleteTaskModal"
 import RolloverDialog from "./RolloverDialog"
 import styles from "./task.module.css"
 import ReanalyzeModal from "./ReanalyzeModal"
+import {formatCanonicalToJalali} from "../../lib/time"
+import { LayersPlus, Megaphone, RotateCwFadingClock } from "lucide-react"
+
 
 
 const priorityWeight: Record<TaskPriority, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 }
@@ -198,9 +201,10 @@ export default function DailyTaskList() {
     return (
         <section className={styles.section}>
             <div className={styles.headerRow}>
-                <h3>
-                    برنامه‌ی روز {faDigits(selectedDate.replaceAll("-", "/"))}
-                </h3>
+            <h3>
+                برنامه‌ی روز {formatCanonicalToJalali(selectedDate)}
+            </h3>
+
                 {tasks.length > 0 && (
                     <span className={styles.count}>
                         {faDigits(doneCount)} از {faDigits(tasks.length)} انجام شده
@@ -211,14 +215,14 @@ export default function DailyTaskList() {
             {overCommitted && (
                 <div className={styles.warningBar}>
                     ⚠️ ظرفیت روز پر شده و زمان بعضی کارها کم شده. اگه کار جدید اضافه کنی، از کارهای
-                    کم‌اهمیت‌تر کم می‌شود — یا «زمان آزاد» روز را زیاد کن.
+                    کم‌اهمیت‌ تر کم میشه — یا «زمان آزاد» روز رو زیاد کن.
                 </div>
             )}
 
             {overdue.length > 0 && (
                 <div className={styles.banner}>
                     <span>
-                        📥 {faDigits(overdue.length)} کار از روزهای قبل ناتمام مانده
+                    <Megaphone /> {faDigits(overdue.length)} کار از روزهای قبل ناتمام مانده
                     </span>
                     <button className={styles.btnPrimary} onClick={() => setRolloverOpen(true)}>
                         انتقال به امروز
@@ -232,7 +236,7 @@ export default function DailyTaskList() {
                 <div className={styles.empty}>
                     هنوز کاری برای این روز ثبت نشده.
                     <br />
-                    اولین کار را بساز تا هوش مصنوعی اولویت و زمان‌بندیش را مشخص کند.
+                    اولین کار را بساز تا هوش مصنوعی اولویت و زمانبندی رو مشخص کنه.
                 </div>
             ) : (
                 <ul className={styles.list}>
@@ -264,7 +268,7 @@ export default function DailyTaskList() {
                                 <div className={styles.chips}>
                                     <span className="dp-queued-chip">⏳ در صف سینک — آفلاین</span>
                                     <span className={styles.chipTime}>
-                                        🕐 {faDigits(new Date(q.createdAt).getHours())}:
+                                    <RotateCwFadingClock /> {faDigits(new Date(q.createdAt).getHours())}:
                                         {faDigits(String(new Date(q.createdAt).getMinutes()).padStart(2, "0"))}
                                     </span>
                                 </div>
@@ -279,7 +283,7 @@ export default function DailyTaskList() {
 
             <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} style={{ width: "fit-content" }}>
                 <button className={styles.btnPrimary} onClick={() => setCreateOpen(true)}>
-                    + کار جدید
+                <LayersPlus />{" "}کار جدید
                 </button>
             </motion.div>
 
@@ -311,7 +315,7 @@ export default function DailyTaskList() {
                             <h4>حذف کار</h4>
                         </div>
                         <p className={styles.hint}>
-                            «{deleteTask.title}» حذف شود؟ زمانِ تخصیص‌یافته‌اش به استخر روز برمی‌گردد.
+                            «{deleteTask.title}» حذف شود؟ زمانِ تخصیص‌ یافته‌اش به استخر روز برمی گرده.
                         </p>
                         <div className={styles.modalActions}>
                             <button

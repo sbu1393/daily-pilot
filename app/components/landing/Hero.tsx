@@ -32,12 +32,12 @@ export default function Hero({ user }: { user: AvatarUser | null }) {
                 animate="visible"
             >
                 <motion.div variants={item} className={styles.heroLogo}>
-                    <Logo size={110} />
+                    <Logo size={85} />
                 </motion.div>
                 <motion.h1 variants={item}>
-                    مدیریت روزهای خودت
+                    با<span className={styles.brand}>روزچین</span>
                     <br />
-                    با <span className={styles.brand}>روزچین</span>
+                    روزت بچین
                 </motion.h1>
                 <motion.p variants={item}>
                     یک سیستم هوشمند برای برنامه‌ریزی، مدیریت کارها و ساختن عادت‌های بهتر.

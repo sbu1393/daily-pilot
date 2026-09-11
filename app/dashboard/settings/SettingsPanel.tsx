@@ -17,6 +17,7 @@ import moment from "moment-jalaali"
 import { faDigits } from "@/app/lib/time"
 import InstallCard from "@/app/components/pwa/InstallCard"
 import styles from "./settings.module.css"
+import { AlarmClock, BellRing, LaptopMinimalCheck, LibraryBig, LockKeyholeOpen, MonitorCog, Moon, Palette, Settings, SunMedium, UserRound } from "lucide-react"
 
 type ProfileInput = z.infer<typeof profileSchema>
 
@@ -235,14 +236,14 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                         className={`${styles.navItem} ${tab === "account" ? styles.navItemActive : ""}`}
                         onClick={() => setTab("account")}
                     >
-                        👤 حساب کاربری
+                        <UserRound /> حساب کاربری
                     </button>
                     <button
                         type="button"
                         className={`${styles.navItem} ${tab === "preferences" ? styles.navItemActive : ""}`}
                         onClick={() => setTab("preferences")}
                     >
-                        ⚙️ تنظیمات
+                        <Settings /> تنظیمات
                     </button>
                     <button
                         type="button"
@@ -250,7 +251,7 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                         className={`${styles.navItem} ${tab === "install" ? styles.navItemActive : ""}`}
                         onClick={() => setTab("install")}
                     >
-                        📲 نصب برنامه
+                        <LaptopMinimalCheck /> نصب برنامه
                     </button>
                     <button
                         type="button"
@@ -258,7 +259,7 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                         className={`${styles.navItem} ${tab === "info" ? styles.navItemActive : ""}`}
                         onClick={() => setTab("info")}
                     >
-                        📚 اطلاعات
+                        <LibraryBig /> اطلاعات
                     </button>
                 </nav>
             </div>
@@ -360,10 +361,9 @@ export default function SettingsPanel({ user }: { user: UserData }) {
 
                         {/* بخش تغییر رمز عبور */}
                         <div className={styles.card} style={{ marginTop: 8 }}>
-                            <h3 className={styles.cardTitle}>🔐 تغییر رمز عبور</h3>
+                            <h3 className={styles.cardTitle}><LockKeyholeOpen />{" "} تغییر رمز عبور</h3>
                             <p className={styles.muted}>
-                                اگر پسورد فعلی‌تان را به یاد دارید، می‌توانید آن را تغییر دهید. کسانی که از روش‌های دیگر
-                                (مثل ایمیل یا شبکه‌های اجتماعی) وارد شده‌اند، می‌توانند این بخش را供給 کنند.
+                                اگر پسورد فعلی‌تان را به یاد دارید، می‌توانید آن را تغییر دهید.
                             </p>
                             {passwordSuccess && (
                                 <div className={styles.passwordSuccess}>{passwordSuccess}</div>
@@ -423,12 +423,12 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                         <p className={styles.subtitle}>ظاهر و رفتار برنامه را مطابق سلیقه‌تان تنظیم کنید.</p>
 
                         <div className={styles.card}>
-                            <h3 className={styles.cardTitle}>🎨 تم برنامه</h3>
+                            <h3 className={styles.cardTitle}><Palette /> تم برنامه</h3>
                             <div className={styles.themeRow}>
                                 {([
-                                    { key: "light", label: "روشن", icon: "☀️" },
-                                    { key: "dark", label: "تیره", icon: "🌙" },
-                                    { key: "system", label: "سیستم", icon: "🖥️" },
+                                    { key: "light", label: "روشن", icon: <SunMedium /> },
+                                    { key: "dark", label: "تیره", icon: <Moon /> },
+                                    { key: "system", label: "سیستم", icon: <MonitorCog /> },
                                 ] as const).map((opt) => (
                                     <button
                                         key={opt.key}
@@ -446,7 +446,7 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                         <div className={styles.card}>
                             <div className={styles.toggleRow}>
                                 <div>
-                                    <h3 className={styles.cardTitle}>🔔 صدای اعلان</h3>
+                                    <h3 className={styles.cardTitle}><BellRing /> صدای اعلان</h3>
                                     <p className={styles.muted}>پخش بوق کوتاه هنگام یادآور و اعلان‌ها</p>
                                 </div>
                                 <button
@@ -467,7 +467,7 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                         <div className={styles.card}>
                             <div className={styles.toggleRow}>
                                 <div>
-                                    <h3 className={styles.cardTitle}>⏰ یادآور روزانه</h3>
+                                    <h3 className={styles.cardTitle}><AlarmClock /> یادآور روزانه</h3>
                                     <p className={styles.muted}>در زمان مشخص، یادآوری برنامه‌ریزی روزانه دریافت کنید</p>
                                 </div>
                                 <button
@@ -560,13 +560,13 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                             <div className={styles.card}>
                                 <h3 className={styles.cardTitle}>درباره روزچین</h3>
                                 <p className={styles.text}>
-                                    روزچین یک برنامه‌ی هوشمند برنامه‌ریزی روزانه است که با کمک هوش مصنوعی
-                                    به شما کمک می‌کند کارهای روزانه‌تان را اولویت‌بندی کنید، برای هر کار زمان
-                                    واقع‌بینانه‌ای تخصیص دهید و عادت‌های بهتری بسازید.
+                                    روزچین یک برنامه‌ی هوشمند برنامه‌ریزی روزانه هست که با کمک هوش مصنوعی
+                                    به شما کمک می‌کنه کارهای روزانه‌ خودتون رو اولویت‌ بندی کنین، برای هر کار زمان
+                                واقع‌بینانه‌ای تخصیص بدین و عادت‌های بهتری بسازین.
                                 </p>
                                 <p className={styles.text}>
                                     موتور برنامه‌ریزی ما با در نظر گرفتن بودجه‌ی زمانی روز، اهمیت هر کار و
-                                    تخمین زمان آن، برنامه‌ای متعادل می‌سازد که هم واقع‌بینانه باشد و هم
+                                    تخمین زمان آن، برنامه‌ای متعادل میسازه که هم واقع‌بینانه باشه و هم
                                     به‌سادگی قابل انجام.
                                 </p>
                                 <p className={styles.text}>ساخته‌شده با ❤️ برای روزهای بهتر.</p>

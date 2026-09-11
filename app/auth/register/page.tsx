@@ -85,7 +85,7 @@ export default function RegisterForm() {
         >
             <AuthCard
                 title="ساخت حساب کاربری"
-                subtitle="چند ثانیه تا شروع برنامهریزی هوشمند روزانه"
+                subtitle="چند ثانیه تا شروع برنامه ریزی هوشمند روزانه"
             >
                 <form
                     onSubmit={handleSubmit(onSubmit)}

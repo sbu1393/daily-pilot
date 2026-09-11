@@ -28,11 +28,17 @@ export function useDaySummary() {
 
     const refresh = useCallback(
         async (silent = false) => {
+            // --- GUARD CLAUSE: اگر تاریخ هنوز آماده نیست، درخواست نزن ---
+            if (!selectedDate || selectedDate.trim() === "") {
+                if (!silent) setLoading(false)
+                return
+            }
+
             if (!silent) setLoading(true)
             try {
                 // ADR-04: { ok, data: summary } → خود data خلاصه است
-                const summary = await api<DaySummary>(`/api/planner/day?dayKey=${selectedDate}`)
-                setSummary(summary)
+                const res = await api<DaySummary>(`/api/planner/day?dayKey=${selectedDate}`)
+                setSummary(res)
                 setError(null)
             } catch (e) {
                 /* آفلاین: نمایش خلاصه‌ی کش‌شده تا نوار آمار از بین نرود */
@@ -52,12 +58,14 @@ export function useDaySummary() {
 
     // لود اولیه و تایمر دوره‌ای
     useEffect(() => {
-        refresh(true)
+        if (!selectedDate) return
+
+        refresh(false) // لود اولیه به صورت غیر سایلنت انجام شود تا وضعیت لودینگ درست کار کند
         const timer = setInterval(() => refresh(true), 30_000)
         return () => clearInterval(timer)
-    }, [refresh])
+    }, [selectedDate, refresh])
 
-    // 👇 گوش دادن به رویدادی که در DailyTaskList فایر می‌شود
+    // گوش دادن به رویدادی که در برنامه فایر می‌شود
     useEffect(() => {
         const handleMutated = () => {
             refresh(true)

@@ -67,7 +67,7 @@ export default function LoginForm() {
         >
             <AuthCard
                 title="ورود به روزچین"
-                subtitle="روزت را با خلبان خودکار برنامهریزی کن"
+                subtitle="روزت را با خلبان خودکار برنامه ریزی کن"
             >
                 <form
                     onSubmit={handleSubmit(onCredentialSubmit)}

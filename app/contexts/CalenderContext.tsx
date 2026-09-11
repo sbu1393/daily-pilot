@@ -1,25 +1,29 @@
 "use client"
 
 import { createContext, useContext, useEffect, useState } from "react"
-import { getCanonicalToday } from "../lib/canonicalDay"
+import { getCanonicalToday } from "@/app/lib/canonicalDay"
 
 type CalendarContextType = {
-    selectedDate: string // کلید روز canonical میلادی: "2026-01-02" (جلالی فقط برای نمایش)
+    selectedDate: string
     setSelectedDate: (date: string) => void
-    timezone: string // timezone کاربر — مبنای محاسبهی «امروز» در کلاینت
+    timezone: string
 }
 
-// پیشفرض Prisma — تا وقتی پروفایل کاربر نرسیده (همهی کاربران فعلی همین را دارند)
 const DEFAULT_TIMEZONE = "Asia/Tehran"
 
 const CalendarContext = createContext<CalendarContextType | null>(null)
 
 export function CalendarProvider({ children }: { children: React.ReactNode }) {
     const [timezone, setTimezone] = useState<string>(DEFAULT_TIMEZONE)
-    const [selectedDate, setSelectedDate] = useState<string>(() => getCanonicalToday(DEFAULT_TIMEZONE))
 
-    // timezone کاربر از پروفایل — کلیدهای canonical بر اساس همین tz محاسبه میشوند
+    // نکته: مقدار اولیه را خالی می‌گذاریم تا SSR/CSR هم‌ارزش باشند
+    const [selectedDate, setSelectedDate] = useState<string>("")
+
+    // پس از mount، selectedDate را مقداردهی می‌کنیم
     useEffect(() => {
+        // ابتدا با timezone فعلی (پیش‌فرض) مقدار بده
+        setSelectedDate(getCanonicalToday(DEFAULT_TIMEZONE))
+
         let cancelled = false
         fetch("/api/auth/profile")
             .then((res) => (res.ok ? res.json() : null))
@@ -31,7 +35,7 @@ export function CalendarProvider({ children }: { children: React.ReactNode }) {
                 }
             })
             .catch(() => {
-                /* مهمان یا خطا → پیشفرض میماند */
+                // مهمان یا خطا → پیشفرض می‌ماند، selectedDate همان مقدار خط بالا می‌ماند
             })
         return () => {
             cancelled = true

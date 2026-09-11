@@ -103,7 +103,7 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
 
                         <p className={styles.hint}>
                             عنوان را در صورت نیاز ویرایش کن تا اولویت، امتیاز، زمان تخمینی و دسته‌بندی دوباره
-                            محاسبه شود. این کار زمان تخصیص‌یافته به بقیه کارهای روز را هم بازتوزیع می‌کند.
+                            محاسبه بشه. این کار زمان تخصیص‌ یافته به بقیه کارهای روز رو هم بازتوزیع میکنه.
                         </p>
 
                         <label className={styles.fieldLabel}>عنوان کار</label>

@@ -351,6 +351,9 @@ code, kbd, samp {
 .dp-link-reset {
   text-decoration: none;
   color: inherit;
+  display: flex;
+  width: 4rem;
+
 }
 
 .app-header {
@@ -397,28 +400,34 @@ code, kbd, samp {
 
 .header-user {
   position: relative;
+  display: flex;
+  align-items: center;
 }
 
 .header-user-btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  border: 1.5px solid var(--border);
-  background: var(--surface);
-  color: var(--ink);
-  border-radius: var(--radius-full);
-  padding: 4px 12px 4px 4px;
-  font-family: inherit;
-  font-weight: 700;
-  font-size: .82rem;
+  justify-content: center;
+  padding: 0;               /* تمام فاصله‌های اضافه دور عکس حذف می‌شود */
+  border: none;             /* حاشیه دکمه حذف می‌شود */
+  background: transparent;  /* پس‌زمینه شفاف می‌شود تا فقط آواتار دیده شود */
+  border-radius: 50%;       /* دکمه کاملاً دایره‌ای می‌شود */
   cursor: pointer;
-  transition: var(--transition);
+  line-height: 0;
+  transition: transform 0.15s ease, opacity 0.15s ease;
 }
 
 .header-user-btn:hover {
   border-color: var(--primary);
   background: var(--primary-soft);
   box-shadow: var(--shadow-xs);
+  transform: scale(1.05);
+  opacity: 0.9;
+}
+
+.header-user-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .header-user-name {

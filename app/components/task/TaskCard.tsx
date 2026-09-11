@@ -89,7 +89,12 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze }: Props) {
 
             <div className={styles.times}>
                 {task.estimatedTime != null ? (
-                    <span>تخمین AI: <b>{fmtMinutes(task.estimatedTime)}</b></span>
+                    <span>
+                    تخمین AI:{" "}
+                    <b dir="rtl">
+                        {fmtMinutes(task.estimatedTime)}
+                    </b>
+                </span>
                 ) : (
                     <span>تخمین AI: <b className="dp-ai-missing">—</b></span>
                 )}

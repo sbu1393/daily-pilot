@@ -37,7 +37,7 @@ export default function Hero({ user }: { user: AvatarUser | null }) {
                 <motion.h1 variants={item}>
                     با<span className={styles.brand}>روزچین</span>
                     <br />
-                    روزت بچین
+                    روزت رو بچین
                 </motion.h1>
                 <motion.p variants={item}>
                     یک سیستم هوشمند برای برنامه‌ریزی، مدیریت کارها و ساختن عادت‌های بهتر.

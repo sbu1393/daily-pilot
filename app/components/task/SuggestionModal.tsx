@@ -1,18 +1,12 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useRef } from "react"
 import { faDigits, fmtMinutes } from "@/app/lib/time"
 import { type TaskItem, type TaskPriority } from "./taskTypes"
 import AnimatedModal from "../motion/AnimatedModal"
 import taskStyles from "./task.module.css"
 import styles from "./suggestion.module.css"
 
-// ADR-006 (Phase S4) — مودال پیشنهاد برنامه‌ی روز.
-// کاربر ۱۰۰٪ کنترل دارد: تیک‌های پیش‌فرض روی «جاافتاده‌ها» + دکمه‌ی تأیید صریح.
-// انتقال فقط از طریق onRollover (POST /api/tasks/rollover موجود در DailyTaskList) انجام می‌شود؛
-// این کامپوننت هیچ فراخوانی mutation مستقیمی ندارد. خطا داخل مودال نشان داده می‌شود.
-
-/* قرارداد GET /api/planner/suggestion (ADR-006 / Phase S2) — نمای سمت کلاینت */
 export type SuggestedTask = {
     taskId: number
     estimatedMinutes: number
@@ -38,7 +32,6 @@ export type SuggestionData = {
 }
 
 const priorityEmoji: Record<TaskPriority, string> = { HIGH: "🔴", MEDIUM: "🟠", LOW: "🟢" }
-// اولویت تحلیلنشده (null — G-16) → نشان خنثا
 const emojiOf = (t?: TaskItem) => (t?.priority ? priorityEmoji[t.priority] : "⚪")
 
 type Props = {
@@ -46,23 +39,33 @@ type Props = {
     onClose: () => void
     suggestion: SuggestionData
     tasks: TaskItem[]
-    /** اگر داده شود، ردیف‌های «جاافتاده» قابل انتخاب می‌شوند و دکمه‌ی انتقال فعال است */
     onRollover?: (ids: number[]) => Promise<void>
 }
 
 export default function SuggestionModal({ open, onClose, suggestion, tasks, onRollover }: Props) {
-    const [selected, setSelected] = useState<Set<number>>(() => new Set())
+    const [selected, setSelected] = useState<Set<number>>(new Set())
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
-    // عنوان/اولویت کارها از همان لیست روز می‌آید (قرارداد S2 را تغییر نمی‌دهیم)
+    const isFirstLoad = useRef(true)
+
     const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
     const unfittedIds = useMemo(() => suggestion.unfitted.map((u) => u.taskId), [suggestion])
 
-    // پیش‌فرض: همه‌ی کارهای جاافتاده انتخاب شده‌اند — همیشه همگام با آخرین پیشنهاد
+    // در اولین باز شدن، کارهای پیشنهادی برای انتقال تیک می‌خورند
     useEffect(() => {
-        setSelected(new Set(unfittedIds))
-    }, [unfittedIds])
+        if (open && isFirstLoad.current) {
+            setSelected(new Set(unfittedIds))
+            isFirstLoad.current = false
+        }
+    }, [open, unfittedIds])
+
+    // با بسته شدن مودال وضعیت لود ریست می‌شود
+    useEffect(() => {
+        if (!open) {
+            isFirstLoad.current = true
+        }
+    }, [open])
 
     const utilization =
         suggestion.capacityMinutes > 0
@@ -84,17 +87,14 @@ export default function SuggestionModal({ open, onClose, suggestion, tasks, onRo
         setBusy(true)
         setError(null)
         try {
-            // موفقیت → والد مودال را می‌بندد و رفرش + پیام را انجام می‌دهد
             await onRollover([...selected])
         } catch (e) {
-            // خطا داخل مودال — بدون شکستن وضعیت برنامه
             setError(e instanceof Error ? e.message : "خطا در انتقال کارها")
         } finally {
             setBusy(false)
         }
     }
 
-    // هنگام اجرای انتقال، بستن (✕ / Escape / کلیک بیرون) قفل می‌شود
     const guardedClose = () => {
         if (!busy) onClose()
     }
@@ -104,7 +104,6 @@ export default function SuggestionModal({ open, onClose, suggestion, tasks, onRo
 
     return (
         <AnimatedModal open={open} onClose={guardedClose}>
-            {/* نقش dialog + برچسب فارسی برای صفحه‌خوان‌ها */}
             <div role="dialog" aria-modal="true" aria-label="پیشنهاد برنامه امروز">
                 <div className={taskStyles.modalHead}>
                     <h4>🧭 پیشنهاد برنامه‌ی امروز</h4>
@@ -122,7 +121,6 @@ export default function SuggestionModal({ open, onClose, suggestion, tasks, onRo
                     بر اساس ظرفیت امروز و اولویت کارهایت — هیچ کاری بدون تأیید تو جابه‌جا نمی‌شود.
                 </p>
 
-                {/* سنجه‌های ظرفیت */}
                 <div className={styles.utilBox}>
                     <div className={styles.utilRow}>
                         <span>ظرفیت امروز</span>
@@ -148,7 +146,6 @@ export default function SuggestionModal({ open, onClose, suggestion, tasks, onRo
                     </div>
                 </div>
 
-                {/* ظرفیت صفر/نامشخص — توضیح صادقانه به‌جای متن عمومی */}
                 {suggestion.capacityMinutes <= 0 && (
                     <p className={styles.rationaleBox}>
                         برای امروز هنوز «وقت آزاد» تعیین نکرده‌ای. از کارت بالای صفحه وقت امروزت را وارد کن
@@ -156,7 +153,7 @@ export default function SuggestionModal({ open, onClose, suggestion, tasks, onRo
                     </p>
                 )}
 
-                {/* برنامه‌ی امروز */}
+                {/* ۱. کارهای برنامه‌ریزی‌شده برای امروز */}
                 <h5 className={styles.sectionTitle}>برنامه‌ی امروز</h5>
                 {suggestion.planned.length === 0 ? (
                     <p className={styles.rationaleBox}>
@@ -168,8 +165,8 @@ export default function SuggestionModal({ open, onClose, suggestion, tasks, onRo
                     <ul className={styles.taskList}>
                         {suggestion.planned.map((p) => {
                             const t = byId.get(p.taskId)
-                            return (
-                                <li key={p.taskId} className={styles.taskRow}>
+                            const row = (
+                                <>
                                     <span className={styles.emoji} aria-hidden="true">
                                         {emojiOf(t)}
                                     </span>
@@ -180,13 +177,30 @@ export default function SuggestionModal({ open, onClose, suggestion, tasks, onRo
                                         {fmtMinutes(p.suggestedMinutes)}
                                         {p.partial && <em className={styles.partialChip}>کاهش‌یافته</em>}
                                     </span>
+                                </>
+                            )
+
+                            return showActions ? (
+                                <label key={p.taskId} className={styles.pickRow}>
+                                    <input
+                                        type="checkbox"
+                                        checked={selected.has(p.taskId)}
+                                        onChange={() => toggle(p.taskId)}
+                                        disabled={busy}
+                                        aria-label={`انتخاب ${t?.title ?? `کار ${faDigits(p.taskId)}`}`}
+                                    />
+                                    {row}
+                                </label>
+                            ) : (
+                                <li key={p.taskId} className={styles.taskRow}>
+                                    {row}
                                 </li>
                             )
                         })}
                     </ul>
                 )}
 
-                {/* پیشنهاد انتقال */}
+                {/* ۲. پیشنهاد انتقال به فردا */}
                 <h5 className={styles.sectionTitle}>پیشنهاد انتقال به فردا</h5>
                 {suggestion.unfitted.length === 0 ? (
                     <p className={styles.rationaleBox}>همه‌ی کارها در ظرفیت امروز جا شدند. 🎉</p>
@@ -231,7 +245,6 @@ export default function SuggestionModal({ open, onClose, suggestion, tasks, onRo
                     </ul>
                 )}
 
-                {/* صداقت درباره‌ی تخمین پیش‌فرض (§5.4 «Ask actual duration») */}
                 {suggestion.usedDefaultEstimate.length > 0 && (
                     <p className={styles.footnote}>
                         برای {faDigits(suggestion.usedDefaultEstimate.length)} کار از این فهرست هنوز تخمین
@@ -240,7 +253,6 @@ export default function SuggestionModal({ open, onClose, suggestion, tasks, onRo
                     </p>
                 )}
 
-                {/* راهنمای وقتی هیچ کاری انتخاب نشده */}
                 {noSelection && !busy && (
                     <p className={styles.footnote} role="note">
                         هیچ کاری انتخاب نشده — یا کارها را انتخاب کن، یا با «فعلاً نه» برنامه‌ی امروز را
@@ -266,8 +278,8 @@ export default function SuggestionModal({ open, onClose, suggestion, tasks, onRo
                                 {busy
                                     ? "در حال انتقال…"
                                     : selected.size === 0
-                                      ? "برای انتقال، کار انتخاب کن"
-                                      : `انتقال ${faDigits(selected.size)} کار به فردا`}
+                                        ? "برای انتقال، کار انتخاب کن"
+                                        : `انتقال ${faDigits(selected.size)} کار به فردا`}
                             </button>
                             <button className={taskStyles.btnGhost} onClick={guardedClose} disabled={busy}>
                                 فعلاً نه

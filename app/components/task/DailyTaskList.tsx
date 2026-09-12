@@ -8,7 +8,6 @@ import { getCanonicalToday, shiftCanonicalKey } from "../../lib/canonicalDay"
 import { faDigits } from "@/app/lib/time"
 import {
     cacheDay,
-    enqueueTask,
     isOffline,
     onOnline,
     readCachedDay,
@@ -26,10 +25,9 @@ import RolloverDialog from "./RolloverDialog"
 import styles from "./task.module.css"
 import ReanalyzeModal from "./ReanalyzeModal"
 import SuggestionCard from "./SuggestionCard"
+import SuggestionModal, { type SuggestionData } from "./SuggestionModal"
 import { formatCanonicalToJalali } from "../../lib/time"
 import { LayersPlus, Megaphone, RotateCwFadingClock } from "lucide-react"
-
-
 
 const priorityWeight: Record<TaskPriority, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 }
 
@@ -46,14 +44,16 @@ export default function DailyTaskList() {
     const [completeTask, setCompleteTask] = useState<TaskItem | null>(null)
     const [rolloverOpen, setRolloverOpen] = useState(false)
     const [deleteTask, setDeleteTask] = useState<TaskItem | null>(null)
-
     const [reanalyzeTask, setReanalyzeTask] = useState<TaskItem | null>(null)
+    
+    // استیت‌های مربوط به هوش مصنوعی
+    const [suggestionOpen, setSuggestionOpen] = useState(false)
+    const [suggestionData, setSuggestionData] = useState<SuggestionData | null>(null)
+
     const [queuedTasks, setQueuedTasks] = useState<QueuedTask[]>([])
-    const [offline, setOffline] = useState(false)
+    
+    const requestSeq = useRef(0)
 
-    const requestSeq = useRef(0) // محافظ race هنگام تعویض سریع روز
-
-    /* نمایش کارهای صف‌شدهی آفلاین فقط برای همان روز */
     const visibleQueued = useMemo(
         () => queuedTasks.filter((q) => q.dayKey === selectedDate),
         [queuedTasks, selectedDate],
@@ -69,16 +69,13 @@ export default function DailyTaskList() {
         const seq = ++requestSeq.current
         setLoading(true)
         try {
-            // ADR-04: { ok, data: { tasks, summary } } → data.tasks
             const data = await api<{ tasks: TaskItem[]; summary: DaySummary }>(
                 `/api/tasks?dayKey=${selectedDate}`,
             )
             const dayTasks = data.tasks
             if (seq === requestSeq.current) {
                 setTasks(dayTasks)
-                setOffline(false)
             }
-            /* کش محلی برای استفاده‌ی آفلاین بعدی — ADR-04: data = summary */
             try {
                 const sum = await api<DaySummary>(`/api/planner/day?dayKey=${selectedDate}`)
                 cacheDay(selectedDate, dayTasks, sum)
@@ -87,14 +84,11 @@ export default function DailyTaskList() {
             }
         } catch (e) {
             if (seq === requestSeq.current) {
-                /* آفلاین: به کش محلی برمی‌گردیم تا داشبورد کار کند */
                 const cached = readCachedDay(selectedDate)
                 if (cached) {
                     setTasks(cached.tasks)
-                    setOffline(true)
                 } else if (isOffline()) {
                     setTasks([])
-                    setOffline(true)
                 } else {
                     toast.error(e instanceof Error ? e.message : "خطا در دریافت کارها")
                 }
@@ -104,12 +98,10 @@ export default function DailyTaskList() {
         }
     }, [selectedDate])
 
-    // کارهای ناتمام روزهای قبل — اندپوینت مخصوص بازگرداندنِ کارهای عقب‌افتاده
     const loadOverdue = useCallback(async () => {
         try {
-            // ADR-04: { ok, data: tasks } → خود data آرایهی کارهاست
             const data = await api<TaskItem[]>("/api/tasks/overdue")
-            const limit = shiftCanonicalKey(getCanonicalToday(timezone), -6) // فقط ۷ روز اخیر
+            const limit = shiftCanonicalKey(getCanonicalToday(timezone), -6)
             setOverdue(data.filter((t) => t.dayKey >= limit))
         } catch {
             /* بی‌صدا */
@@ -125,7 +117,6 @@ export default function DailyTaskList() {
         refreshQueue()
     }, [refreshAll, refreshQueue])
 
-    /* وقتی آنلاین شدیم: صف را سینک کن و روز را دوباره بگیر */
     useEffect(() => {
         const off = onOnline(() => {
             void (async () => {
@@ -144,7 +135,7 @@ export default function DailyTaskList() {
     const afterMutation = useCallback(
         async (msg?: string) => {
             await Promise.all([refreshAll(), refreshSummary(true)])
-            window.dispatchEvent(new Event("planner:mutated")) // نوار آمار فاز ۵ هم رفرش بشه
+            window.dispatchEvent(new Event("planner:mutated"))
             if (msg) toast.success(msg)
         },
         [refreshAll, refreshSummary],
@@ -160,7 +151,6 @@ export default function DailyTaskList() {
             if (a.status === "IN_PROGRESS" && b.status !== "IN_PROGRESS") return -1
             if (b.status === "IN_PROGRESS" && a.status !== "IN_PROGRESS") return 1
             const d = scoreOf(b) - scoreOf(a)
-            // null = تحلیلنشده → مثل LOW در صف میماند
             return d !== 0 ? d : priorityWeight[b.priority ?? "LOW"] - priorityWeight[a.priority ?? "LOW"]
         })
     }, [tasks])
@@ -175,7 +165,8 @@ export default function DailyTaskList() {
             await api(`/api/tasks/${deleteTask.id}`, { method: "DELETE" })
             setDeleteTask(null)
             await afterMutation("کار حذف شد؛ زمانش به استخر روز برگشت 🕊")
-        } catch (e) {                    toast.error(e instanceof Error ? e.message : "خطا در حذف کار")
+        } catch (e) {
+            toast.error(e instanceof Error ? e.message : "خطا در حذف کار")
         } finally {
             setBusy(false)
         }
@@ -198,8 +189,6 @@ export default function DailyTaskList() {
         }
     }
 
-    // ADR-006 (S4): انتقال «به فردا» از پیشنهاد روز — همان اندپوینت موجود.
-    // خطا را throw می‌کنیم تا مودال آن را داخل خودش نشان دهد (بدون toast دوم).
     const handleSuggestionRollover = async (ids: number[]) => {
         setBusy(true)
         try {
@@ -216,14 +205,10 @@ export default function DailyTaskList() {
         }
     }
 
-
     return (
         <section className={styles.section}>
             <div className={styles.headerRow}>
-            <h3>
-                برنامه‌ی روز {formatCanonicalToJalali(selectedDate)}
-            </h3>
-
+                <h3>برنامه‌ی روز {formatCanonicalToJalali(selectedDate)}</h3>
                 {tasks.length > 0 && (
                     <span className={styles.count}>
                         {faDigits(doneCount)} از {faDigits(tasks.length)} انجام شده
@@ -233,24 +218,27 @@ export default function DailyTaskList() {
 
             {overCommitted && (
                 <div className={styles.warningBar}>
-                    ⚠️ ظرفیت روز پر شده و زمان بعضی کارها کم شده. اگه کار جدید اضافه کنی، از کارهای
-                    کم‌اهمیت‌ تر کم میشه — یا «زمان آزاد» روز رو زیاد کن.
+                    ⚠️ ظرفیت روز پر شده و زمان بعضی کارها کم شده. اگه کار جدید اضافه کنی، از کارهای کم‌اهمیت‌ تر کم میشه — یا «زمان آزاد» روز رو زیاد کن.
                 </div>
             )}
 
-            {/* ADR-006 (S3/S4): کارت پیشنهاد روز — روزِ امروزِ دارای کار جاافتاده */}
+            {/* بخش پیشنهاد هوش مصنوعی */}
             {selectedDate === getCanonicalToday(timezone) && (
                 <SuggestionCard
                     dayKey={selectedDate}
                     tasks={tasks}
                     onRollover={handleSuggestionRollover}
+                    onOpenModal={(data) => {
+                        setSuggestionData(data)
+                        setSuggestionOpen(true)
+                    }}
                 />
             )}
 
             {overdue.length > 0 && (
                 <div className={styles.banner}>
                     <span>
-                    <Megaphone /> {faDigits(overdue.length)} کار از روزهای قبل ناتمام مانده
+                        <Megaphone /> {faDigits(overdue.length)} کار از روزهای قبل ناتمام مانده
                     </span>
                     <button className={styles.btnPrimary} onClick={() => setRolloverOpen(true)}>
                         انتقال به امروز
@@ -262,13 +250,11 @@ export default function DailyTaskList() {
                 <p className={styles.empty}>در حال بارگذاری…</p>
             ) : ordered.length === 0 && visibleQueued.length === 0 ? (
                 <div className={styles.empty}>
-                    هنوز کاری برای این روز ثبت نشده.
-                    <br />
+                    هنوز کاری برای این روز ثبت نشده.<br />
                     اولین کار را بساز تا هوش مصنوعی اولویت و زمانبندی رو مشخص کنه.
                 </div>
             ) : (
                 <ul className={styles.list}>
-                    {/* AnimatePresence تا کارت‌ها هنگام حذف/اتمام، با انیمیشن خارج شوند */}
                     <AnimatePresence initial={false} mode="popLayout">
                         {ordered.map((task) => (
                             <TaskCard
@@ -279,8 +265,6 @@ export default function DailyTaskList() {
                                 onReanalyze={setReanalyzeTask}
                             />
                         ))}
-
-                        {/* کارهای ساختهشده در حالت آفلاین — هنوز سینک نشدهاند */}
                         {visibleQueued.map((q) => (
                             <motion.li
                                 key={q.id}
@@ -296,7 +280,7 @@ export default function DailyTaskList() {
                                 <div className={styles.chips}>
                                     <span className="dp-queued-chip">⏳ در صف سینک — آفلاین</span>
                                     <span className={styles.chipTime}>
-                                    <RotateCwFadingClock /> {faDigits(new Date(q.createdAt).getHours())}:
+                                        <RotateCwFadingClock /> {faDigits(new Date(q.createdAt).getHours())}:
                                         {faDigits(String(new Date(q.createdAt).getMinutes()).padStart(2, "0"))}
                                     </span>
                                 </div>
@@ -311,7 +295,7 @@ export default function DailyTaskList() {
 
             <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} style={{ width: "fit-content" }}>
                 <button className={styles.btnPrimary} onClick={() => setCreateOpen(true)}>
-                <LayersPlus />{" "}کار جدید
+                    <LayersPlus /> کار جدید
                 </button>
             </motion.div>
 
@@ -333,6 +317,17 @@ export default function DailyTaskList() {
                     onClose={() => setRolloverOpen(false)}
                     onConfirm={handleRollover}
                     busy={busy}
+                />
+            )}
+            
+            {/* مودال پیشنهاد هوش مصنوعی */}
+            {suggestionData && (
+                <SuggestionModal
+                    open={suggestionOpen}
+                    onClose={() => setSuggestionOpen(false)}
+                    suggestion={suggestionData}
+                    tasks={tasks}
+                    onRollover={handleSuggestionRollover}
                 />
             )}
 
@@ -361,7 +356,7 @@ export default function DailyTaskList() {
                 </div>
             )}
             <ReanalyzeModal
-                key={reanalyzeTask?.id ?? "none"} // باز شدن دوباره = مونت مجدد = state تمیز
+                key={reanalyzeTask?.id ?? "none"}
                 task={reanalyzeTask}
                 onClose={() => setReanalyzeTask(null)}
                 onDone={() => afterMutation()}

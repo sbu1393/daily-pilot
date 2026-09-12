@@ -130,9 +130,9 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze }: Props) {
                             type="button"
                             className={styles.btnGhost}
                             onClick={() => onReanalyze?.(task)}
-                            title="تحلیل مجدد با هوش مصنوعی (اولویت، امتیاز، تخمین و دسته‌بندی)"
+                            title=" تحلیل باهوش مصنوعی (اولویت، امتیاز، تخمین و دسته‌بندی)"
                         >
-                            🔄 تحلیل مجدد
+                            🔄 تحلیل باهوش مصنوعی
                         </button>
                     )}
                 </div>

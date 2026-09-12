@@ -8,6 +8,7 @@ import { api } from "@/app/lib/api/client"
 import AnimatedModal from "../motion/AnimatedModal" // مودال با انیمیشن فر머-موشن
 import { type TaskItem } from "./taskTypes"
 import styles from "./task.module.css"
+import { Gift } from "lucide-react"
 
 type Props = {
     task: TaskItem | null
@@ -141,7 +142,7 @@ export default function CompleteTaskModal({ task, onClose, onCompleted }: Props)
                     <div className={styles.resultBox}>
                         {result.saved > 0 && (
                             <div className={styles.resultSaved}>
-                                <div className={styles.resultEmoji}>🎉</div>
+                                <div className={styles.resultEmoji}><Gift /></div>
                                 <h4>{fmtMinutes(result.saved)} زمان سیو شد!</h4>
                                 <p>این زمان آزاد است و می‌توانی برای بقیه کارهای امروز استفاده کنی.</p>
                             </div>

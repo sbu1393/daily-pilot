@@ -1,3 +1,7 @@
+import moment from "moment-jalaali"
+
+
+
 // تبدیل ارقام به فارسی
 export function faDigits(input: number | string): string {
     return String(input).replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[Number(d)])
@@ -73,4 +77,12 @@ export function faRelativeTime(input: Date | string | number): string {
 
     const years = Math.floor(days / 365)
     return `${faDigits(years)} سال پیش`
+}
+
+
+// تبدیل میلادی به شمسی در ui
+
+export function formatCanonicalToJalali(canonicalKey: string): string {
+    if (!canonicalKey) return ""
+    return faDigits(moment(canonicalKey, "YYYY-MM-DD").format("jYYYY/jMM/jDD"))
 }

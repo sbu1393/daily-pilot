@@ -42,7 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
         {/* ===== PWA ===== */}
         <link rel="manifest" href="/manifest.webmanifest" />
-        <link rel="preload" as="image" href="/logo.png" />
+        <link rel="preload" as="image" href="/animated-logo.gif" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />

@@ -2,13 +2,15 @@
 
 import { useEffect, useState } from "react"
 import { useCalendar } from "@/app/contexts/CalenderContext"
-import { faDigits } from "@/app/lib/time"
 import { enqueueTask, isOffline } from "@/app/lib/offline"
 import { canonicalKeyToLocalMidnight } from "@/app/lib/canonicalDay"
 import { api } from "@/app/lib/api/client"
 import { toast } from "react-toastify"
 import AnimatedModal from "../motion/AnimatedModal"
 import styles from "./task.module.css"
+import { formatCanonicalToJalali } from "../../lib/time"
+import { NotebookPen, Unplug } from "lucide-react"
+
 
 type Props = {
     open: boolean
@@ -52,7 +54,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
             dayKey: selectedDate,
             scheduledDate: canonicalKeyToLocalMidnight(selectedDate, timezone).toISOString(),
         })
-        toast.info("🔌 آفلاین هستی — کار ذخیره شد و بعد از اتصال سینک می‌شود")
+        toast.info(`${<Unplug />} آفلاین هستی — کار ذخیره شد و بعد از اتصال سینک می‌شود`)
         setText("")
         onClose()
         onCreated()
@@ -100,17 +102,21 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
     return (
         <AnimatedModal open={open} onClose={onClose}>
             <div className={styles.modalHead}>
-                <h4>کار جدید</h4>                    <button className={styles.closeBtn} onClick={onClose} aria-label="بستن">✕</button>
+                <NotebookPen />
+                <h4>کار جدید</h4>
+                <button className={styles.closeBtn} onClick={onClose} aria-label="بستن">✕</button>
             </div>
             {offline && (
                 <div className="dp-queued-chip" style={{ justifyContent: "center" }}>
-                    🔌 آفلاین — کار محلی ذخیره و بعداً سینک می‌شود
+                    <Unplug /> آفلاین — کار محلی ذخیره و بعداً سینک می‌شود
                 </div>
             )}
             <p className={styles.hint}>
-                برای روز <b>{faDigits(selectedDate.replaceAll("-", "/"))}</b> — کار بدون تحلیل ساخته می‌شود؛
-                بعداً با «تحلیل مجدد» می‌توانی اولویت، امتیاز، دلیل و زمان تخمینی را با هوش مصنوعی تعیین کنی.
+                برای روز <b>{formatCanonicalToJalali(selectedDate)}</b>
+                — کار بدون تحلیل ساخته میشه
+                بعداً با «تحلیل مجدد» می‌تونی اولویت، امتیاز، دلیل و زمان تخمینی را با هوش مصنوعی تعیین کنی.
             </p>
+
             <input
                 autoFocus
                 className={styles.input}

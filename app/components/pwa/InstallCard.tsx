@@ -16,7 +16,12 @@ export default function InstallCard() {
     const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
     const [platform, setPlatform] = useState<"ios" | "other">("other")
 
-    const shareUrl = typeof window !== "undefined" ? window.location.origin : ""
+    const [shareUrl, setShareUrl] = useState("")
+
+    useEffect(() => {
+        setShareUrl(window.location.origin)
+    }, [])
+
 
     useEffect(() => {
         // تولید QR سمت کلاینت (ویندوز/تبلت/گوشی — بدون بار سرور)
@@ -32,14 +37,16 @@ export default function InstallCard() {
         setPlatform(/iphone|ipad|ipod/i.test(window.navigator.userAgent) ? "ios" : "other")
     }, [shareUrl])
 
+
+
     // کاربر از داخل خود اپ آمده → نصب انجام شده
     if (isStandalone) {
         return (
             <div className="dp-card-soft">
                 <h3 className="dp-card-title">✅ برنامه نصب شده است</h3>
                 <p className="dp-card-text">
-                    روزچین روی این دستگاه نصب است و مثل یک اپ بومی اجرا می‌شود. از همین‌جا با یک لمس
-                    به برنامه‌ریزی روز بپرداز!
+                    روزچین روی این دستگاه نصب هست و مثل یک اپ اجرا میشه. از همین‌جا با یک لمس
+                    به برنامه‌ریزی روزت بپرداز!
                 </p>
             </div>
         )
@@ -61,7 +68,7 @@ export default function InstallCard() {
             </h3>
             <p className="dp-card-text">
                 با دوربین گوشی کد زیر را اسکن کن یا لینک را روی گوشی باز کن تا روزچین مثل یک اپ
-                واقعی نصب شود — آیکون روی صفحه اصلی، اجرای تمام‌صفحه و کارکرد آفلاین.
+                واقعی نصب بشه — آیکون روی صفحه اصلی، اجرای تمام‌صفحه و کارکرد آفلاین.
             </p>
 
             <div className="dp-install-grid">

@@ -7,6 +7,8 @@ import { api } from "@/app/lib/api/client"
 import { faDigits, fmtMinutes } from "@/app/lib/time"
 import { toast } from "react-toastify"
 import styles from "./history.module.css"
+import {formatCanonicalToJalali} from "../../lib/time"
+
 
 type TaskItem = {
     id: number
@@ -29,9 +31,13 @@ export default function DayHistoryPanel() {
     const isPast = selectedDate < getCanonicalToday(timezone)
 
     const load = useCallback(async () => {
+        // --- GUARD CLAUSE: اگر تاریخ هنوز آماده نیست، درخواست نزن ---
+        if (!selectedDate || selectedDate.trim() === "") {
+            return
+        }
+
         setLoading(true)
         try {
-            // ADR-04: { ok, data: { tasks, summary } } → data.tasks
             const data = await api<{ tasks: TaskItem[] }>(`/api/tasks?dayKey=${selectedDate}`)
             setTasks(data.tasks ?? [])
         } catch (e) {
@@ -47,7 +53,6 @@ export default function DayHistoryPanel() {
         else setTasks([])
     }, [isPast, load])
 
-    // بعد از هر mutation (اتمام/حذف/rollover) تاریخچه بیصدا رفرش میشه
     useEffect(() => {
         const onMutated = () => { if (isPast) load() }
         window.addEventListener("planner:mutated", onMutated)
@@ -83,18 +88,20 @@ export default function DayHistoryPanel() {
     return (
         <section className={styles.section}>
             <div className={styles.head}>
-                <h3>تاریخچهی این روز</h3>
-                <span className={styles.date}>{faDigits(selectedDate.replaceAll("-", "/"))}</span>
+                <h3>تاریخچه‌ی این روز</h3>
+                <span className={styles.date}>
+                    {selectedDate ? formatCanonicalToJalali(selectedDate) : ""}
+                </span>
             </div>
 
-            {/* جمعبندی روز */}
+
             <div className={styles.statsRow}>
                 <div className={styles.stat}>
                     <span className={styles.statLabel}>کار انجام‌شده</span>
                     <span className={styles.statValue}>{faDigits(done.length)} کار</span>
                 </div>
                 <div className={styles.stat}>
-                    <span className={styles.statLabel}>زمان واقعی صرف‌شده</span>
+                    <span className={styles.statLabel}>زمان واقعی صرف‌ شده</span>
                     <span className={styles.statValue}>{fmtMinutes(totalSpent)}</span>
                 </div>
                 {totalSaved > 0 && (
@@ -105,7 +112,7 @@ export default function DayHistoryPanel() {
                 )}
                 {totalOverspent > 0 && (
                     <div className={styles.stat}>
-                        <span className={styles.statLabel}>بیش‌مصرفی</span>
+                        <span className={styles.statLabel}>بیش‌ مصرفی</span>
                         <span className={`${styles.statValue} ${styles.bad}`}>−{fmtMinutes(totalOverspent)}</span>
                     </div>
                 )}
@@ -114,10 +121,9 @@ export default function DayHistoryPanel() {
             {loading ? (
                 <p className={styles.loading}>در حال بارگذاری...</p>
             ) : done.length === 0 && leftovers.length === 0 ? (
-                <p className={styles.empty}>کاری در این روز ثبت نشده است</p>
+                <p className={styles.empty}>کاری در این روز ثبت نشده </p>
             ) : (
                 <>
-                    {/* انجامشدهها */}
                     {done.length > 0 && (
                         <div className={styles.block}>
                             <h4 className={styles.blockTitle}>انجام‌شده‌ها</h4>
@@ -139,7 +145,7 @@ export default function DayHistoryPanel() {
                                                     <span className={`${styles.metaChip} ${styles.savedChip}`}>+{fmtMinutes(saved)} سیو</span>
                                                 )}
                                                 {over > 0 && (
-                                                    <span className={`${styles.metaChip} ${styles.overChip}`}>−{fmtMinutes(over)} بیش‌مصرفی</span>
+                                                    <span className={`${styles.metaChip} ${styles.overChip}`}>−{fmtMinutes(over)} بیش‌ مصرفی</span>
                                                 )}
                                             </div>
                                         </li>
@@ -149,7 +155,6 @@ export default function DayHistoryPanel() {
                         </div>
                     )}
 
-                    {/* کارهای باقیمانده از اون روز */}
                     {leftovers.length > 0 && (
                         <div className={styles.block}>
                             <div className={styles.leftoverNote}>

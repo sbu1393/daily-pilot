@@ -44,10 +44,10 @@ export default function DownloadSection() {
                 transition={{ duration: .6, ease: [0.22, 1, 0.36, 1] }}
             >
                 <h2 className={styles.downloadTitle}>
-                    <Smartphone size={22} /> روزچین را روی گوشی‌ات نصب کن
+                    <Smartphone size={22} /> روزچین را روی گوشی‌ خودت نصب کن
                 </h2>
                 <p className={styles.downloadText}>
-                    با دوربین گوشی کد زیر را اسکن کن تا همین صفحه روی گوشی‌ات باز شود؛ بعد طبق راهنما
+                    با دوربین گوشی کد زیر را اسکن کن تا همین صفحه روی خودت باز بشه؛ بعد طبق راهنما
                     اپ را روی صفحه اصلی نصب کن — آیکون اختصاصی، اجرای تمام‌صفحه و کارکرد آفلاین.
                 </p>
 

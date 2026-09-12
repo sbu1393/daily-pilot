@@ -7,7 +7,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--surface, #f8fafc);
+    background: #0b1120; 
     /* Fallback بدون نیاز به JS: حتی اگر hydration شکست بخورد،
        اسپلش بعد از ۴ ثانیه خودش محو میشود و هرگز روی اپ گیر نمیکند. */
     animation: dpSplashGone 0s 4s forwards;

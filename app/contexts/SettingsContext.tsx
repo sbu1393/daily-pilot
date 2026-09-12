@@ -1,6 +1,13 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
+import {
+    createContext,
+    useCallback,
+    useContext,
+    useEffect,
+    useRef,
+    useState,
+} from "react"
 
 export type ThemePreference = "light" | "dark" | "system"
 
@@ -8,7 +15,7 @@ export type Settings = {
     theme: ThemePreference
     sound: boolean
     reminderEnabled: boolean
-    reminderTime: string // "HH:MM" به وقت محلی
+    reminderTime: string
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -31,11 +38,19 @@ type SettingsContextType = {
 const SettingsContext = createContext<SettingsContextType | null>(null)
 
 function loadSettings(): Settings {
-    if (typeof window === "undefined") return DEFAULT_SETTINGS
     try {
         const raw = window.localStorage.getItem(STORAGE_KEY)
-        if (!raw) return DEFAULT_SETTINGS
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
+
+        if (!raw) {
+            return DEFAULT_SETTINGS
+        }
+
+        const saved = JSON.parse(raw) as Partial<Settings>
+
+        return {
+            ...DEFAULT_SETTINGS,
+            ...saved,
+        }
     } catch {
         return DEFAULT_SETTINGS
     }
@@ -43,10 +58,11 @@ function loadSettings(): Settings {
 
 function resolveTheme(pref: ThemePreference): "light" | "dark" {
     if (pref === "system") {
-        return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
+        return window.matchMedia("(prefers-color-scheme: dark)").matches
             ? "dark"
             : "light"
     }
+
     return pref
 }
 
@@ -55,110 +71,228 @@ function applyTheme(pref: ThemePreference) {
     document.documentElement.setAttribute("data-theme", theme)
 }
 
-// بوق کوتاه و لطیف با Web Audio — بدون نیاز به فایل صوتی
 function beep() {
     try {
-        const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-        const ctx = new Ctx()
+        const AudioContextClass =
+            window.AudioContext ||
+            (
+                window as unknown as {
+                    webkitAudioContext: typeof AudioContext
+                }
+            ).webkitAudioContext
+
+        const ctx = new AudioContextClass()
         const now = ctx.currentTime
 
-        const play = (freq: number, start: number, dur: number) => {
-            const osc = ctx.createOscillator()
+        const play = (freq: number, start: number, duration: number) => {
+            const oscillator = ctx.createOscillator()
             const gain = ctx.createGain()
-            osc.type = "sine"
-            osc.frequency.value = freq
+
+            oscillator.type = "sine"
+            oscillator.frequency.value = freq
+
             gain.gain.setValueAtTime(0.0001, start)
-            gain.gain.exponentialRampToValueAtTime(0.22, start + 0.02)
-            gain.gain.exponentialRampToValueAtTime(0.0001, start + dur)
-            osc.connect(gain).connect(ctx.destination)
-            osc.start(start)
-            osc.stop(start + dur + 0.05)
+            gain.gain.exponentialRampToValueAtTime(
+                0.22,
+                start + 0.02,
+            )
+            gain.gain.exponentialRampToValueAtTime(
+                0.0001,
+                start + duration,
+            )
+
+            oscillator.connect(gain).connect(ctx.destination)
+            oscillator.start(start)
+            oscillator.stop(start + duration + 0.05)
         }
 
         play(660, now, 0.18)
         play(880, now + 0.16, 0.28)
-        setTimeout(() => ctx.close().catch(() => undefined), 900)
+
+        window.setTimeout(() => {
+            ctx.close().catch(() => undefined)
+        }, 900)
     } catch {
-        /* بی‌صدا در مرورگرهای قدیمی */
+        // Web Audio در دسترس نیست.
     }
 }
 
-export function SettingsProvider({ children }: { children: React.ReactNode }) {
-    const [settings, setSettings] = useState<Settings>(loadSettings)
+export function SettingsProvider({
+    children,
+}: {
+    children: React.ReactNode
+}) {
+    /*
+     * سرور و اولین رندر مرورگر باید دقیقاً مقدار یکسانی داشته باشند.
+     * بنابراین اینجا مستقیماً localStorage را نمی‌خوانیم.
+     */
+    const [settings, setSettings] =
+        useState<Settings>(DEFAULT_SETTINGS)
+
+    /*
+     * مشخص می‌کند خواندن localStorage تمام شده است.
+     * این متغیر مانع بازنویسی زودهنگام تنظیمات ذخیره‌شده می‌شود.
+     */
+    const [settingsLoaded, setSettingsLoaded] = useState(false)
+
     const firedRef = useRef<string | null>(null)
 
-    // اعمال تم روی <html> + ذخیره‌سازی
+    // تنظیمات فقط پس از mount از localStorage خوانده می‌شوند.
     useEffect(() => {
+        const savedSettings = loadSettings()
+
+        setSettings(savedSettings)
+        setSettingsLoaded(true)
+    }, [])
+
+    // پس از بارگذاری تنظیمات، تم را اعمال و تغییرات را ذخیره می‌کنیم.
+    useEffect(() => {
+        if (!settingsLoaded) {
+            return
+        }
+
         applyTheme(settings.theme)
+
         try {
-            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
-        } catch { /* ذخیره‌سازی غیرفعال */ }
-    }, [settings])
+            window.localStorage.setItem(
+                STORAGE_KEY,
+                JSON.stringify(settings),
+            )
+        } catch {
+            // localStorage در دسترس نیست.
+        }
+    }, [settings, settingsLoaded])
 
-    // دنبال کردن تغییر تم سیستم وقتی حالت «سیستم» انتخاب شده
+    // دنبال کردن تغییر تم سیستم در حالت system
     useEffect(() => {
-        if (settings.theme !== "system") return
-        const mq = window.matchMedia("(prefers-color-scheme: dark)")
-        const handler = () => applyTheme("system")
-        mq.addEventListener("change", handler)
-        return () => mq.removeEventListener("change", handler)
-    }, [settings.theme])
+        if (!settingsLoaded || settings.theme !== "system") {
+            return
+        }
 
-    // یادآور: هر ۲۰ ثانیه بررسی می‌کند ساعت به زمان تعیین‌شده رسیده یا نه
+        const mediaQuery = window.matchMedia(
+            "(prefers-color-scheme: dark)",
+        )
+
+        const handleChange = () => {
+            applyTheme("system")
+        }
+
+        mediaQuery.addEventListener("change", handleChange)
+
+        return () => {
+            mediaQuery.removeEventListener("change", handleChange)
+        }
+    }, [settings.theme, settingsLoaded])
+
+    // یادآور
     useEffect(() => {
-        if (!settings.reminderEnabled) return
+        if (!settingsLoaded || !settings.reminderEnabled) {
+            return
+        }
 
         const check = () => {
             const now = new Date()
-            const hh = String(now.getHours()).padStart(2, "0")
-            const mm = String(now.getMinutes()).padStart(2, "0")
-            const key = `${hh}:${mm}`
-            if (key !== settings.reminderTime) return
+            const hours = String(now.getHours()).padStart(2, "0")
+            const minutes = String(now.getMinutes()).padStart(2, "0")
+            const timeKey = `${hours}:${minutes}`
 
-            // فقط یک بار در هر دقیقه
-            const dateStamp = new Date().toDateString()
-            const fired = `${dateStamp}|${key}`
-            if (firedRef.current === fired) return
-            firedRef.current = fired
+            if (timeKey !== settings.reminderTime) {
+                return
+            }
+
+            const dateStamp = now.toDateString()
+            const firedKey = `${dateStamp}|${timeKey}`
+
+            if (firedRef.current === firedKey) {
+                return
+            }
+
+            firedRef.current = firedKey
+
             try {
-                window.localStorage.setItem(REMINDER_KEYS_FIRED, fired)
-            } catch { /* ignore */ }
+                window.localStorage.setItem(
+                    REMINDER_KEYS_FIRED,
+                    firedKey,
+                )
+            } catch {
+                // localStorage در دسترس نیست.
+            }
 
-            if (settings.sound) beep()
+            if (settings.sound) {
+                beep()
+            }
 
-            if ("Notification" in window && Notification.permission === "granted") {
+            if (
+                "Notification" in window &&
+                Notification.permission === "granted"
+            ) {
                 new Notification("یادآور روزچین", {
                     body: "وقت برنامه‌ریزی روزت رسیده است ✨",
                 })
             }
         }
 
-        // اگر تب باز بوده و دقیقه‌ی یادآور رد شده، از آخرین حالت ذخیره‌شده رد نشویم
         try {
-            firedRef.current = window.localStorage.getItem(REMINDER_KEYS_FIRED)
-        } catch { /* ignore */ }
+            firedRef.current = window.localStorage.getItem(
+                REMINDER_KEYS_FIRED,
+            )
+        } catch {
+            // localStorage در دسترس نیست.
+        }
 
-        const id = window.setInterval(check, 20_000)
-        return () => window.clearInterval(id)
-    }, [settings.reminderEnabled, settings.reminderTime, settings.sound])
+        // همان ابتدا نیز بررسی شود؛ لازم نیست ۲۰ ثانیه صبر کند.
+        check()
+
+        const intervalId = window.setInterval(check, 20_000)
+
+        return () => {
+            window.clearInterval(intervalId)
+        }
+    }, [
+        settingsLoaded,
+        settings.reminderEnabled,
+        settings.reminderTime,
+        settings.sound,
+    ])
 
     const update = useCallback((patch: Partial<Settings>) => {
-        setSettings((prev) => ({ ...prev, ...patch }))
+        setSettings((previous) => ({
+            ...previous,
+            ...patch,
+        }))
     }, [])
 
     const playBeep = useCallback(() => {
-        if (settings.sound) beep()
+        if (settings.sound) {
+            beep()
+        }
     }, [settings.sound])
 
-    const requestNotificationPermission = useCallback(async () => {
-        if (!("Notification" in window)) return false
-        if (Notification.permission === "granted") return true
-        const result = await Notification.requestPermission()
-        return result === "granted"
-    }, [])
+    const requestNotificationPermission =
+        useCallback(async (): Promise<boolean> => {
+            if (!("Notification" in window)) {
+                return false
+            }
+
+            if (Notification.permission === "granted") {
+                return true
+            }
+
+            const result =
+                await Notification.requestPermission()
+
+            return result === "granted"
+        }, [])
 
     return (
-        <SettingsContext.Provider value={{ settings, update, playBeep, requestNotificationPermission }}>
+        <SettingsContext.Provider
+            value={{
+                settings,
+                update,
+                playBeep,
+                requestNotificationPermission,
+            }}
+        >
             {children}
         </SettingsContext.Provider>
     )
@@ -166,6 +300,12 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
 export function useSettings() {
     const context = useContext(SettingsContext)
-    if (!context) throw new Error("useSettings must be used inside SettingsProvider")
+
+    if (!context) {
+        throw new Error(
+            "useSettings must be used inside SettingsProvider",
+        )
+    }
+
     return context
 }

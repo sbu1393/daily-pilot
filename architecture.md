@@ -5837,3 +5837,32 @@ UI Boundary (app/components) | Client Components | بدون Prisma/Secret/Server
 Persistence (prisma) | Schema + Migration — منبع حقیقت داده | مدل داده طبق Section 6
 
 Static / PWA (public) | دارایی‌های استاتیک + PWA (sw.js، manifest) | API/RSC هرگز توسط SW کش نشوند (Section 9)
+
+---
+
+## ADR-006: Daily Schedule Suggestion Engine (Advisor Layer)
+- **Status:** Accepted
+- **Date:** 2026-09-12
+- **Decider:** Mehdi Arezoumandi (Project Lead)
+- **Reference:** Extension to Sections 5.6, 5.7, and 5.8 of `architecture.md`
+
+### Context & Problem Statement
+Users often accumulate more tasks in a day than their available capacity (`availableMinutes`). While the rebalancing engine (`rebalanceDay`) scales durations proportionally based on task weights, the system previously lacked a clear, advisory mechanism to suggest which tasks fit comfortably into today's schedule and which should be recommended for rollover to the next day.
+
+### Decision
+1. **Zero Database / Schema Changes:** The engine relies strictly on existing V1 entities and attributes (`Task`, `availableMinutes`, `priority`, `durationMin`). No schema updates or migrations.
+2. **Pure Deterministic Calculation:** The suggestion logic (`suggestDay`) MUST be a pure, deterministic mathematical algorithm residing in `app/lib/planner/suggestion.ts`. It follows the existing Weighted Proportional Allocation math (`rebalance.ts`). Runtime LLM calls are explicitly forbidden for generating daily suggestions.
+3. **User Autonomy:** The engine is advisory only. No tasks shall be automatically or silently moved or modified in the background. Every modification requires explicit user confirmation via UI.
+4. **Endpoint & Operation Reuse:**
+   - Reading suggestions: Read-only endpoint `GET /api/planner/suggestion`.
+   - Applying suggestions: Direct reuse of the existing `POST /api/tasks/rollover` endpoint without modifying its request/response contract.
+5. **Phased Roadmap:**
+   - Phase S1: Pure deterministic function `suggestDay` + comprehensive unit tests.
+   - Phase S2: Read-only GET endpoint.
+   - Phase S3: Read-only UI Card and Modal.
+   - Phase S4: Integration with Rollover API and confirmation flows.
+   - Phase S5: Copy polishing, edge-case hardening, and legacy naming cleanup.
+
+### Consequences
+- **Positive:** Transparent decision-making for the user, zero database/data risk, fully unit-testable math.
+- **Trade-offs:** Advisory suggestions are purely heuristic/mathematical in V1 without dynamic natural-language conversational reasoning.

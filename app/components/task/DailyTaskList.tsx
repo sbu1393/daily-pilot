@@ -25,6 +25,7 @@ import CompleteTaskModal from "./CompleteTaskModal"
 import RolloverDialog from "./RolloverDialog"
 import styles from "./task.module.css"
 import ReanalyzeModal from "./ReanalyzeModal"
+import SuggestionCard from "./SuggestionCard"
 
 
 const priorityWeight: Record<TaskPriority, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 }
@@ -194,6 +195,24 @@ export default function DailyTaskList() {
         }
     }
 
+    // ADR-006 (S4): انتقال «به فردا» از پیشنهاد روز — همان اندپوینت موجود.
+    // خطا را throw می‌کنیم تا مودال آن را داخل خودش نشان دهد (بدون toast دوم).
+    const handleSuggestionRollover = async (ids: number[]) => {
+        setBusy(true)
+        try {
+            await api("/api/tasks/rollover", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ taskIds: ids }),
+            })
+            await afterMutation("کارهای مشخص‌شده به فردا منتقل شدند ✅")
+        } catch (e) {
+            throw e instanceof Error ? e : new Error("خطا در انتقال کارها")
+        } finally {
+            setBusy(false)
+        }
+    }
+
 
     return (
         <section className={styles.section}>
@@ -213,6 +232,15 @@ export default function DailyTaskList() {
                     ⚠️ ظرفیت روز پر شده و زمان بعضی کارها کم شده. اگه کار جدید اضافه کنی، از کارهای
                     کم‌اهمیت‌تر کم می‌شود — یا «زمان آزاد» روز را زیاد کن.
                 </div>
+            )}
+
+            {/* ADR-006 (S3/S4): کارت پیشنهاد روز — روزِ امروزِ دارای کار جاافتاده */}
+            {selectedDate === getCanonicalToday(timezone) && (
+                <SuggestionCard
+                    dayKey={selectedDate}
+                    tasks={tasks}
+                    onRollover={handleSuggestionRollover}
+                />
             )}
 
             {overdue.length > 0 && (

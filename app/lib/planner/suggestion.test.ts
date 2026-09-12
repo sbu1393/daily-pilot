@@ -17,6 +17,7 @@ const task = (
     score: null,
     priority: null,
     status: "TODO",
+    allocatedMinutes: null,
     ...overrides,
 })
 
@@ -73,6 +74,71 @@ describe("suggestDay — fast path (capacity fits all estimates)", () => {
     it("includes IN_PROGRESS tasks as candidates (they are open work)", () => {
         const result = suggestDay(60, [task(1, { estimatedTime: 30, status: "IN_PROGRESS" })])
         expect(result.planned.map((p) => p.taskId)).toEqual([1])
+    })
+})
+
+describe("suggestDay — IN_PROGRESS protection (rebalanceDay parity)", () => {
+    it("reports no protected ids when no IN_PROGRESS task holds an allocation", () => {
+        const result = suggestDay(120, [
+            task(1, { estimatedTime: 30 }),
+            task(2, { estimatedTime: 30, status: "IN_PROGRESS" }),
+        ])
+        expect(result.protectedTaskIds).toEqual([])
+    })
+
+    it("never reduces an IN_PROGRESS task that already has an allocation", () => {
+        const result = suggestDay(30, [
+            task(1, { estimatedTime: 120, score: 90, status: "IN_PROGRESS", allocatedMinutes: 60 }),
+            task(2, { estimatedTime: 60, score: 50 }),
+        ])
+
+        expect(result.protectedTaskIds).toEqual([1])
+        const protectedItem = result.planned.find((p) => p.taskId === 1)
+        expect(protectedItem?.suggestedMinutes).toBe(60)
+        expect(protectedItem?.partial).toBe(true)
+        // بودجه‌ی ۳۰ کاملاً صرف تسک محافظت‌شده شده → تسک دیگر جا نمی‌شود
+        expect(result.unfitted.map((u) => u.taskId)).toEqual([2])
+    })
+
+    it("deducts the protected allocation from the distributable budget", () => {
+        // بدون محافظت تسک ۲ کل ۶۰ دقیقه را می‌گرفت؛ با محافظت فقط ۲۰ می‌گیرد
+        const result = suggestDay(60, [
+            task(1, { estimatedTime: 60, score: 90, status: "IN_PROGRESS", allocatedMinutes: 40 }),
+            task(2, { estimatedTime: 60, score: 50 }),
+        ])
+
+        expect(result.protectedTaskIds).toEqual([1])
+        expect(result.planned.find((p) => p.taskId === 1)?.suggestedMinutes).toBe(40)
+        expect(result.planned.find((p) => p.taskId === 2)?.suggestedMinutes).toBe(20)
+        expect(result.plannedMinutes).toBe(60)
+        expect(result.remainingMinutes).toBe(0)
+    })
+
+    it("marks a protected task as non-partial when its allocation equals its estimate", () => {
+        const result = suggestDay(120, [
+            task(1, { estimatedTime: 60, status: "IN_PROGRESS", allocatedMinutes: 60 }),
+        ])
+        expect(result.protectedTaskIds).toEqual([1])
+        expect(result.planned).toEqual([
+            { taskId: 1, estimatedMinutes: 60, suggestedMinutes: 60, partial: false, weight: 45 },
+        ])
+    })
+
+    it("does not protect an IN_PROGRESS task without an allocation (mirrors rebalanceDay)", () => {
+        const result = suggestDay(60, [
+            task(1, { estimatedTime: 30, status: "IN_PROGRESS", allocatedMinutes: null }),
+        ])
+        expect(result.protectedTaskIds).toEqual([])
+        expect(result.planned.map((p) => p.taskId)).toEqual([1])
+    })
+
+    it("excludes DONE tasks from protection accounting", () => {
+        const result = suggestDay(60, [
+            task(1, { estimatedTime: 30, status: "DONE", allocatedMinutes: 30 }),
+            task(2, { estimatedTime: 30 }),
+        ])
+        expect(result.protectedTaskIds).toEqual([])
+        expect(result.planned.map((p) => p.taskId)).toEqual([2])
     })
 })
 

@@ -5866,3 +5866,76 @@ Users often accumulate more tasks in a day than their available capacity (`avail
 ### Consequences
 - **Positive:** Transparent decision-making for the user, zero database/data risk, fully unit-testable math.
 - **Trade-offs:** Advisory suggestions are purely heuristic/mathematical in V1 without dynamic natural-language conversational reasoning.
+
+---
+
+## Smart Day Planning Stabilization Roadmap (Workstream A1)
+
+### Purpose
+Establish a non-destructive, deterministic "Blueprint Preview" workflow with client concurrency hardening, without altering database schemas or breaking existing API contracts.
+
+### Milestones & Scope
+
+#### Phase 1: Core Planner Alignment & Metadata
+- **`app/lib/planner/suggestion.ts`:**
+  - Mirror `rebalanceDay` logic for `IN_PROGRESS` tasks (protect tasks with allocations from reduction).
+  - Return `protectedTaskIds: number[]` in `suggestDay`.
+- **`app/lib/services/planner.service.ts` & `app/api/planner/suggestion/route.ts`:**
+  - Add `basis` metadata (`planVersion`, `rebalancedVersion`, `availableMinutes`, `taskCount`) and `state: "fresh" | "stale"` to API response.
+- **Verification:** Update unit tests and verify Zod schemas.
+
+#### Phase 2: Data-Flow & Race Condition Hardening
+- **`app/hooks/UseDaySummary.ts`:**
+  - Implement `requestSeq` (monotonic sequence counter) to discard out-of-order responses from polling (30s) and event-bus triggers.
+  - Synchronize TypeScript types with `planner/summary.ts` (`overspentMinutes`, versioning).
+- **Verification:** Ensure zero state-flickering during rapid operations.
+
+#### Phase 3: UI/UX Blueprint Preview
+- **`app/components/task/SuggestionModal.tsx`:**
+  - Lock `IN_PROGRESS` tasks with a protected badge; exclude them from default selection.
+  - Display Before/After comparison per task (e.g., `60m ➔ 45m (-15m)`).
+  - Handle empty/zero available-time edge cases with full a11y support.
+- **`app/components/task/SuggestionCard.tsx` & `DailyTaskList.tsx`:**
+  - Centralize blueprint state ownership and show non-intrusive "Plan Stale" banner.
+
+#### Phase 4: Conflict Guard & Offline Handling
+- Guard modal confirmation against stale versions using `planVersion` (reject stale with `PLAN_STALE`).
+- Mark offline blueprint views as `Provisional` and disable offline rollover mutation.
+- Full RTL and test-suite verification.
+
+---
+
+## Workstream A1 Seal — Read-only Blueprint Preview (Phases 1–4) — COMPLETE
+
+- **Status:** COMPLETE — 2026-09-12
+- **Reference:** Implements the "Smart Day Planning Stabilization Roadmap (Workstream A1)" above; extension to ADR-006.
+- **Schema:** unchanged — no migration, no new dependency. Node.js 16.16.0 / Next.js 13.5.6 preserved.
+
+### Delivered
+
+**Phase 1 — Core Planner Alignment & Metadata**
+- `app/lib/planner/suggestion.ts`: `suggestDay` mirrors `rebalanceDay`'s `IN_PROGRESS` protection — an `IN_PROGRESS` task holding an allocation is never reduced, and its existing allocation is deducted from the distributable budget. Returns `protectedTaskIds: number[]`; `SuggestionTaskInput` gained `allocatedMinutes`.
+- `app/lib/services/planner.service.ts`: `getDaySuggestion` returns `basis { planVersion, rebalancedVersion, availableMinutes, taskCount }` and `state: "fresh" | "stale"` (§6.3.2; a missing `DailyPlan` row maps to `stale` per §6.3.3), and selects `allocatedMinutes`.
+- `app/api/planner/suggestion/route.ts`: logic unchanged — the ADR-02 thin handler is a pass-through, so `basis`/`state` ride inside the existing `{ ok, data }` envelope.
+
+**Phase 2 — Data-Flow & Race-Condition Hardening**
+- `app/hooks/UseDaySummary.ts`: monotonic `requestSeq` guard discards out-of-order responses from the 30 s interval, the `planner:mutated` event and rapid day switches; in-flight responses are invalidated on day switch / unmount; the client `DaySummary` mirrors `planner/summary.ts` (added `overspentMinutes`; optional `planVersion?` / `rebalancedVersion?` reserved for the Phase 4 guard); `loading` is now cleared by the latest settled request.
+
+**Phase 3 — UI/UX Blueprint Preview**
+- `app/components/task/SuggestionModal.tsx` + `suggestion.module.css`: `IN_PROGRESS` rows (union with the server's `protectedTaskIds`) carry the «در حال انجام — دست‌نخورده» badge and are never default-selected — the checkbox stays available so the user retains explicit control (ADR-006 §3). Before/after display (`current ➔ proposed` with a signed delta chip) whenever the persisted allocation differs from the proposal; utilisation clamped; a11y via progressbar `aria-valuetext`, dialog/alert/note roles and per-checkbox labels.
+- `app/components/task/SuggestionCard.tsx`: single owner of blueprint state; non-intrusive «برنامه‌ی امروز با تغییرات اخیر همخوان نیست» chip, shown only when `state === "stale" && basis.planVersion > 0` (avoids double-nagging on unplanned days).
+
+**Phase 4 — Conflict Guard**
+- `PlanStaleError` (409 `PLAN_STALE`) added to `app/lib/services/errors.ts`; mapped by the existing ADR-04 envelope plumbing.
+- `rolloverTasks(userId, timezone, taskIds, expectedPlanVersion?)`: when a version is supplied, the plan version of **every source day** is verified (§6.3.2 — a missing `DailyPlan` row counts as `planVersion 0`, §6.3.3) and the mutation is rejected **before any write**.
+- `POST /api/tasks/rollover` accepts an **optional** `planVersion` (additive). The overdue path omits it, so its behaviour and the success response contract are unchanged.
+- UI: the modal sends `basis.planVersion`, shows a dedicated `PLAN_STALE` message, and `SuggestionCard` silently refetches the blueprint — no crash, no dirty state.
+
+### Verification
+- `npm test`: 283/283 tests across 27 files (Phase 4 added 12: 7 route + 5 service).
+- `npm run typecheck`: 0 errors. `npm run lint`: no new findings.
+- Sections 1–13 and the ADR-006 text are unchanged; the Workstream A1 roadmap section above and this seal are the only additions.
+
+### Known limits (intentionally NOT changed)
+- The version guard is a pre-flight check: a mutation landing between the check and the commit is not detected. Closing that window requires converting `rolloverTasks` to an interactive transaction — out of scope for A1, deliberately not applied.
+- The blueprint remains advisory and read-only; applying a suggestion still reuses `POST /api/tasks/rollover`.

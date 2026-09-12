@@ -110,6 +110,23 @@ export class NoRolloverCandidatesError extends ServiceError {
     }
 }
 
+// ---------- Planner / Blueprint (A1 Phase 4) ----------
+
+/**
+ * A1 Phase 4 — گارد نسخه‌ی blueprint: کاربر پیشنهادی را تأیید می‌کند که بر اساس نسخه‌ی
+ * پلنی ساخته شده که دیگر جاری نیست (§6.3.2: هر mutation مؤثر planVersion را بالا می‌برد).
+ * 409 Conflict → Client فقط باید پیشنهاد تازه بگیرد؛ هیچ داده‌ای نوشته نمی‌شود.
+ */
+export class PlanStaleError extends ServiceError {
+    constructor() {
+        super(
+            409,
+            "PLAN_STALE",
+            "برنامه‌ی امروز با تغییرات اخیر همخوان نیست؛ پیشنهاد تازه را ببین و دوباره تأیید کن",
+        )
+    }
+}
+
 // ---------- Auth / Users ----------
 
 export class EmailTakenError extends ServiceError {

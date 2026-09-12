@@ -24,6 +24,8 @@ export async function GET(req: NextRequest) {
             return errorResponse(400, "VALIDATION_ERROR", "فرمت روز نامعتبر است")
         }
 
+        // A1 Phase 1 — پاسخ شامل basis (planVersion/rebalancedVersion/availableMinutes/taskCount)
+        // و state ("fresh" | "stale") است؛ route عمداً thin می‌ماند و آن‌ها را عبور می‌دهد (ADR-02).
         const suggestion = await getDaySuggestion(user.id, dayKey)
 
         // ADR-04: { ok, data: suggestion }

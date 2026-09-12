@@ -36,6 +36,9 @@ const SUGGESTION = {
     plannedMinutes: 90,
     remainingMinutes: 210,
     usedDefaultEstimate: [],
+    protectedTaskIds: [],
+    basis: { planVersion: 3, rebalancedVersion: 3, availableMinutes: 300, taskCount: 4 },
+    state: "fresh" as const,
 }
 
 const callGET = (query = "") =>
@@ -81,6 +84,22 @@ describe("GET /api/planner/suggestion", () => {
         expect(parsed.data.plannedMinutes + parsed.data.remainingMinutes).toBeLessThanOrEqual(
             parsed.data.capacityMinutes,
         )
+    })
+
+    it("passes through the A1 basis metadata and freshness state", async () => {
+        mocks.getDaySuggestion.mockResolvedValue(SUGGESTION)
+
+        const res = await callGET(`?date=${DAY_KEY}`)
+        const parsed = (await res.json()) as { ok: boolean; data: typeof SUGGESTION }
+
+        expect(parsed.data.state).toBe("fresh")
+        expect(parsed.data.basis).toEqual({
+            planVersion: 3,
+            rebalancedVersion: 3,
+            availableMinutes: 300,
+            taskCount: 4,
+        })
+        expect(parsed.data.protectedTaskIds).toEqual([])
     })
 
     it("returns 400 VALIDATION_ERROR for a malformed date and never calls the service", async () => {

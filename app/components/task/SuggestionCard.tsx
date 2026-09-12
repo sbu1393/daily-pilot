@@ -4,24 +4,33 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { api } from "@/app/lib/api/client"
 import { faDigits } from "@/app/lib/time"
 import { type TaskItem } from "./taskTypes"
-import SuggestionModal, { type SuggestionData } from "./SuggestionModal"
+import { type SuggestionData } from "./SuggestionModal"
 import taskStyles from "./task.module.css"
 import styles from "./suggestion.module.css"
 
-// ADR-006 (Phase S3/S4) — کارت/بنر پیشنهاد روز.
-// فقط وقتی نشان داده می‌شود که روز شلوغ باشد و کارِ جاافتاده وجود داشته باشد.
+// ADR-006 (Phase S3/S4) + A1 Phase 3 — کارت/بنر پیشنهاد روز.
+//
+// A1 Phase 3 — مالکیت state: این کارت تنها مالکِ state پیشنهاد (fetch + نگه‌داری) است؛
+// مودال «ارائه‌دهنده»ی خالص است و والد (DailyTaskList) با onOpenModal داده را می‌گیرد و
+// جهشِ تأییدشده را تزریق می‌کند. به همین دلیل هیچ state موازی‌ای برای blueprint وجود ندارد.
+//
+// نمایش:
+// - Actionable (کار جاافتاده دارد): بنر پیشنهاد + دکمه‌ی «دیدن پیشنهاد».
+// - Plan Stale (§6.3.2): چیپِ کم‌سر‌و‌صدای «برنامه با تغییرات اخیر همخوان نیست».
+// خودش mutation ندارد؛ انتقال از طریق onRollover والد (POST /api/tasks/rollover موجود) انجام می‌شود.
+//
+// rebase: دکمه‌ی «دیدن پیشنهاد» داده را به والد می‌دهد (onOpenModal — ساختار نسخه‌ی remote)؛
+// منطق A1 (گیتِ actionable و چیپ کهنه) دست‌نخورده باقی مانده است.
 
 type Props = {
     dayKey: string
     tasks: TaskItem[]
-    /** انتقال کارهای انتخاب‌شده به فردا؛ promise باید در موفقیت resolve شود */
-    onRollover: (ids: number[]) => Promise<void>
-    onOpenModal: (data: SuggestionData) => void;
+    /** A1: تحویل blueprint به والد که مالک مودال و جهش تأییدشده است */
+    onOpenModal: (data: SuggestionData) => void
 }
 
-export default function SuggestionCard({ dayKey, tasks, onRollover, onOpenModal }: Props) {
+export default function SuggestionCard({ dayKey, tasks, onOpenModal }: Props) {
     const [suggestion, setSuggestion] = useState<SuggestionData | null>(null)
-    const [modalOpen, setModalOpen] = useState(false)
     const requestSeq = useRef(0)
 
     const load = useCallback(
@@ -30,15 +39,17 @@ export default function SuggestionCard({ dayKey, tasks, onRollover, onOpenModal 
             if (!silent) setSuggestion(null)
             try {
                 const data = await api<SuggestionData>(`/api/planner/suggestion?date=${dayKey}`)
-                // فقط آخرین پاسخ معتبر است
+                // فقط آخرین پاسخ معتبر است (محافظ تعویض سریع روز)
                 if (seq === requestSeq.current) setSuggestion(data)
             } catch {
+                // فقط خواندنی — خطا هیچ‌وقت نباید نمای روز را خراب کند؛ کارت بی‌صدا حذف می‌شود
                 if (seq === requestSeq.current && !silent) setSuggestion(null)
             }
         },
         [dayKey],
     )
 
+    // لود اولیه + رفرش بی‌صدا بعد از هر mutation برنامه (تغییر بودجه/ساخت/حذف/انتقال)
     useEffect(() => {
         const onMutated = () => {
             void load(true)
@@ -48,37 +59,44 @@ export default function SuggestionCard({ dayKey, tasks, onRollover, onOpenModal 
         return () => window.removeEventListener("planner:mutated", onMutated)
     }, [load])
 
-    // شرط نمایش: پیشنهاد لود شده باشد، کار جاافتاده داشته باشیم و در لیست تسک‌ها کار غیر انجام شده باشد
-    const actionable = suggestion !== null && tasks.length > 0;
+    if (suggestion === null) return null
 
-    if (!actionable || suggestion === null) return null
+    // فقط وقتی actionable است: کار جاافتاده وجود دارد و کار بازیافته هم هست
+    const actionable =
+        suggestion.unfitted.length > 0 && tasks.some((t) => t.status !== "DONE")
+
+    // A1 Phase 3 — «برنامه کهنه» (§6.3.2): stale ⇔ rebalancedVersion خالی یا planVersion > rebalancedVersion.
+    // نبودِ رکورد DailyPlan هم طبق فاز ۱ «stale» است؛ ولی برای پرهیز از تکرار پیامِ
+    // «وقت آزاد امروز را وارد کن»، بنر فقط وقتی می‌آید که یک پلن واقعی عقب افتاده باشد (planVersion > 0).
+    const stale = suggestion.state === "stale" && (suggestion.basis?.planVersion ?? 0) > 0
+
+    if (!actionable && !stale) return null
 
     return (
-        <>
-            <div className={styles.banner} role="status">
-                <span className={styles.bannerText}>
-                    🧭 {faDigits(suggestion.unfitted.length)} کار در ظرفیت امروز جا نشده — پیشنهادی برای
-                    برنامه‌ات دارم.
+        <div
+            className={`${styles.banner} ${stale && !actionable ? styles.bannerStale : ""}`}
+            role="status"
+        >
+            {stale && (
+                <span className={styles.staleChip}>
+                    🕓 برنامه‌ی امروز با تغییرات اخیر همخوان نیست
                 </span>
-                <button
-                    className={taskStyles.btnPrimary}
-                    onClick={() => onOpenModal(suggestion)} // اینجا پیشنهاد را پاس می‌دهیم
-                    aria-label="نمایش پیشنهاد برنامه امروز"
-                >
-                    دیدن پیشنهاد
-                </button>
-            </div>
-
-            <SuggestionModal
-                open={modalOpen}
-                onClose={() => setModalOpen(false)}
-                suggestion={suggestion}
-                tasks={tasks}
-                onRollover={async (ids) => {
-                    await onRollover(ids)
-                    setModalOpen(false)
-                }}
-            />
-        </>
+            )}
+            {actionable && (
+                <>
+                    <span className={styles.bannerText}>
+                        🧭 {faDigits(suggestion.unfitted.length)} کار در ظرفیت امروز جا نشده — پیشنهادی
+                        برای برنامه‌ات دارم.
+                    </span>
+                    <button
+                        className={taskStyles.btnPrimary}
+                        onClick={() => onOpenModal(suggestion)}
+                        aria-label="نمایش پیشنهاد برنامه امروز"
+                    >
+                        دیدن پیشنهاد
+                    </button>
+                </>
+            )}
+        </div>
     )
 }

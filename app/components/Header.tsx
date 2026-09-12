@@ -3,8 +3,12 @@
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import Avatar, { type AvatarUser } from "./Avatar"
+// rebase: UI نسخه‌ی remote (lucide + logo.png) حفظ شد؛ importهای H2 پروژه باقی ماندند
+import { toast } from "react-toastify"
 import { CalendarDays, DoorOpen, Settings } from "lucide-react"
+import Avatar, { type AvatarUser } from "./Avatar"
+import { clearOfflineForLogout } from "@/app/lib/offline"
+import { faDigits } from "@/app/lib/time"
 
 export default function Header({ user }: { user: AvatarUser | null }) {
     const router = useRouter()
@@ -27,12 +31,28 @@ export default function Header({ user }: { user: AvatarUser | null }) {
     const logout = async () => {
         if (busy) return
         setBusy(true)
+
+        // H2: قبل از پاک شدن کوکی نشست، صف آفلاین را (بهترین تلاش) سینک و کش محلی روزها را
+        // پاک می‌کنیم تا داده‌ی حساب قبلی روی دستگاه باقی نماند و صف در حساب دیگری POST نشود.
+        let pending = 0
+        try {
+            const flushed = await clearOfflineForLogout()
+            pending = flushed.pending
+        } catch {
+            /* پاک‌سازی ناموفق → خروج باید همچنان انجام شود */
+        }
+
         try {
             await fetch("/api/auth/logout", { method: "POST" })
         } catch {
             /* حتی اگر درخواست خطا بدهد، کاربر به صفحه ورود برمی‌گردد */
         } finally {
             setBusy(false)
+            if (pending > 0) {
+                toast.info(
+                    `${faDigits(pending)} کار آفلاین سینک‌نشده در حساب خودت محفوظ ماند و بعد از ورود دوباره سینک می‌شود`,
+                )
+            }
             router.push("/auth/login")
             router.refresh()
         }

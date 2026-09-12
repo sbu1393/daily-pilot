@@ -20,6 +20,7 @@ export type SuggestionTaskInput = {
     score: number | null
     priority: "HIGH" | "MEDIUM" | "LOW" | null
     status: "TODO" | "IN_PROGRESS" | "DONE"
+    allocatedMinutes: number | null
 }
 
 export type SuggestedItem = {
@@ -37,6 +38,8 @@ export type UnfittedItem = {
 }
 
 export type DaySuggestion = {
+    /** تسک‌های IN_PROGRESS که به‌خاطر تخصیص فعلی کاهش نمی‌یابند (آینه‌ی rebalanceDay) */
+    protectedTaskIds: number[]
     capacityMinutes: number // ظرفیت قابل توزیع (ورودی caller)
     planned: SuggestedItem[]
     unfitted: UnfittedItem[]
@@ -64,16 +67,46 @@ export function suggestDay(
     const budget = Math.max(0, Math.floor(capacityMinutes))
     const usedDefaultEstimate: number[] = []
 
-    const items = open.map((t) => {
-        const est = estimateOf(t)
+    // تخمین پیش‌فرض روی همه‌ی تسک‌های باز (محافظت‌شده و نامحافظت‌شده) گزارش می‌شود
+    for (const t of open) {
         if (t.estimatedTime == null) usedDefaultEstimate.push(t.id)
-        return { id: t.id, weight: weightOf(t), cap: est }
-    })
+    }
 
-    const { allocations, dropped, pool } = distribute(budget, items)
+    // آینه‌ی rebalanceDay: تسکِ IN_PROGRESS با تخصیص فعلی محافظت می‌شود —
+    // سهمش کاهش نمی‌یابد و همان مقدار از بودجه‌ی قابل‌توزیع کم می‌شود.
+    const protectedSet = new Set(
+        open
+            .filter((t) => t.status === "IN_PROGRESS" && t.allocatedMinutes != null)
+            .map((t) => t.id),
+    )
+    const protectedTaskIds = open.filter((t) => protectedSet.has(t.id)).map((t) => t.id)
+    const protectedSum = open.reduce(
+        (s, t) => s + (protectedSet.has(t.id) ? (t.allocatedMinutes ?? 0) : 0),
+        0,
+    )
+
+    const items = open
+        .filter((t) => !protectedSet.has(t.id))
+        .map((t) => ({ id: t.id, weight: weightOf(t), cap: estimateOf(t) }))
+
+    const { allocations, dropped, pool } = distribute(Math.max(0, budget - protectedSum), items)
 
     const planned: SuggestedItem[] = []
     const unfitted: UnfittedItem[] = []
+
+    // محافظت‌شده‌ها همیشه در «برنامه‌ی امروز» می‌مانند، با همان تخصیص فعلی
+    for (const t of open) {
+        if (!protectedSet.has(t.id)) continue
+        const cap = estimateOf(t)
+        const share = t.allocatedMinutes ?? 0
+        planned.push({
+            taskId: t.id,
+            estimatedMinutes: cap,
+            suggestedMinutes: share,
+            partial: share < cap,
+            weight: weightOf(t),
+        })
+    }
 
     for (const item of items) {
         const share = allocations[item.id] ?? 0
@@ -114,6 +147,7 @@ export function suggestDay(
         unfitted,
         plannedMinutes,
         remainingMinutes: pool,
+        protectedTaskIds,
         usedDefaultEstimate,
     }
 }

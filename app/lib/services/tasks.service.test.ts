@@ -19,6 +19,7 @@ const { prismaMock, getPrismaMock } = vi.hoisted(() => {
             create: vi.fn(),
             findFirst: vi.fn(),
             update: vi.fn(),
+            updateMany: vi.fn(),
             delete: vi.fn(),
             findMany: vi.fn(),
         },
@@ -382,28 +383,44 @@ describe("completeTask (C2 — Time Tracking)", () => {
         id: 5,
         userId: 1,
         title: "گزارش",
-        status: "TODO" as const,
-        dayKey: today,
+        status: "TODO" as "TODO" | "DONE",
+        dayKey: today as string | null,
         scheduledDate: new Date(),
         allocatedMinutes: 30 as number | null,
         estimatedTime: 45 as number | null,
     }
 
-    const mergedUpdate = async (args: unknown) => {
-        const { data } = args as { data: Record<string, unknown> }
-        return { ...baseTask, ...data }
+    // شبیه‌ساز رکورد دیتابیس برای H4: گارد شرطی updateMany (status != DONE) واقعاً مدل می‌شود
+    // تا هم مسیر موفق و هم مسیر double-completion قابل تست باشد.
+    let row: typeof baseTask
+
+    const setRow = (partial: Partial<typeof baseTask>) => {
+        row = { ...baseTask, ...partial } as typeof baseTask
     }
 
     beforeEach(() => {
         vi.clearAllMocks()
-        prismaMock.task.findFirst.mockResolvedValue(baseTask)
-        prismaMock.task.update.mockImplementation(mergedUpdate)
+        setRow({})
+        prismaMock.task.findFirst.mockImplementation(async () => row)
+        prismaMock.task.updateMany.mockImplementation(async (args: unknown) => {
+            const { data, where } = args as {
+                data: Record<string, unknown>
+                where: { status?: { not?: string } }
+            }
+            // همان کاری که دیتابیس واقعی در READ COMMITTED انجام می‌دهد: شرط دوباره چک می‌شود
+            if (where?.status?.not === "DONE" && row.status === "DONE") return { count: 0 }
+            row = { ...row, ...data } as typeof baseTask
+            return { count: 1 }
+        })
     })
 
     it("sets DONE, persists spentMinutes, sets completedAt/completedOn server-side, records COMPLETED with spentMinutes payload", async () => {
         const result = await completeTask(1, TIMEZONE, 5, { spentMinutes: 40 })
 
-        const updateArgs = prismaMock.task.update.mock.calls[0][0]
+        const updateArgs = prismaMock.task.updateMany.mock.calls[0][0] as {
+            data: Record<string, unknown>
+            where: Record<string, unknown>
+        }
         expect(updateArgs.data.status).toBe("DONE")
         expect(updateArgs.data.spentMinutes).toBe(40)
         expect(updateArgs.data.completedAt).toBeInstanceOf(Date)
@@ -431,11 +448,11 @@ describe("completeTask (C2 — Time Tracking)", () => {
     })
 
     it("spends zero minutes without an allocation → spentMinutes=0, allocated baseline stored, no overspend", async () => {
-        prismaMock.task.findFirst.mockResolvedValue({ ...baseTask, allocatedMinutes: null, estimatedTime: null })
+        setRow({ allocatedMinutes: null, estimatedTime: null })
 
         const result = await completeTask(1, TIMEZONE, 5, { spentMinutes: 0 })
 
-        const updateArgs = prismaMock.task.update.mock.calls[0][0]
+        const updateArgs = prismaMock.task.updateMany.mock.calls[0][0] as { data: Record<string, unknown> }
         expect(updateArgs.data.spentMinutes).toBe(0)
         // §5.4.1: بدون تخصیص، پایه = مقدار واقعی ذخیره میشود
         expect(updateArgs.data.allocatedMinutes).toBe(0)
@@ -443,11 +460,11 @@ describe("completeTask (C2 — Time Tracking)", () => {
     })
 
     it("completion on a past-day task moves it to the completion day (dayKey/scheduledDate/previousScheduledDate) and bumps both days", async () => {
-        prismaMock.task.findFirst.mockResolvedValue({ ...baseTask, dayKey: otherDay })
+        setRow({ dayKey: otherDay })
 
         const result = await completeTask(1, TIMEZONE, 5, { spentMinutes: 25 })
 
-        const updateArgs = prismaMock.task.update.mock.calls[0][0]
+        const updateArgs = prismaMock.task.updateMany.mock.calls[0][0] as { data: Record<string, unknown> }
         expect(updateArgs.data.dayKey).toBe(today)
         expect(updateArgs.data.completedOn).toBe(today)
         expect(updateArgs.data.scheduledDate).toEqual(canonicalKeyToLocalMidnight(today, TIMEZONE))
@@ -471,24 +488,45 @@ describe("completeTask (C2 — Time Tracking)", () => {
         await expect(completeTask(1, TIMEZONE, 999, { spentMinutes: 40 })).rejects.toThrow(
             /پیدا نشد|Task not found/i,
         )
-        expect(prismaMock.task.update).not.toHaveBeenCalled()
+        expect(prismaMock.task.updateMany).not.toHaveBeenCalled()
         expect(prismaMock.taskEvent.create).not.toHaveBeenCalled()
     })
 
     it("throws TaskAlreadyDoneError for an already-DONE task and writes nothing", async () => {
-        prismaMock.task.findFirst.mockResolvedValue({ ...baseTask, status: "DONE" as const })
+        setRow({ status: "DONE" })
 
         await expect(completeTask(1, TIMEZONE, 5, { spentMinutes: 40 })).rejects.toThrow(/تمام شده/i)
-        expect(prismaMock.task.update).not.toHaveBeenCalled()
+        expect(prismaMock.task.updateMany).not.toHaveBeenCalled()
         expect(prismaMock.taskEvent.create).not.toHaveBeenCalled()
         expect(prismaMock.dailyPlan.updateMany).not.toHaveBeenCalled()
     })
 
     it("throws MissingDayKeyError for a task without dayKey (defensive) and writes nothing", async () => {
-        prismaMock.task.findFirst.mockResolvedValue({ ...baseTask, dayKey: null })
+        setRow({ dayKey: null })
 
         await expect(completeTask(1, TIMEZONE, 5, { spentMinutes: 40 })).rejects.toThrow()
-        expect(prismaMock.task.update).not.toHaveBeenCalled()
+        expect(prismaMock.task.updateMany).not.toHaveBeenCalled()
+    })
+
+    // H4 — رفع race دو-تب: درخواست دوم به گارد اتمیک می‌خورد، نه به pre-check
+    it("H4 race: rejects the second concurrent completion at the atomic guard and writes nothing", async () => {
+        // 1️⃣ pre-read در هر دو درخواست همان رکورد TODO را می‌بیند (دقیقاً سناریوی race)
+        const preRead = { ...baseTask }
+        prismaMock.task.findFirst.mockResolvedValue(preRead)
+
+        // 2️⃣ درخواست اول موفق می‌شود
+        await expect(completeTask(1, TIMEZONE, 5, { spentMinutes: 40 })).resolves.toBeTruthy()
+        expect(prismaMock.task.updateMany).toHaveBeenCalledTimes(1)
+
+        // 3️⃣ در دیتابیس رکورد دیگر TODO نیست → گارد شرطی count = 0 می‌گیرد
+        prismaMock.task.updateMany.mockResolvedValue({ count: 0 })
+
+        await expect(completeTask(1, TIMEZONE, 5, { spentMinutes: 40 })).rejects.toThrow(/تمام شده/i)
+
+        // هیچ رویداد/بمپی برای درخواست دوم نوشته نشده (فقط ۱ بار از درخواست اول)
+        expect(prismaMock.taskEvent.create).toHaveBeenCalledTimes(1)
+        expect(prismaMock.dailyPlan.updateMany).toHaveBeenCalledTimes(1)
+        expect(preRead.status).toBe("TODO") // pre-read سایر درخواست‌ها دست‌نخورده می‌ماند
     })
 })
 
@@ -524,7 +562,7 @@ describe("C4 — ADR-03 lazy wiring (read vs mutation)", () => {
             allocatedMinutes: 30,
             estimatedTime: 30,
         })
-        prismaMock.task.update.mockResolvedValue({ id: 5 })
+        prismaMock.task.updateMany.mockResolvedValue({ count: 1 })
 
         await completeTask(1, TIMEZONE, 5, { spentMinutes: 40 })
 
@@ -695,6 +733,90 @@ describe("C5 — rolloverTasks (§5.6.3 / §6.3.2 / §6.3.5)", () => {
         await rolloverTasks(1, TIMEZONE, [1])
 
         expect(ensureDayRebalancedMock).not.toHaveBeenCalled()
+    })
+})
+
+/* ------------------------------------------------------------------ */
+/* A1 Phase 4 — گارد نسخه‌ی blueprint در rolloverTasks (PLAN_STALE)    */
+/* §6.3.2: planVersion با هر mutation مؤثر بالا می‌رود. ردِ کهنه‌ها      */
+/* باید قبل از هر نوشتنی باشد (بدون state کثیف).                        */
+/* ------------------------------------------------------------------ */
+
+describe("A1 Phase 4 — rollover blueprint version guard", () => {
+    const today = getCanonicalToday(TIMEZONE)
+    const yesterday = shiftCanonicalKey(today, -1)
+    const tomorrow = shiftCanonicalKey(today, 1)
+
+    const taskToday = {
+        id: 1,
+        userId: 1,
+        status: "TODO",
+        dayKey: today,
+        scheduledDate: new Date("2026-03-05T00:00:00Z"),
+        allocatedMinutes: 30,
+    }
+
+    beforeEach(() => {
+        vi.clearAllMocks()
+        prismaMock.task.findMany.mockResolvedValue([taskToday])
+        prismaMock.task.update.mockResolvedValue({})
+    })
+
+    it("rejects a superseded blueprint with 409 PLAN_STALE and writes nothing", async () => {
+        prismaMock.dailyPlan.findUnique.mockResolvedValue({ dayKey: today, planVersion: 5 })
+
+        await expect(rolloverTasks(1, TIMEZONE, [1], 4)).rejects.toMatchObject({
+            code: "PLAN_STALE",
+            status: 409,
+        })
+
+        expect(prismaMock.task.update).not.toHaveBeenCalled()
+        expect(prismaMock.taskEvent.create).not.toHaveBeenCalled()
+        expect(prismaMock.dailyPlan.updateMany).not.toHaveBeenCalled()
+        expect(prismaMock.$transaction).not.toHaveBeenCalled()
+    })
+
+    it("proceeds when the provided version is still current", async () => {
+        prismaMock.dailyPlan.findUnique.mockResolvedValue({ dayKey: today, planVersion: 5 })
+
+        const { moved } = await rolloverTasks(1, TIMEZONE, [1], 5)
+
+        expect(moved).toEqual([{ id: 1, from: today, to: tomorrow }])
+        expect(prismaMock.dailyPlan.findUnique).toHaveBeenCalledWith({
+            where: { userId_dayKey: { userId: 1, dayKey: today } },
+        })
+        expect(prismaMock.$transaction).toHaveBeenCalledTimes(1)
+    })
+
+    it("treats a missing DailyPlan row as planVersion 0 (§6.3.3)", async () => {
+        prismaMock.dailyPlan.findUnique.mockResolvedValue(null)
+
+        const { moved } = await rolloverTasks(1, TIMEZONE, [1], 0)
+
+        expect(moved).toEqual([{ id: 1, from: today, to: tomorrow }])
+    })
+
+    it("skips the guard entirely when no version is provided (backward compatible)", async () => {
+        await rolloverTasks(1, TIMEZONE, [1])
+
+        expect(prismaMock.dailyPlan.findUnique).not.toHaveBeenCalled()
+        expect(prismaMock.$transaction).toHaveBeenCalledTimes(1)
+    })
+
+    it("validates every source day of a multi-day rollover", async () => {
+        prismaMock.task.findMany.mockResolvedValue([taskToday, { ...taskToday, id: 2, dayKey: yesterday }])
+        // روز جاری هم‌نسخه است ولی روز عقب‌افتاده عقب مانده → کل انتقال رد می‌شود
+        prismaMock.dailyPlan.findUnique.mockImplementation(
+            ({ where }: { where: { userId_dayKey: { dayKey: string } } }) =>
+                Promise.resolve(
+                    where.userId_dayKey.dayKey === today ? { planVersion: 7 } : { planVersion: 6 },
+                ),
+        )
+
+        await expect(rolloverTasks(1, TIMEZONE, [1, 2], 7)).rejects.toMatchObject({
+            code: "PLAN_STALE",
+        })
+        expect(prismaMock.task.update).not.toHaveBeenCalled()
     })
 })
 

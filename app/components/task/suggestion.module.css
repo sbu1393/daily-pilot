@@ -189,3 +189,74 @@
     text-align: center;
     line-height: 1.9;
 }
+
+/* ===== A1 Phase 3 — بنر کم‌سر‌و‌صدای «برنامه کهنه» (§6.3.2) ===== */
+.bannerStale {
+    border-color: var(--warning);
+    border-style: dashed;
+}
+
+.staleChip {
+    font-size: .78rem;
+    font-weight: 700;
+    color: var(--warning);
+    background: var(--warning-bg);
+    border-radius: 999px;
+    padding: 5px 12px;
+    line-height: 1.9;
+}
+
+/* ===== A1 Phase 3 — نشانِ قفلِ «در حال انجام» (محافظت موتور) ===== */
+.lockBadge {
+    font-style: normal;
+    font-weight: 800;
+    font-size: .68rem;
+    color: var(--primary-dark);
+    background: var(--primary-soft);
+    border-radius: 999px;
+    padding: 2px 8px;
+    width: max-content;
+    line-height: 1.9;
+}
+
+/* ===== A1 Phase 3 — قبل/بعدِ تخصیص: «تخصیص فعلی ➔ سهم پیشنهادی» ===== */
+.compare {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    font-size: .78rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.compareOld {
+    color: var(--muted);
+}
+
+.compareArrow {
+    color: var(--muted-2);
+}
+
+.compareNew {
+    color: var(--primary-dark);
+    font-weight: 800;
+}
+
+.delta {
+    font-style: normal;
+    font-weight: 800;
+    font-size: .68rem;
+    border-radius: 999px;
+    padding: 2px 7px;
+}
+
+.deltaDown {
+    color: var(--warning);
+    background: var(--warning-bg);
+}
+
+.deltaUp {
+    color: var(--primary-dark);
+    background: var(--primary-soft);
+}

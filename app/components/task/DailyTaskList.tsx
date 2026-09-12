@@ -8,6 +8,9 @@ import { getCanonicalToday, shiftCanonicalKey } from "../../lib/canonicalDay"
 import { faDigits } from "@/app/lib/time"
 import {
     cacheDay,
+    // rebase: enqueueTask حذف شد (نسخه‌ی remote) چون در این کامپوننت استفاده نمی‌شود؛
+    // ensureOfflineScope از H2 باقی می‌ماند.
+    ensureOfflineScope,
     isOffline,
     onOnline,
     readCachedDay,
@@ -16,7 +19,7 @@ import {
     type QueuedTask,
 } from "@/app/lib/offline"
 import { toast } from "react-toastify"
-import { api } from "@/app/lib/api/client"
+import { api, ApiClientError } from "@/app/lib/api/client"
 import { type TaskItem, type TaskPriority } from "./taskTypes"
 import TaskCard from "./TaskCard"
 import CreateTaskModal from "./CreateTaskModal"
@@ -68,6 +71,9 @@ export default function DailyTaskList() {
     const loadDay = useCallback(async () => {
         const seq = ++requestSeq.current
         setLoading(true)
+        // H2: scope کاربر (user-scoped کش/صف) موازی با بارگذاری روز مشخص می‌شود و
+        // قبل از هر تماس با کش محلی await می‌شود.
+        const scopeReady = ensureOfflineScope()
         try {
             const data = await api<{ tasks: TaskItem[]; summary: DaySummary }>(
                 `/api/tasks?dayKey=${selectedDate}`,
@@ -78,12 +84,16 @@ export default function DailyTaskList() {
             }
             try {
                 const sum = await api<DaySummary>(`/api/planner/day?dayKey=${selectedDate}`)
+                await scopeReady
                 cacheDay(selectedDate, dayTasks, sum)
             } catch {
+                await scopeReady
                 cacheDay(selectedDate, dayTasks, null)
             }
         } catch (e) {
             if (seq === requestSeq.current) {
+                /* آفلاین: به کش محلی برمی‌گردیم تا داشبورد کار کند */
+                await scopeReady // H2: کش فقط با scope مشخص خوانده می‌شود
                 const cached = readCachedDay(selectedDate)
                 if (cached) {
                     setTasks(cached.tasks)
@@ -114,12 +124,14 @@ export default function DailyTaskList() {
 
     useEffect(() => {
         refreshAll()
-        refreshQueue()
+        // H2: صف فقط بعد از مشخص شدن scope کاربر خوانده می‌شود
+        void ensureOfflineScope().then(refreshQueue)
     }, [refreshAll, refreshQueue])
 
     useEffect(() => {
         const off = onOnline(() => {
             void (async () => {
+                await ensureOfflineScope() // H2: scope پیش از سینک صف
                 const synced = await syncQueue()
                 if (synced > 0) {
                     toast.success(`${faDigits(synced)} کار آفلاین سینک شد ✅`)
@@ -189,16 +201,30 @@ export default function DailyTaskList() {
         }
     }
 
-    const handleSuggestionRollover = async (ids: number[]) => {
+    // ADR-006 (S4) + A1 Phase 4: انتقال «به فردا» از پیشنهاد روز — همان اندپوینت موجود.
+    // planVersion فقط وقتی فرستاده می‌شود که blueprint نسخه داشته باشد (گارد اپتیمیستیک).
+    // rebase: مودال الآن توسط همین کامپوننت رندر می‌شود و snapshot داده را نگه می‌دارد؛ پس در
+    // PLAN_STALE مودال بسته می‌شود (داده‌ی کهنه دیگر قابل تأیید نیست)، کارت با
+    // planner:mutated پیشنهاد تازه می‌گیرد و کاربر با دیدن نسخه‌ی جدید دوباره تأیید می‌کند.
+    // بقیه‌ی خطاها دوباره پرتاب می‌شوند تا مودال خودش آن‌ها را نمایش دهد.
+    const handleSuggestionRollover = async (ids: number[], planVersion?: number) => {
         setBusy(true)
         try {
             await api("/api/tasks/rollover", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ taskIds: ids }),
+                body: JSON.stringify({ taskIds: ids, planVersion }),
             })
             await afterMutation("کارهای مشخص‌شده به فردا منتقل شدند ✅")
         } catch (e) {
+            if (e instanceof ApiClientError && e.code === "PLAN_STALE") {
+                window.dispatchEvent(new Event("planner:mutated")) // پیشنهاد تازه
+                setSuggestionOpen(false)
+                toast.info(
+                    "برنامه‌ی امروز با تغییرات اخیر همخوان نیست — هیچ تغییری اعمال نشد؛ پیشنهاد تازه را ببین و دوباره تأیید کن",
+                )
+                return // خطا در همان‌جا مدیریت شد (بدون نوشتن در دیتابیس)
+            }
             throw e instanceof Error ? e : new Error("خطا در انتقال کارها")
         } finally {
             setBusy(false)
@@ -227,7 +253,6 @@ export default function DailyTaskList() {
                 <SuggestionCard
                     dayKey={selectedDate}
                     tasks={tasks}
-                    onRollover={handleSuggestionRollover}
                     onOpenModal={(data) => {
                         setSuggestionData(data)
                         setSuggestionOpen(true)

@@ -4,6 +4,9 @@ const dayKeyPattern = /^\d{4}-\d{2}-\d{2}$/
 
 export const rolloverSchema = z.object({
     taskIds: z.array(z.number().int().positive()).min(1, "حداقل یک تسک انتخاب کنید"),
+    // A1 Phase 4 — اختیاری (additive، بدون شکستن قرارداد ADR-006 §4):
+    // اگر Client نسخه‌ی blueprint را بفرستد، rollover فقط روی همان نسخه اجرا می‌شود (§6.3.2).
+    planVersion: z.number().int().nonnegative().optional(),
 })
 
 export const dayPlanSchema = z.object({

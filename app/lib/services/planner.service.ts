@@ -34,8 +34,21 @@ export async function setDayPlan(
 // ---------- ADR-006 (Phase S2) — پیشنهاد روز: فقط خواندنی، بدون persist، بدون AI ----------
 // ورود به نمای روز → اول lazy rebalance (همان read path خلاصه) تا تخصیص‌های فعلی
 // به‌روز باشند؛ سپس موتورِ خالص suggestDay روی وضعیت فعلی اجرا می‌شود.
+/** مبنای محاسبه‌ی پیشنهاد — نسخه‌های پلن + ظرفیت + تعداد کارهای ورودی */
+export type SuggestionBasis = {
+    planVersion: number
+    rebalancedVersion: number | null
+    availableMinutes: number
+    taskCount: number
+}
+
+/** §6.3.2: fresh ⇔ پلن هست و rebalancedVersion == planVersion؛ در غیر این صورت stale */
+export type SuggestionState = "fresh" | "stale"
+
 export type DaySuggestionResponse = ReturnType<typeof suggestDay> & {
     dayKey: string
+    basis: SuggestionBasis
+    state: SuggestionState
 }
 
 export async function getDaySuggestion(
@@ -48,7 +61,7 @@ export async function getDaySuggestion(
     const [plan, tasks] = await Promise.all([
         prisma.dailyPlan.findUnique({
             where: { userId_dayKey: { userId, dayKey } },
-            select: { availableMinutes: true },
+            select: { availableMinutes: true, planVersion: true, rebalancedVersion: true },
         }),
         prisma.task.findMany({
             where: { userId, dayKey },
@@ -58,13 +71,27 @@ export async function getDaySuggestion(
                 score: true,
                 priority: true,
                 status: true,
+                allocatedMinutes: true,
             },
         }),
     ])
 
-    const suggestion = suggestDay(plan?.availableMinutes ?? 0, tasks)
+    const availableMinutes = plan?.availableMinutes ?? 0
+    const planVersion = plan?.planVersion ?? 0
+    const rebalancedVersion = plan?.rebalancedVersion ?? null
 
-    return { dayKey, ...suggestion }
+    // §6.3.2 — نبود پلن = stale؛ عقب‌ماندن نسخه‌ی rebalance از planVersion = stale
+    const state: SuggestionState =
+        !plan || rebalancedVersion == null || planVersion > rebalancedVersion ? "stale" : "fresh"
+
+    const suggestion = suggestDay(availableMinutes, tasks)
+
+    return {
+        dayKey,
+        ...suggestion,
+        basis: { planVersion, rebalancedVersion, availableMinutes, taskCount: tasks.length },
+        state,
+    }
 }
 
 export type HistoryMarker = {

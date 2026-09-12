@@ -20,6 +20,7 @@ import {
     TaskNotAnalyzeableError,
     OverdueTaskError,
     NoRolloverCandidatesError,
+    PlanStaleError,
 } from "./errors"
 
 // ---------- ساخت تسک (مستقل از AI — فیلدهای تحلیل null می‌مانند تا Analyze صریح) ----------
@@ -190,24 +191,39 @@ export async function completeTask(
     }
 
     // A3: روزهای متأثر در همان transaction اتمام، stale می‌شوند (bump اتمیک)
+    // H4 (audit) — گارد اتمیک ضد double-completion:
+    // نوشتن به‌صورت شرطی (status != DONE) و داخل یک transaction تعاملی انجام می‌شود. اگر دو
+    // درخواست هم‌زمان برسند، دومی count = 0 می‌گیرد → TaskAlreadyDoneError و هیچ
+    // TaskEvent/بمپ planVersion نوشته نمی‌شود (برخلاف چک pre-flight قبلی که TOCTOU داشت).
     const affectedDays = new Set<string>([oldDayKey, targetDayKey])
-    const [updated] = await prisma.$transaction([
-        prisma.task.update({ where: { id: task.id }, data }),
-        ...Array.from(affectedDays).map((dayKey) =>
-            prisma.dailyPlan.updateMany({
+    const updated = await prisma.$transaction(async (tx) => {
+        const guard = await tx.task.updateMany({
+            where: { id: task.id, userId, status: { not: "DONE" } },
+            data,
+        })
+        if (guard.count !== 1) throw new TaskAlreadyDoneError()
+
+        for (const dayKey of affectedDays) {
+            await tx.dailyPlan.updateMany({
                 where: { userId, dayKey },
                 data: { planVersion: { increment: 1 } },
-            }),
-        ),
+            })
+        }
+
         // A2: رویداد COMPLETED در همان transaction (§6.3.6 — payload مثال: spentMinutes)
-        prisma.taskEvent.create({
+        await tx.taskEvent.create({
             data: {
                 taskId: task.id,
                 type: "COMPLETED",
                 payload: { spentMinutes, savedMinutes, overspentMinutes },
             },
-        }),
-    ])
+        })
+
+        // حالت نهایی همان رکورد از دیتابیس خوانده می‌شود (منبع حقیقت، نه بازسازی محلی)
+        const fresh = await tx.task.findFirst({ where: { id: task.id, userId } })
+        if (!fresh) throw new TaskNotFoundError()
+        return fresh
+    })
 
     // A3: بازتوزیع در زمان mutation اجرا نمی‌شود — read بعدی آن را lazy اجرا می‌کند
     const summaries: Record<string, RebalanceOutput> = {}
@@ -216,10 +232,15 @@ export async function completeTask(
 }
 
 // ---------- انتقال (rollover) تسک‌های عقب‌افتاده ----------
+// A1 Phase 4: گارد نسخه‌ی blueprint (اختیاری). اگر Client نسخه‌ای بفرستد، انتقال فقط وقتی
+// انجام می‌شود که planVersion روزهای مبدأ هنوز همان باشد؛ در غیر این صورت 409 PLAN_STALE
+// و هیچ نوشتنی رخ نمی‌دهد (بدون state کثیف). مسیرهای دیگر (کارهای عقب‌افتاده) نسخه نمی‌فرستند
+// → رفتارشان بدون تغییر می‌ماند.
 export async function rolloverTasks(
     userId: number,
     timezone: string,
     taskIds: number[],
+    expectedPlanVersion?: number,
 ): Promise<{ moved: { id: number; from: string; to: string }[]; summaries: Record<string, RebalanceOutput> }> {
     const prisma = getPrisma()
     const tasks = await prisma.task.findMany({
@@ -232,6 +253,19 @@ export async function rolloverTasks(
     )
 
     if (schedulable.length === 0) throw new NoRolloverCandidatesError()
+
+    // §6.3.2 — optimistic read قبل از هر نوشتن: blueprint کهنه = هیچ تغییری اعمال نمی‌شود.
+    // نبود رکورد DailyPlan معادل planVersion صفر است (§6.3.3)، همان مقداری که blueprint خوانده بود.
+    if (expectedPlanVersion !== undefined) {
+        const sourceDays = Array.from(new Set(schedulable.map((t) => t.dayKey)))
+        const plans = await Promise.all(
+            sourceDays.map((dayKey) =>
+                prisma.dailyPlan.findUnique({ where: { userId_dayKey: { userId, dayKey } } }),
+            ),
+        )
+        const stale = plans.some((plan) => (plan?.planVersion ?? 0) !== expectedPlanVersion)
+        if (stale) throw new PlanStaleError()
+    }
 
     const today = getCanonicalToday(timezone)
     const affectedDays = new Set<string>()

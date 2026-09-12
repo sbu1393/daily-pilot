@@ -14,7 +14,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: mocks.getCurrentUser }))
 vi.mock("@/app/lib/services/planner.service", () => ({ getDaySuggestion: mocks.getDaySuggestion }))
-vi.mock("@/app/lib/canonicalDay", () => ({ getCanonicalToday: mocks.getCanonicalToday }))
+// M10: فقط getCanonicalToday mock می‌شود؛ اعتبارسنجی روز باید واقعی (قالب + تقویم) تست شود
+vi.mock("@/app/lib/canonicalDay", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/lib/canonicalDay")>()),
+    getCanonicalToday: mocks.getCanonicalToday,
+}))
 
 import { GET } from "./route"
 import { ServiceError } from "@/app/lib/services/errors"
@@ -109,6 +113,17 @@ describe("GET /api/planner/suggestion", () => {
         const parsed = await res.json()
         expect(parsed.ok).toBe(false)
         expect(parsed.error.code).toBe("VALIDATION_ERROR")
+        expect(mocks.getDaySuggestion).not.toHaveBeenCalled()
+    })
+
+    it("returns 400 VALIDATION_ERROR for a calendar-invalid date (M10) and never calls the service", async () => {
+        for (const bad of ["2026-02-30", "2026-13-99"]) {
+            const res = await callGET(`?date=${bad}`)
+
+            expect(res.status).toBe(400)
+            const parsed = await res.json()
+            expect(parsed.error.code).toBe("VALIDATION_ERROR")
+        }
         expect(mocks.getDaySuggestion).not.toHaveBeenCalled()
     })
 

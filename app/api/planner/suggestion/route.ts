@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
 import { getDaySuggestion } from "@/app/lib/services/planner.service"
-import { getCanonicalToday } from "@/app/lib/canonicalDay"
+import { getCanonicalToday, isValidCanonicalDayKey } from "@/app/lib/canonicalDay"
 import {
     errorResponse,
     okResponse,
@@ -20,7 +20,9 @@ export async function GET(req: NextRequest) {
         const dateParam = req.nextUrl.searchParams.get("date")
         const dayKey = dateParam ?? getCanonicalToday(user.timezone)
 
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+        // Phase 2A (M10): اعتبارسنجی سخت‌گیرانه‌ی مشترک — قالب + تقویم واقعی،
+        // یکسان با /api/planner/day و /api/planner/history
+        if (!isValidCanonicalDayKey(dayKey)) {
             return errorResponse(400, "VALIDATION_ERROR", "فرمت روز نامعتبر است")
         }
 

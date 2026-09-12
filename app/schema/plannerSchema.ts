@@ -1,6 +1,5 @@
 import { z } from "zod"
-
-const dayKeyPattern = /^\d{4}-\d{2}-\d{2}$/
+import { isValidCanonicalDayKey } from "@/app/lib/canonicalDay"
 
 export const rolloverSchema = z.object({
     taskIds: z.array(z.number().int().positive()).min(1, "حداقل یک تسک انتخاب کنید"),
@@ -10,7 +9,8 @@ export const rolloverSchema = z.object({
 })
 
 export const dayPlanSchema = z.object({
-    dayKey: z.string().regex(dayKeyPattern, "فرمت روز نامعتبر است"),
+    // M10: قالب + تقویم واقعی — «2026-13-99» یا «2026-02-30» نباید ذخیره شوند
+    dayKey: z.string().refine(isValidCanonicalDayKey, "فرمت روز نامعتبر است"),
     availableMinutes: z.coerce
         .number()
         .int()

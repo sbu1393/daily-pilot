@@ -18,6 +18,22 @@ function assertValidKeyParts(key: string): [number, number, number] {
     return [year, month, day]
 }
 
+/**
+ * M10 — اعتبارسنجی سخت‌گیرانه‌ی کلید canonical «YYYY-MM-DD» برای ورودی کاربر (query param):
+ * هم قالب و هم تقویم. «2026-13-99» یا «2026-02-30» هر دو نامعتبرند — Date آن‌ها را
+ * بی‌صدا نرمالایز می‌کند، پس مقایسه‌ی round-trip لازم است.
+ * سال‌های ۰–۹۹ هم رد می‌شوند چون Date.UTC آن‌ها را ۱۹xx تفسیر می‌کند.
+ */
+export function isValidCanonicalDayKey(key: string): boolean {
+    if (!CANONICAL_KEY_RE.test(key)) return false
+
+    const [year, month, day] = key.split("-").map(Number)
+    if (month < 1 || month > 12 || day < 1 || day > 31) return false
+
+    const d = new Date(Date.UTC(year, month - 1, day))
+    return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day
+}
+
 function dayParts(date: Date, timezone: string): DayParts {
     const parts = new Intl.DateTimeFormat("en", {
         timeZone: timezone,

@@ -68,6 +68,9 @@ const isAbort = (e: unknown): boolean =>
  *
  * @param dayKey روزِ کانونیکال (YYYY-MM-DD)
  * @param enabled اگر false باشد هیچ درخواستی زده نمی‌شود (و داده پاک می‌شود)
+ * @returns `{ suggestion, loading, error, refetch }` — پیشنهاد فعلی/نال، وضعیت بارگذاری،
+ *          پیام خطا، و تابع refetch دستی. پاسخ‌های کهنه هرگز روی state نوشته نمی‌شوند
+ *          (لغو AbortController + گارد ترتیب requestSeq).
  */
 export function useDaySuggestion(dayKey: string, enabled: boolean = true): UseDaySuggestionResult {
     const [suggestion, setSuggestion] = useState<SuggestionData | null>(null)

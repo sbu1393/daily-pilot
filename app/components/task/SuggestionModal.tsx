@@ -148,8 +148,9 @@ export default function SuggestionModal({ open, onClose, suggestion, tasks, onRo
         setError(null)
         try {
             // A1 Phase 4: نسخه‌ی blueprint همراه درخواست می‌رود (اگر موجود باشد).
-            // موفقیت → والد مودال را می‌بندد و رفرش + پیام را انجام می‌دهد.
+            // موفقیت → بلافاصله مودال بسته می‌شود و والد رفرش + پیام را انجام می‌دهد.
             await onRollover([...selected], suggestion.basis?.planVersion)
+            onClose()
         } catch (e) {
             // خطا داخل مودال — بدون شکستن وضعیت برنامه
             setError(e instanceof Error ? e.message : "خطا در انتقال کارها")

@@ -257,6 +257,9 @@ export default function DailyTaskList() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ taskIds: ids, planVersion }),
             })
+            // انتقال موفق بود → مودال پیشنهاد بسته می‌شود (قبل از رفرش، تا حتی اگر
+            // رفرش خطا داد، وضعیت مودال به‌درستی بسته بماند)
+            setSuggestionOpen(false)
             await afterMutation("کارهای مشخص‌شده به فردا منتقل شدند ✅")
         } catch (e) {
             if (e instanceof ApiClientError && e.code === "PLAN_STALE") {

@@ -5,6 +5,14 @@ import { useCalendar } from "@/app/contexts/CalenderContext"
 import { readCachedDay } from "@/app/lib/offline"
 import { api } from "@/app/lib/api/client"
 
+// M5/M6 (Phase 2B) — چرخه‌ی کامل درخواست: گارد ترتیب پاسخ (A1 Phase 2) + AbortController.
+// اگر `api` سیگنال را بپذیرد، درخواست واقعاً لغو می‌شود؛ در غیر این صورت فقط پاسخ کهنه دور ریخته می‌شود.
+// خطای AbortError (لغو عمدی خودمان) هرگز خطای کاربر شمرده نمی‌شود — بی‌صدا تمام می‌شود.
+const isAbort = (e: unknown): boolean =>
+    e instanceof DOMException
+        ? e.name === "AbortError"
+        : typeof e === "object" && e !== null && (e as { name?: unknown }).name === "AbortError"
+
 // A1 Phase 2 — نمای سمت کلاینت باید با app/lib/planner/summary.ts (منبع حقیقت سمت سرور)
 // یکی باشد: GET /api/planner/day دقیقاً همین ساختار را برمی‌گرداند.
 //
@@ -39,23 +47,29 @@ export function useDaySummary() {
     const requestSeq = useRef(0)
 
     const refresh = useCallback(
-        async (silent = false) => {
+        async (silent = false, signal?: AbortSignal) => {
             // rebase: گارد «تاریخ آماده نیست» (نسخه‌ی remote) + گارد ترتیب پاسخ (A1 Phase 2)
             if (!selectedDate || selectedDate.trim() === "") {
                 if (!silent) setLoading(false)
                 return
             }
 
+            if (signal?.aborted) return // لغو پیش از شروع
+
             const seq = ++requestSeq.current
             if (!silent) setLoading(true)
             try {
                 // ADR-04: { ok, data: summary } → خود data خلاصه است
-                const data = await api<DaySummary>(`/api/planner/day?dayKey=${selectedDate}`)
-                if (seq !== requestSeq.current) return // پاسخ قدیمی → دور ریخته می‌شود
+                // M6: درخواست با AbortController لغو می‌شود (وقتی api آن را می‌پذیرد)
+                const data = await api<DaySummary>(`/api/planner/day?dayKey=${selectedDate}`, {
+                    signal,
+                })
+                if (seq !== requestSeq.current || signal?.aborted) return // پاسخ قدیمی/لغوشده → دور ریخته می‌شود
                 setSummary(data)
                 setError(null)
             } catch (e) {
-                if (seq !== requestSeq.current) return
+                // لغو عمدی (تعویض روز/unmount) خطا نیست — همان رفتار «پاسخ قدیمی» را دارد
+                if (seq !== requestSeq.current || signal?.aborted || isAbort(e)) return
                 /* آفلاین: نمایش خلاصه‌ی کش‌شده تا نوار آمار از بین نرود */
                 const cached = readCachedDay(selectedDate)
                 if (cached?.summary) {
@@ -67,7 +81,7 @@ export function useDaySummary() {
             } finally {
                 // فقط درخواست جاری loading را می‌بندد؛ پاسخ قدیمی نباید اسپینر را
                 // وسط یک درخواست تازه قطع کند (منبع flicker).
-                if (seq === requestSeq.current) setLoading(false)
+                if (seq === requestSeq.current && !signal?.aborted) setLoading(false)
             }
         },
         [selectedDate],
@@ -79,10 +93,27 @@ export function useDaySummary() {
         // در پرواز هنگام unmount/تعویض روز (A1 Phase 2)
         if (!selectedDate) return
 
-        void refresh(false)
-        const timer = setInterval(() => void refresh(true), 30_000)
+        // M5: هر چرخه‌ی روز AbortController خودش را دارد؛ تعویض سریع روز یا unmount
+        // درخواستِ در پرواز را واقعاً لغو می‌کند (نه فقط دور ریختن پاسخ).
+        const controller = new AbortController()
+        void refresh(false, controller.signal)
+        const timer = setInterval(() => {
+            if (document.visibilityState === "hidden") return // M5: تب مخفی → بدون درخواست
+            void refresh(true, controller.signal)
+        }, 30_000)
+
+        // M5: توقف/ادامه‌ی polling با visibility — تب مخفی بیکار می‌ماند، برگشت دوباره شروع می‌کند
+        const handleVisibility = () => {
+            if (document.visibilityState === "visible") {
+                void refresh(true, controller.signal)
+            }
+        }
+        document.addEventListener("visibilitychange", handleVisibility)
+
         return () => {
             clearInterval(timer)
+            document.removeEventListener("visibilitychange", handleVisibility)
+            controller.abort() // تعویض روز/unmount → درخواست در پرواز لغو می‌شود
             requestSeq.current += 1
         }
     }, [selectedDate, refresh])

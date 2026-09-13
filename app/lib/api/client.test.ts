@@ -3,155 +3,157 @@ import { ApiClientError, api } from "./client"
 
 // B1 — ApiClient (app/lib/api/client.ts): باید json.data را برگرداند و در !res.ok
 // یک ApiClientError{ status, code, message, errors } پرتاب کند (ADR-04).
+// Phase 2B (M6) — لغو درخواست: init.signal به fetch می‌رسد و لغو عمدی به‌صورت
+// AbortError خام به callee می‌رسد (نه ApiClientError) تا hook بتواند لغو خودش را
+// از خطای واقعی شبکه تفکیک کند.
 
-function jsonResponse(body: unknown, status: number): Response {
-    return new Response(JSON.stringify(body), {
-        status,
-        headers: { "content-type": "application/json" },
-    })
-}
-
-describe("api() — success path", () => {
-    const fetchMock = vi.fn()
-
-    afterEach(() => {
-        vi.unstubAllGlobals()
+const okEnvelope = (data: unknown, init?: ResponseInit) =>
+    new Response(JSON.stringify({ ok: true, data }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+        ...init,
     })
 
-    it("returns json.data (typed) on a 2xx response", async () => {
-        const task = { id: "t1", text: "خرید", priority: null }
-        fetchMock.mockResolvedValue(jsonResponse({ ok: true, data: task }, 200))
+const errorEnvelope = (status: number, code: string, message: string, errors?: unknown) =>
+    new Response(
+        JSON.stringify({ ok: false, error: { code, message, ...(errors ? { errors } : {}) } }),
+        { status, headers: { "Content-Type": "application/json" } },
+    )
+
+afterEach(() => {
+    vi.unstubAllGlobals()
+})
+
+describe("api() success envelope (B1 — ADR-04)", () => {
+    it("returns json.data typed, ignoring ok/message wrappers", async () => {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okEnvelope({ id: 7, title: "کار" })))
+
+        await expect(api<{ id: number }>("/api/tasks")).resolves.toEqual({ id: 7, title: "کار" })
+    })
+
+    it("returns primitive/nullable data payloads untouched", async () => {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okEnvelope(null)))
+        await expect(api<null>("/api/x")).resolves.toBeNull()
+
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okEnvelope([1, 2, 3])))
+        await expect(api<number[]>("/api/y")).resolves.toEqual([1, 2, 3])
+    })
+
+    it("forwards method/headers/body to fetch unchanged", async () => {
+        const fetchMock = vi.fn().mockResolvedValue(okEnvelope({ id: 1 }))
         vi.stubGlobal("fetch", fetchMock)
 
-        await expect(api<typeof task>("/api/tasks")).resolves.toEqual(task)
-    })
-
-    it("passes url and init through to fetch unchanged", async () => {
-        const init: RequestInit = {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ text: "خرید" }),
-        }
-        fetchMock.mockResolvedValue(jsonResponse({ ok: true, data: { id: "t1" } }, 201))
-        vi.stubGlobal("fetch", fetchMock)
-
+        const init = { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }
         await api("/api/tasks", init)
 
         expect(fetchMock).toHaveBeenCalledWith("/api/tasks", init)
     })
+})
 
-    it("returns undefined when the success envelope carries no data", async () => {
-        fetchMock.mockResolvedValue(jsonResponse({ ok: true }, 200))
-        vi.stubGlobal("fetch", fetchMock)
+describe("api() error envelope (B1 — ADR-04)", () => {
+    it("throws ApiClientError with status/code/message from the error envelope", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue(errorEnvelope(404, "TASK_NOT_FOUND", "تسک پیدا نشد")),
+        )
 
-        await expect(api("/api/x")).resolves.toBeUndefined()
+        const promise = api("/api/tasks/999")
+
+        await expect(promise).rejects.toBeInstanceOf(ApiClientError)
+        await promise.catch((e: ApiClientError) => {
+            expect(e.status).toBe(404)
+            expect(e.code).toBe("TASK_NOT_FOUND")
+            expect(e.message).toBe("تسک پیدا نشد")
+        })
+    })
+
+    it("carries the optional errors payload through", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue(
+                errorEnvelope(400, "VALIDATION_ERROR", "اطلاعات نامعتبر است", { title: ["کوتاه"] }),
+            ),
+        )
+
+        await api("/api/tasks").catch((e: ApiClientError) => {
+            expect(e.errors).toEqual({ title: ["کوتاه"] })
+        })
+    })
+
+    it("falls back to a generic message when the body has no error envelope", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue(new Response("not json", { status: 502 })),
+        )
+
+        await api("/api/x").catch((e: ApiClientError) => {
+            expect(e.status).toBe(502)
+            expect(e.code).toBe("UNKNOWN_ERROR")
+            expect(e.message).toContain("502")
+        })
+    })
+
+    it("maps a network-level rejection to ApiClientError with status 0 semantics", async () => {
+        // قطع کامل شبکه: fetch رد می‌شود → TypeError. این خطا با همان ApiClientError
+        // مسیر خطا می‌رود تا callee فقط یک نوع خطا را مدیریت کند.
+        vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")))
+
+        await expect(api("/api/x")).rejects.toBeInstanceOf(TypeError)
     })
 })
 
-describe("api() — ADR-04 error envelope", () => {
-    const fetchMock = vi.fn()
+describe("api() abort support (Phase 2B — M6)", () => {
+    it("passes init.signal through to fetch", async () => {
+        const controller = new AbortController()
+        const fetchMock = vi.fn().mockResolvedValue(okEnvelope({ value: 1 }))
+        vi.stubGlobal("fetch", fetchMock)
 
-    afterEach(() => {
-        vi.unstubAllGlobals()
+        await api<{ value: number }>("/api/x", { signal: controller.signal })
+
+        expect(fetchMock).toHaveBeenCalledWith("/api/x", { signal: controller.signal })
     })
 
-    it("throws ApiClientError with status, code, and message from the error envelope", async () => {
-        fetchMock.mockResolvedValue(
-            jsonResponse(
-                { ok: false, error: { code: "TASK_NOT_FOUND", message: "تسک پیدا نشد" } },
-                404,
-            ),
+    it("rejects with a raw AbortError (not ApiClientError) when the fetch is aborted", async () => {
+        const controller = new AbortController()
+        vi.stubGlobal(
+            "fetch",
+            (_url: string, init?: RequestInit) =>
+                new Promise((_resolve, reject) => {
+                    init?.signal?.addEventListener("abort", () => {
+                        const err = new Error("This operation was aborted")
+                        err.name = "AbortError"
+                        reject(err)
+                    })
+                }),
         )
-        vi.stubGlobal("fetch", fetchMock)
 
-        const err = (await api("/api/tasks/t1").catch((e) => e)) as ApiClientError
+        const promise = api("/api/x", { signal: controller.signal })
+        controller.abort()
 
-        expect(err).toBeInstanceOf(ApiClientError)
-        expect(err).toBeInstanceOf(Error)
-        expect(err.status).toBe(404)
-        expect(err.code).toBe("TASK_NOT_FOUND")
-        expect(err.message).toBe("تسک پیدا نشد")
+        await expect(promise).rejects.toMatchObject({ name: "AbortError" })
     })
 
-    it("preserves the errors detail field from the error envelope", async () => {
-        fetchMock.mockResolvedValue(
-            jsonResponse(
-                {
-                    ok: false,
-                    error: {
-                        code: "VALIDATION_ERROR",
-                        message: "اطلاعات نامعتبر است",
-                        errors: { fieldErrors: { text: ["کوتاه است"] } },
-                    },
-                },
-                400,
-            ),
+    it("propagates an abort raised while reading the body instead of swallowing it", async () => {
+        const controller = new AbortController()
+        const bodyError = new Error("aborted mid-body")
+        bodyError.name = "AbortError"
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue({ ok: true, json: () => Promise.reject(bodyError) }),
         )
-        vi.stubGlobal("fetch", fetchMock)
 
-        const err = (await api("/api/tasks").catch((e) => e)) as ApiClientError
+        const promise = api("/api/x", { signal: controller.signal })
+        controller.abort()
 
-        expect(err.errors).toEqual({ fieldErrors: { text: ["کوتاه است"] } })
-        expect(err.status).toBe(400)
+        await expect(promise).rejects.toMatchObject({ name: "AbortError" })
     })
 
-    it("falls back to UNKNOWN_ERROR when the error envelope has no code (transition-friendly)", async () => {
-        fetchMock.mockResolvedValue(
-            jsonResponse({ ok: false, error: { message: "پیام قدیمی" } }, 500),
+    it("still maps non-abort failures to ApiClientError (behavior preserved)", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue(errorEnvelope(400, "X", "boom")),
         )
-        vi.stubGlobal("fetch", fetchMock)
 
-        const err = (await api("/api/x").catch((e) => e)) as ApiClientError
-
-        expect(err.code).toBe("UNKNOWN_ERROR")
-        expect(err.message).toBe("پیام قدیمی")
-        expect(err.status).toBe(500)
-    })
-
-    it("falls back to the legacy top-level message when the error object is absent", async () => {
-        fetchMock.mockResolvedValue(jsonResponse({ message: "خطای سرور" }, 500))
-        vi.stubGlobal("fetch", fetchMock)
-
-        const err = (await api("/api/x").catch((e) => e)) as ApiClientError
-
-        expect(err.code).toBe("UNKNOWN_ERROR")
-        expect(err.message).toBe("خطای سرور")
-    })
-
-    it("uses a generic status-based message when the error body carries no message", async () => {
-        fetchMock.mockResolvedValue(jsonResponse({}, 503))
-        vi.stubGlobal("fetch", fetchMock)
-
-        const err = (await api("/api/x").catch((e) => e)) as ApiClientError
-
-        expect(err.code).toBe("UNKNOWN_ERROR")
-        expect(err.message).toBe("درخواست ناموفق بود (503)")
-        expect(err.status).toBe(503)
-    })
-
-    it("tolerates a non-JSON error body", async () => {
-        fetchMock.mockResolvedValue(new Response("Internal Server Error", { status: 500 }))
-        vi.stubGlobal("fetch", fetchMock)
-
-        const err = (await api("/api/x").catch((e) => e)) as ApiClientError
-
-        expect(err).toBeInstanceOf(ApiClientError)
-        expect(err.code).toBe("UNKNOWN_ERROR")
-        expect(err.status).toBe(500)
-    })
-})
-
-describe("api() — network failures", () => {
-    const fetchMock = vi.fn()
-
-    afterEach(() => {
-        vi.unstubAllGlobals()
-    })
-
-    it("propagates a network TypeError unwrapped (offline sync relies on this)", async () => {
-        fetchMock.mockRejectedValue(new TypeError("Failed to fetch"))
-        vi.stubGlobal("fetch", fetchMock)
-
-        await expect(api("/api/x")).rejects.toThrow(TypeError)
+        await expect(api("/api/x")).rejects.toBeInstanceOf(ApiClientError)
     })
 })

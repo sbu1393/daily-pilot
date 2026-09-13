@@ -37,22 +37,52 @@ type SettingsContextType = {
 
 const SettingsContext = createContext<SettingsContextType | null>(null)
 
-function loadSettings(): Settings {
-    try {
-        const raw = window.localStorage.getItem(STORAGE_KEY)
+/**
+ * M5 (Phase 2B) — Safe Parse & Merge: محلی قابل تست (بدون window/localStorage).
+ * JSON خراب، غیر-آبجکت، یا مقدارِ با تیپ اشتباه هرگز کرش نمی‌سازد — کلیدِ نامعتبر
+ * به مقدار پیش‌فرض برمی‌گردد و کلیدهای معتبر حفظ می‌شوند (merge محترمانه با defaults).
+ */
+export function mergeSettings(raw: string | null): Settings {
+    if (!raw) {
+        return { ...DEFAULT_SETTINGS }
+    }
 
-        if (!raw) {
-            return DEFAULT_SETTINGS
+    try {
+        const saved: unknown = JSON.parse(raw)
+        if (typeof saved !== "object" || saved === null || Array.isArray(saved)) {
+            return { ...DEFAULT_SETTINGS } // "5"، "null"، "[]" و امثالهم → پیش‌فرض
         }
 
-        const saved = JSON.parse(raw) as Partial<Settings>
+        const source = saved as Record<string, unknown>
+        const theme = source.theme
+        const reminderTime = source.reminderTime
 
         return {
-            ...DEFAULT_SETTINGS,
-            ...saved,
+            theme:
+                theme === "light" || theme === "dark" || theme === "system"
+                    ? theme
+                    : DEFAULT_SETTINGS.theme,
+            sound: typeof source.sound === "boolean" ? source.sound : DEFAULT_SETTINGS.sound,
+            reminderEnabled:
+                typeof source.reminderEnabled === "boolean"
+                    ? source.reminderEnabled
+                    : DEFAULT_SETTINGS.reminderEnabled,
+            reminderTime:
+                typeof reminderTime === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(reminderTime)
+                    ? reminderTime
+                    : DEFAULT_SETTINGS.reminderTime,
         }
     } catch {
-        return DEFAULT_SETTINGS
+        return { ...DEFAULT_SETTINGS } // JSON خراب → بدون کرش، با پیش‌فرض‌ها
+    }
+}
+
+function loadSettings(): Settings {
+    try {
+        return mergeSettings(window.localStorage.getItem(STORAGE_KEY))
+    } catch {
+        // خودِ دسترسی به localStorage (نه JSON) ممکن است خطا بدهد (حالت خصوصی و امثالهم)
+        return { ...DEFAULT_SETTINGS }
     }
 }
 

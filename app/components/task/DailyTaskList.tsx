@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { useCalendar } from "@/app/contexts/CalenderContext"
-import { useDaySummary, type DaySummary } from "../../hooks/UseDaySummary"
+import { useDaySummary, type DaySummary } from "../../hooks/useDaySummary"
 import { getCanonicalToday, shiftCanonicalKey } from "../../lib/canonicalDay"
 import { faDigits } from "@/app/lib/time"
 import {
@@ -29,6 +29,8 @@ import styles from "./task.module.css"
 import ReanalyzeModal from "./ReanalyzeModal"
 import SuggestionCard from "./SuggestionCard"
 import SuggestionModal, { type SuggestionData } from "./SuggestionModal"
+import AdvisorCard from "./AdvisorCard"
+import { type AdvisorResult } from "@/app/lib/planner/advisor"
 import { formatCanonicalToJalali } from "../../lib/time"
 import { LayersPlus, Megaphone, RotateCwFadingClock } from "lucide-react"
 
@@ -39,6 +41,8 @@ export default function DailyTaskList() {
     const { summary, refresh: refreshSummary } = useDaySummary()
 
     const [tasks, setTasks] = useState<TaskItem[]>([])
+    // Part 3/3 — مشاور شروع: از همان GET /api/tasks می‌آید (data.advisor) — فقط نمایش
+    const [advisor, setAdvisor] = useState<AdvisorResult | null>(null)
     const [overdue, setOverdue] = useState<TaskItem[]>([])
     const [loading, setLoading] = useState(true)
     const [busy, setBusy] = useState(false)
@@ -75,12 +79,13 @@ export default function DailyTaskList() {
         // قبل از هر تماس با کش محلی await می‌شود.
         const scopeReady = ensureOfflineScope()
         try {
-            const data = await api<{ tasks: TaskItem[]; summary: DaySummary }>(
+            const data = await api<{ tasks: TaskItem[]; summary: DaySummary; advisor?: AdvisorResult | null }>(
                 `/api/tasks?dayKey=${selectedDate}`,
             )
             const dayTasks = data.tasks
             if (seq === requestSeq.current) {
                 setTasks(dayTasks)
+                setAdvisor(data.advisor ?? null)
             }
             try {
                 const sum = await api<DaySummary>(`/api/planner/day?dayKey=${selectedDate}`)
@@ -97,6 +102,8 @@ export default function DailyTaskList() {
                 const cached = readCachedDay(selectedDate)
                 if (cached) {
                     setTasks(cached.tasks)
+                    // مشاور فقط از داده‌ی تازه‌ی سرور معنا دارد؛ در حالت آفلاین/کش مخفی می‌شود
+                    setAdvisor(null)
                 } else if (isOffline()) {
                     setTasks([])
                 } else {
@@ -246,6 +253,11 @@ export default function DailyTaskList() {
                 <div className={styles.warningBar}>
                     ⚠️ ظرفیت روز پر شده و زمان بعضی کارها کم شده. اگه کار جدید اضافه کنی، از کارهای کم‌اهمیت‌ تر کم میشه — یا «زمان آزاد» روز رو زیاد کن.
                 </div>
+            )}
+
+            {/* مشاور شروع (Part 3/3) — فقط نمایش، بدون هیچ جهشی؛ فقط برای روز امروز */}
+            {selectedDate === getCanonicalToday(timezone) && (
+                <AdvisorCard advisor={advisor} tasks={tasks} />
             )}
 
             {/* بخش پیشنهاد هوش مصنوعی */}

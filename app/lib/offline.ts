@@ -1,7 +1,7 @@
 "use client"
 
 import type { TaskItem } from "@/app/components/task/taskTypes"
-import type { DaySummary } from "@/app/hooks/UseDaySummary"
+import type { DaySummary } from "@/app/hooks/useDaySummary"
 
 /**
  * لایه‌ی آفلاین Daily Pilot

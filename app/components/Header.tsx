@@ -9,6 +9,7 @@ import { CalendarDays, DoorOpen, Settings } from "lucide-react"
 import Avatar, { type AvatarUser } from "./Avatar"
 import { clearOfflineForLogout } from "@/app/lib/offline"
 import { faDigits } from "@/app/lib/time"
+import Logo from "./Logo"
 
 export default function Header({ user }: { user: AvatarUser | null }) {
     const router = useRouter()
@@ -61,23 +62,13 @@ export default function Header({ user }: { user: AvatarUser | null }) {
     return (
         <header className="app-header">
             <div className="header-inner">
-                <Link href="/" className="dp-link-reset" style={{ flexShrink: 0 }}>
-                <img
-                    src="/logo.png"
-                    alt="روزچین"
-                    style={{
-                        height: "100%",
-                        width: "100%",
-                        objectFit: "contain",
-                        objectPosition: "50% 47%",
-                        display: "block",
-                    }}
-                />
+                <Link href="/" className="dp-link-reset flex items-center">
+                    <Logo size={37} /> 
                 </Link>
 
                 <div className="header-actions">
                     <Link href="/dashboard" className="dp-header-link">
-                    <CalendarDays />{" "}برنامه امروز
+                        <span style={{margin:"3px"}}>برنامه امروز </span> <CalendarDays />
                     </Link>
 
                     {user && (
@@ -110,7 +101,7 @@ export default function Header({ user }: { user: AvatarUser | null }) {
                                         onClick={logout}
                                         disabled={busy}
                                     >
-                                        {busy ? "…" : <><DoorOpen/> خروج از حساب</>}
+                                        {busy ? "…" : <><DoorOpen /> خروج از حساب</>}
 
                                     </button>
                                 </div>

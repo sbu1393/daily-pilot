@@ -6,6 +6,7 @@ import { type SuggestionData } from "@/app/hooks/useDaySuggestion"
 import { type TaskItem } from "./taskTypes"
 import taskStyles from "./task.module.css"
 import styles from "./advisor.module.css"
+import { Coffee, HourglassCog, ShelvingUnit, Sprout, TimerReset, TriangleAlert } from "lucide-react"
 
 /* ------------------------------------------------------------------ */
 /* AdvisorCard — کارتِ مشاور روی نمای روز.                             */
@@ -28,8 +29,8 @@ import styles from "./advisor.module.css"
 
 const priorityEmoji: Record<"HIGH" | "MEDIUM" | "LOW", string> = {
     HIGH: "🔴",
-    MEDIUM: "🟠",
-    LOW: "🟢",
+    MEDIUM: "🔸",
+    LOW: "🔹",
 }
 
 export type AdvisorCardView =
@@ -197,14 +198,17 @@ export default function AdvisorCard({
             {/* ۲) وضعیت برنامه‌ی امروز */}
             {status === "empty" ? (
                 <p className={styles.status} role="status">
-                    🌱 امروز هنوز کاری ثبت نشده — اولین کارت را بساز تا با هم برنامه‌ی متعادلی برای
+                    <Sprout /> امروز هنوز کاری ثبت نشده — اولین کارت را بساز تا با هم برنامه‌ی متعادلی برای
                     امروز بچینیم.
                 </p>
             ) : status === "allDone" ? (
                 <p className={styles.status} role="status">
                     {view.kind === "allDone"
                         ? view.message
-                        : "🎉 کارهای امروز تمام شده — وقتشه استراحت کنی."}
+                        : <>
+                        <Coffee />
+                        <span> کارهای امروز تمام شده — وقتشه استراحت کنی.</span>
+                        </>}
                 </p>
             ) : (
                 <>
@@ -213,15 +217,15 @@ export default function AdvisorCard({
                         role="status"
                     >
                         {status === "overflow" ? (
-                            <>⚠️ {faDigits(suggestion.unfitted.length)} تسک ممکن است امروز انجام نشود.</>
+                            <><TriangleAlert /> {faDigits(suggestion.unfitted.length)} تسک ممکن است امروز انجام نشود.</>
                         ) : status === "noCapacity" ? (
-                            <>🕰️ برای پیشنهاد دقیق، «وقت آزاد» امروزت را تعیین کن.</>
+                            <><HourglassCog /> برای پیشنهاد دقیق، «وقت آزاد» امروزت را تعیین کن.</>
                         ) : (
                             <>✅ برنامه‌ی امروز متعادل است — همه‌ی کارها در ظرفیت امروز جا می‌شوند.</>
                         )}
                     </p>
 
-                    {stale && <span className={styles.staleChip}>🕓 برنامه به بازمحاسبه نیاز دارد</span>}
+                    {stale && <span className={styles.staleChip}><TimerReset /> برنامه به بازمحاسبه نیاز دارد</span>}
 
                     {showToggle && (
                         <div className={styles.actions}>
@@ -247,7 +251,7 @@ export default function AdvisorCard({
                                         : "برای این روز کاری برای اولویت‌دهی نیست"
                                 }
                             >
-                                🧭 چیدمان هوشمند
+                                <ShelvingUnit /> چیدمان هوشمند
                                 <span className={styles.toggleState}>
                                     {isAdvisorOrderActive ? "روشن" : "خاموش"}
                                 </span>

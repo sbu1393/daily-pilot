@@ -62,14 +62,14 @@ export default function DailyTaskList() {
     const [rolloverOpen, setRolloverOpen] = useState(false)
     const [deleteTask, setDeleteTask] = useState<TaskItem | null>(null)
     const [reanalyzeTask, setReanalyzeTask] = useState<TaskItem | null>(null)
-    
+
     // استیت‌های مربوط به هوش مصنوعی
     const [suggestionOpen, setSuggestionOpen] = useState(false)
     // Phase 2 — «چیدمان هوشمند»: فقط یک کلیدِ نمایشیِ محلی (هیچ داده‌ای را تغییر نمی‌دهد)
     const [isAdvisorOrderActive, setIsAdvisorOrderActive] = useState(false)
 
     const [queuedTasks, setQueuedTasks] = useState<QueuedTask[]>([])
-    
+
     const requestSeq = useRef(0)
 
     const visibleQueued = useMemo(
@@ -309,9 +309,12 @@ export default function DailyTaskList() {
 
             {overdue.length > 0 && (
                 <div className={styles.banner}>
-                    <span>
-                        <Megaphone /> {faDigits(overdue.length)} کار از روزهای قبل ناتمام مانده
-                    </span>
+                    <div>
+                        <Megaphone />
+                        <span>
+                            {faDigits(overdue.length)} کار از روزهای قبل ناتمام مانده
+                        </span>
+                    </div>
                     <button className={styles.btnPrimary} onClick={() => setRolloverOpen(true)}>
                         انتقال به امروز
                     </button>
@@ -391,7 +394,7 @@ export default function DailyTaskList() {
                     busy={busy}
                 />
             )}
-            
+
             {/* مودال پیشنهاد هوش مصنوعی — داده‌ی زنده از useDaySuggestion (بدون snapshot) */}
             {suggestionOpen && suggestion && (
                 <SuggestionModal

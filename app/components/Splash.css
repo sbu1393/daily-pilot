@@ -1,4 +1,4 @@
-/* Splash — only visible before hydration removes #dp-splash from the DOM. */
+/* Splash — نمایش اسپلش در اولین لود اپلیکیشن */
 
 #dp-splash {
     position: fixed;
@@ -7,10 +7,14 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #0b1120; 
-    /* Fallback بدون نیاز به JS: حتی اگر hydration شکست بخورد،
-       اسپلش بعد از ۴ ثانیه خودش محو میشود و هرگز روی اپ گیر نمیکند. */
-    animation: dpSplashGone 0s 4s forwards;
+    background: #0b1120;
+
+    /* هماهنگی با متغیرهای جاوااسکریپت: بعد از ۲.۲ ثانیه شروع به محو شدن نرم میکند */
+    animation-name: dpSplashGone;
+    animation-duration: var(--dp-splash-fade-duration, 200ms);
+    animation-delay: var(--dp-splash-duration, 2200ms);
+    animation-timing-function: ease-out;
+    animation-fill-mode: forwards;
 }
 
 @keyframes dpSplashGone {
@@ -21,15 +25,27 @@
     }
 }
 
+/* برای کاربرانی که انیمیشن کمتر را در سیستم‌عامل انتخاب کردند */
+@media (prefers-reduced-motion: reduce) {
+    #dp-splash {
+        animation-duration: 0ms;
+    }
+}
+
+/* نمایش مستقیم و تمیز گیف بدون قاب، پس‌زمینه و Pill */
 #dp-splash img {
-    /* همان قاب ۴٫۴:۱ لوگو — پس‌زمینهی خالی PNG را حذف میکند تا متن روزچین درشت بماند */
-    height: 110px;
-    aspect-ratio: 4.4 / 1;
-    max-width: calc(100vw - 48px);
-    object-fit: cover;
-    object-position: 50% 47%;
-    padding: 12px 30px;
-    background: var(--primary-soft, #eef2ff);
-    border-radius: 999px;
-    box-shadow: 0 16px 34px -12px rgba(79, 70, 229, .35);
+    /* افزایش ارتفاع کلی برای بزرگ‌تر شدن درخشان لوگو */
+    height: 300px; 
+    width: auto;
+    max-width: calc(100vw - 32px);
+    object-fit: contain;
+    display: block;
+    user-select: none;
+    pointer-events: none;
+    
+    /* کارت سفید با پدینگ متوازن جهت حداکثر فضا برای لوگو */
+    background: #ffffff;
+    border-radius: 20px; /* انحنای مدرن و هماهنگ با ابعاد جدید */
+    box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.45);
+    box-sizing: border-box;
 }

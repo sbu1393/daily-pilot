@@ -62,7 +62,7 @@ export type SuggestionData = {
     state?: "fresh" | "stale"
 }
 
-const priorityEmoji: Record<TaskPriority, string> = { HIGH: "🔴", MEDIUM: "🟠", LOW: "🟢" }
+const priorityEmoji: Record<TaskPriority, string> = { HIGH: "🔴", MEDIUM: "🔸", LOW: "🔹" }
 const emojiOf = (t?: TaskItem) => (t?.priority ? priorityEmoji[t.priority] : "⚪")
 
 const LOCK_BADGE = "در حال انجام — دست‌نخورده"

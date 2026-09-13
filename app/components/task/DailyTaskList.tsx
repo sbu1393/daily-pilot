@@ -27,9 +27,10 @@ import CompleteTaskModal from "./CompleteTaskModal"
 import RolloverDialog from "./RolloverDialog"
 import styles from "./task.module.css"
 import ReanalyzeModal from "./ReanalyzeModal"
-import SuggestionCard from "./SuggestionCard"
-import SuggestionModal, { type SuggestionData } from "./SuggestionModal"
+import SuggestionModal from "./SuggestionModal"
 import AdvisorCard from "./AdvisorCard"
+import { useDaySuggestion } from "@/app/hooks/useDaySuggestion"
+import { orderTasksByAdvisor } from "@/app/lib/planner/advisorOrder"
 import { type AdvisorResult } from "@/app/lib/planner/advisor"
 import { formatCanonicalToJalali } from "../../lib/time"
 import { LayersPlus, Megaphone, RotateCwFadingClock } from "lucide-react"
@@ -39,6 +40,15 @@ const priorityWeight: Record<TaskPriority, number> = { HIGH: 3, MEDIUM: 2, LOW: 
 export default function DailyTaskList() {
     const { selectedDate, timezone } = useCalendar()
     const { summary, refresh: refreshSummary } = useDaySummary()
+
+    // Phase 2 — روزِ کانونیکالِ امروز: کارت مشاور و «چیدمان هوشمند» فقط برای همین روز معنا دارند
+    const isToday = selectedDate === getCanonicalToday(timezone)
+    // فقط خواندنی؛ با تغییر روز یا رویداد planner:mutated خودش تازه می‌شود (useDaySuggestion)
+    const {
+        suggestion,
+        loading: suggestionLoading,
+        error: suggestionError,
+    } = useDaySuggestion(selectedDate, isToday)
 
     const [tasks, setTasks] = useState<TaskItem[]>([])
     // Part 3/3 — مشاور شروع: از همان GET /api/tasks می‌آید (data.advisor) — فقط نمایش
@@ -55,7 +65,8 @@ export default function DailyTaskList() {
     
     // استیت‌های مربوط به هوش مصنوعی
     const [suggestionOpen, setSuggestionOpen] = useState(false)
-    const [suggestionData, setSuggestionData] = useState<SuggestionData | null>(null)
+    // Phase 2 — «چیدمان هوشمند»: فقط یک کلیدِ نمایشیِ محلی (هیچ داده‌ای را تغییر نمی‌دهد)
+    const [isAdvisorOrderActive, setIsAdvisorOrderActive] = useState(false)
 
     const [queuedTasks, setQueuedTasks] = useState<QueuedTask[]>([])
     
@@ -174,6 +185,30 @@ export default function DailyTaskList() {
         })
     }, [tasks])
 
+    /**
+     * Phase 2 — «چیدمان هوشمند»: وقتی روشن است، کارهای پیشنهادیِ امروز اول می‌آیند (به ترتیب
+     * موتور: وزن نزولی) و بقیه با همان ترتیبِ استانداردِ فهرست می‌مانند؛ DONE همیشه آخر
+     * (orderTasksByAdvisor). خاموش که باشد، همان ترتیب فعلی دست‌نخورده است.
+     */
+    const displayTasks = useMemo(() => {
+        if (!isAdvisorOrderActive || !suggestion) return ordered
+        const plannedTaskIds = suggestion.planned.map((p) => p.taskId)
+        if (plannedTaskIds.length === 0) return ordered
+        return orderTasksByAdvisor(ordered, plannedTaskIds)
+    }, [isAdvisorOrderActive, suggestion, ordered])
+
+    // Phase 2 — کلیدِ چیدمان با تغییر روز ریست می‌شود
+    useEffect(() => {
+        setIsAdvisorOrderActive(false)
+    }, [selectedDate])
+
+    // Phase 2 — و با هر جهش برنامه (افزودن/حذف/انتقال/تحلیل) از رویداد سراسری ریست می‌شود
+    useEffect(() => {
+        const reset = () => setIsAdvisorOrderActive(false)
+        window.addEventListener("planner:mutated", reset)
+        return () => window.removeEventListener("planner:mutated", reset)
+    }, [])
+
     const doneCount = useMemo(() => tasks.filter((t) => t.status === "DONE").length, [tasks])
     const overCommitted = (summary?.overCommittedMinutes ?? 0) > 0
 
@@ -210,9 +245,9 @@ export default function DailyTaskList() {
 
     // ADR-006 (S4) + A1 Phase 4: انتقال «به فردا» از پیشنهاد روز — همان اندپوینت موجود.
     // planVersion فقط وقتی فرستاده می‌شود که blueprint نسخه داشته باشد (گارد اپتیمیستیک).
-    // rebase: مودال الآن توسط همین کامپوننت رندر می‌شود و snapshot داده را نگه می‌دارد؛ پس در
-    // PLAN_STALE مودال بسته می‌شود (داده‌ی کهنه دیگر قابل تأیید نیست)، کارت با
-    // planner:mutated پیشنهاد تازه می‌گیرد و کاربر با دیدن نسخه‌ی جدید دوباره تأیید می‌کند.
+    // Phase 2: داده‌ی blueprint از useDaySuggestion می‌آید (زنده، بدون snapshot)؛ پس در
+    // PLAN_STALE مودال بسته می‌شود (نسخه‌ی کهنه دیگر قابل تأیید نیست)، رویداد planner:mutated
+    // پیشنهاد تازه را می‌گیرد و کاربر با دیدن نسخه‌ی جدید دوباره تأیید می‌کند.
     // بقیه‌ی خطاها دوباره پرتاب می‌شوند تا مودال خودش آن‌ها را نمایش دهد.
     const handleSuggestionRollover = async (ids: number[], planVersion?: number) => {
         setBusy(true)
@@ -255,22 +290,19 @@ export default function DailyTaskList() {
                 </div>
             )}
 
-            {/* مشاور شروع (Part 3/3) — فقط نمایش، بدون هیچ جهشی؛ فقط برای روز امروز */}
-            {selectedDate === getCanonicalToday(timezone) && (
-                <AdvisorCard advisor={advisor} tasks={tasks} />
-            )}
-
-            {/* بخش پیشنهاد هوش مصنوعی */}
-            {selectedDate === getCanonicalToday(timezone) && (
-                <SuggestionCard
-                    dayKey={selectedDate}
-                    tasks={tasks}
-                    onOpenModal={(data) => {
-                        setSuggestionData(data)
-                        setSuggestionOpen(true)
-                    }}
-                />
-            )}
+            {/* Phase 2 — کارت مشاور روز: «کار بعدی» + وضعیت برنامه + کلید چیدمان هوشمند.
+                فقط نمایش/کنترلِ نمایشی است؛ هیچ جهشی از اینجا نوشته نمی‌شود. */}
+            <AdvisorCard
+                enabled={isToday}
+                suggestion={suggestion}
+                loading={suggestionLoading}
+                error={suggestionError}
+                tasks={tasks}
+                advisor={advisor}
+                isAdvisorOrderActive={isAdvisorOrderActive}
+                onToggleOrder={() => setIsAdvisorOrderActive((v) => !v)}
+                onOpenModal={() => setSuggestionOpen(true)}
+            />
 
             {overdue.length > 0 && (
                 <div className={styles.banner}>
@@ -285,7 +317,7 @@ export default function DailyTaskList() {
 
             {loading && tasks.length === 0 ? (
                 <p className={styles.empty}>در حال بارگذاری…</p>
-            ) : ordered.length === 0 && visibleQueued.length === 0 ? (
+            ) : displayTasks.length === 0 && visibleQueued.length === 0 ? (
                 <div className={styles.empty}>
                     هنوز کاری برای این روز ثبت نشده.<br />
                     اولین کار را بساز تا هوش مصنوعی اولویت و زمانبندی رو مشخص کنه.
@@ -293,7 +325,7 @@ export default function DailyTaskList() {
             ) : (
                 <ul className={styles.list}>
                     <AnimatePresence initial={false} mode="popLayout">
-                        {ordered.map((task) => (
+                        {displayTasks.map((task) => (
                             <TaskCard
                                 key={task.id}
                                 task={task}
@@ -357,12 +389,12 @@ export default function DailyTaskList() {
                 />
             )}
             
-            {/* مودال پیشنهاد هوش مصنوعی */}
-            {suggestionData && (
+            {/* مودال پیشنهاد هوش مصنوعی — داده‌ی زنده از useDaySuggestion (بدون snapshot) */}
+            {suggestionOpen && suggestion && (
                 <SuggestionModal
                     open={suggestionOpen}
                     onClose={() => setSuggestionOpen(false)}
-                    suggestion={suggestionData}
+                    suggestion={suggestion}
                     tasks={tasks}
                     onRollover={handleSuggestionRollover}
                 />

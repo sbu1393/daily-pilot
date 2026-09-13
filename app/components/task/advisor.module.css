@@ -1,4 +1,4 @@
-/* AdvisorCard (Part 3/3) — استایل ویجت «مشاور شروع»
+/* AdvisorCard — استایل کارتِ مشاور روز
    همان زبان طراحی suggestion.module.css / task.module.css:
    شیشه‌ای با متغیرهای موجود، RTL، گرد و نرم، ریسپانسیو برای موبایل/PWA */
 
@@ -12,14 +12,6 @@
     border-radius: 18px;
     padding: 13px 16px;
     box-shadow: 0 8px 24px rgba(var(--ink-rgb), .06);
-}
-
-.greeting {
-    margin: 0;
-    font-size: .86rem;
-    font-weight: 700;
-    line-height: 1.9;
-    color: var(--text-strong);
 }
 
 /* ===== کار بعدی — برجسته ===== */
@@ -99,7 +91,96 @@
     white-space: nowrap;
 }
 
-/* ===== پانویس: کارهای سرریز — ارجاع به کارت پیشنهاد برنامه ===== */
+/* ===== وضعیت برنامه‌ی امروز ===== */
+.status {
+    margin: 0;
+    font-size: .86rem;
+    font-weight: 700;
+    line-height: 1.9;
+    color: var(--text-strong);
+}
+
+/* سرریز ظرفیت — لحن هشدار (کم‌سر‌و‌صدا، بدون قرمزِ پرخاشگر) */
+.cardWarn {
+    border-color: var(--warning);
+    border-inline-start-color: var(--warning);
+}
+
+.statusWarn {
+    margin: 0;
+    font-size: .86rem;
+    font-weight: 800;
+    line-height: 1.9;
+    color: var(--warning);
+}
+
+/* A1 Phase 3 — نشانِ کم‌سر‌و‌صدای «برنامه کهنه» (§6.3.2) */
+.staleChip {
+    width: max-content;
+    font-size: .74rem;
+    font-weight: 700;
+    color: var(--warning);
+    background: var(--warning-bg);
+    border-radius: 999px;
+    padding: 4px 12px;
+    line-height: 1.9;
+}
+
+/* ===== کنترل‌ها ===== */
+.actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font: inherit;
+    font-size: .8rem;
+    font-weight: 700;
+    color: var(--ink-2);
+    background: var(--chip-bg);
+    border: 1px solid var(--border-soft);
+    border-radius: 999px;
+    padding: 7px 13px;
+    cursor: pointer;
+    transition: border-color .2s ease, color .2s ease, background .2s ease;
+}
+
+.toggle:hover:not(:disabled) {
+    border-color: var(--primary);
+    color: var(--primary-dark);
+}
+
+.toggle:disabled {
+    cursor: default;
+    opacity: .6;
+}
+
+.toggleOn {
+    color: var(--primary-dark);
+    background: var(--primary-soft);
+    border-color: var(--primary);
+}
+
+.toggleState {
+    font-size: .68rem;
+    font-weight: 800;
+    color: var(--muted);
+    background: var(--surface);
+    border-radius: 999px;
+    padding: 1px 8px;
+    line-height: 1.9;
+}
+
+.toggleOn .toggleState {
+    color: var(--primary-dark);
+}
+
+/* ===== پانویس ===== */
 .footnote {
     margin: 0;
     color: var(--muted);
@@ -110,9 +191,27 @@
     padding: 8px 12px;
 }
 
-/* ===== حالت «همه انجام شده» — آرام و بدون فشار ===== */
-.cardDone {
-    border-inline-start-color: var(--muted-2);
+/* ===== اسکلتِ بارگذاری (نبض) ===== */
+@keyframes advisorPulse {
+    0%, 100% { opacity: .45; }
+    50% { opacity: .9; }
+}
+
+.skeleton {
+    display: block;
+    height: 13px;
+    border-radius: 999px;
+    background: var(--chip-bg);
+    animation: advisorPulse 1.4s ease-in-out infinite;
+}
+
+.skeletonWide {
+    width: 72%;
+}
+
+.skeletonNarrow {
+    width: 42%;
+    animation-delay: .2s;
 }
 
 /* ===== موبایل / PWA ===== */
@@ -133,5 +232,9 @@
     .paceChip {
         white-space: normal;
         line-height: 1.9;
+    }
+
+    .actions {
+        gap: 8px;
     }
 }

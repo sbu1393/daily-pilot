@@ -6,12 +6,41 @@ type Bucket = { count: number; resetAt: number }
 
 const buckets = new Map<string, Bucket>()
 
+// M2 — پاک‌سازی دوره‌ای bucketهای منقضی تا این Map در طول عمر پروسه بی‌نهایت رشد نکند.
+// هزینه: یک پیمایش فقط هر CLEANUP_INTERVAL_MS (نه روی هر درخواست) — رفتار هیچ کاربر
+// فعالی تغییر نمی‌کند، فقط کلیدهای مرده حذف می‌شوند.
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000
+let lastCleanupAt = 0
+
+/**
+ * bucketهای منقضی را حذف می‌کند و تعداد حذف‌شده‌ها را برمی‌گرداند.
+ * هم به‌صورت خودکار (با فاصله‌ی زمانی) از isRateLimited صدا زده می‌شود و هم قابل
+ * فراخوانی مستقیم است.
+ */
+export function pruneExpiredBuckets(now: number = Date.now()): number {
+    let removed = 0
+    for (const [key, bucket] of buckets) {
+        if (now > bucket.resetAt) {
+            buckets.delete(key)
+            removed += 1
+        }
+    }
+    return removed
+}
+
 export function isRateLimited(
     key: string,
     maxAttempts = 10,
     windowMs = 15 * 60 * 1000,
 ): boolean {
     const now = Date.now()
+
+    // پیمایش دوره‌ای (amortized) — نه روی هر درخواست
+    if (now - lastCleanupAt >= CLEANUP_INTERVAL_MS) {
+        lastCleanupAt = now
+        pruneExpiredBuckets(now)
+    }
+
     const bucket = buckets.get(key)
 
     if (!bucket || now > bucket.resetAt) {

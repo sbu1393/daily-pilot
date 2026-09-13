@@ -1,8 +1,8 @@
 import { getPrisma } from "@/app/lib/getPrisma"
 import { savedForTask } from "./summary"
 
-const MIN_ALLOCATION = 15 // کمتر از این → کاندیدای انتقال به فردا
-const GRANULARITY = 5 // همه‌ی تخصیص‌ها مضرب ۵ دقیقه
+export const MIN_ALLOCATION = 15 // کمتر از این → کاندیدای انتقال به فردا
+export const GRANULARITY = 5 // همه‌ی تخصیص‌ها مضرب ۵ دقیقه
 const DEFAULT_ESTIMATE = 30 // وقتی تخمین AI نداریم
 const MAX_ESTIMATE = 480
 const MAX_SCORE = 100

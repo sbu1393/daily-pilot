@@ -21,8 +21,10 @@ export async function POST(req: NextRequest) {
             return validationErrorResponse(parsed.error.flatten())
         }
 
-        const { taskIds } = parsed.data
-        const { moved, summaries } = await rolloverTasks(user.id, user.timezone, taskIds)
+        // A1 Phase 4 — planVersion اختیاری: پاسخ ADR-04 بدون تغییر می‌ماند؛ فقط رد کهنه‌ها
+        // با 409 PLAN_STALE (نقشه‌برداری موجود ServiceError در apiResponse).
+        const { taskIds, planVersion } = parsed.data
+        const { moved, summaries } = await rolloverTasks(user.id, user.timezone, taskIds, planVersion)
 
         return okResponse({ moved, summaries })
     } catch (error) {

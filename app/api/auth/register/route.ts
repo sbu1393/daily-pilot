@@ -20,7 +20,9 @@ export async function POST(req: NextRequest) {
             )
         }
 
-        const body = await req.json()
+        // M3: بدنه‌ی نامعتبر/غیر-JSON نباید ۵۰۰ بسازد → همان ۴۰۰ استاندارد ADR-04
+        const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
+        if (!body) return validationErrorResponse(undefined)
 
         const validation = registerSchema.safeParse(body)
         if (!validation.success) {

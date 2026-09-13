@@ -22,7 +22,6 @@ export default function DayStartModal({
     open,
     isEdit = false, 
     initialMinutes = 240,
-    required = false,
     onClose,
     onSaved,
 }: {

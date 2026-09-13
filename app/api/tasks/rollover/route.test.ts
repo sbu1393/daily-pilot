@@ -14,7 +14,7 @@ vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: mocks.getCurrentUse
 vi.mock("@/app/lib/services/tasks.service", () => ({ rolloverTasks: mocks.rolloverTasks }))
 
 import { POST } from "./route"
-import { NoRolloverCandidatesError } from "@/app/lib/services/errors"
+import { NoRolloverCandidatesError, PlanStaleError } from "@/app/lib/services/errors"
 
 const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran" }
 const MOVED = 2
@@ -39,8 +39,42 @@ describe("POST /api/tasks/rollover", () => {
 
         expect(res.status).toBe(200)
         await expect(res.json()).resolves.toEqual({ ok: true, data: { moved: MOVED, summaries: SUMMARIES } })
-        expect(mocks.rolloverTasks).toHaveBeenCalledWith(1, "Asia/Tehran", [1, 2])
+        expect(mocks.rolloverTasks).toHaveBeenCalledWith(1, "Asia/Tehran", [1, 2], undefined)
     })
+
+    /* A1 Phase 4 — گارد نسخه‌ی blueprint (اختیاری، additive) */
+
+    it("forwards an optional planVersion to the service", async () => {
+        mocks.rolloverTasks.mockResolvedValue({ moved: MOVED, summaries: SUMMARIES })
+
+        const res = await callPOST({ taskIds: [1, 2], planVersion: 7 })
+
+        expect(res.status).toBe(200)
+        expect(mocks.rolloverTasks).toHaveBeenCalledWith(1, "Asia/Tehran", [1, 2], 7)
+    })
+
+    it("propagates a stale blueprint as 409 PLAN_STALE", async () => {
+        mocks.rolloverTasks.mockRejectedValue(new PlanStaleError())
+
+        const res = await callPOST({ taskIds: [1], planVersion: 3 })
+
+        expect(res.status).toBe(409)
+        const parsed = await res.json()
+        expect(parsed.ok).toBe(false)
+        expect(parsed.error.code).toBe("PLAN_STALE")
+    })
+
+    it.each([[-1], [1.5], ["3"], [true]])(
+        "returns 400 VALIDATION_ERROR for an invalid planVersion (%s) and never calls the service",
+        async (planVersion) => {
+            const res = await callPOST({ taskIds: [1], planVersion })
+
+            expect(res.status).toBe(400)
+            const parsed = await res.json()
+            expect(parsed.error.code).toBe("VALIDATION_ERROR")
+            expect(mocks.rolloverTasks).not.toHaveBeenCalled()
+        },
+    )
 
     it("returns 400 VALIDATION_ERROR for an empty taskIds array and never calls the service", async () => {
         const res = await callPOST({ taskIds: [] })
@@ -73,5 +107,14 @@ describe("POST /api/tasks/rollover", () => {
             error: { code: "UNAUTHORIZED", message: "Unauthorized" },
         })
         expect(mocks.rolloverTasks).not.toHaveBeenCalled()
+    })
+
+    it("keeps the request contract backward compatible when planVersion is omitted", async () => {
+        mocks.rolloverTasks.mockResolvedValue({ moved: MOVED, summaries: SUMMARIES })
+
+        const res = await callPOST({ taskIds: [1] })
+
+        expect(res.status).toBe(200)
+        expect(mocks.rolloverTasks).toHaveBeenCalledWith(1, "Asia/Tehran", [1], undefined)
     })
 })

@@ -421,6 +421,13 @@
     border-radius: 18px;
     font-size: .85rem;
 }
+.banner>div {
+    display: flex;
+    align-items: center;
+}
+.banner>div>span {
+    margin: 0 3px;
+}
 
 /* کارت تسکی که در حالت آفلاین ساخته شده و هنوز سینک نشده */
 .queuedCard {

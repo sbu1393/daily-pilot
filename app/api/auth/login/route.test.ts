@@ -100,6 +100,25 @@ describe("POST /api/auth/login", () => {
         expect(mocks.createSession).not.toHaveBeenCalled()
     })
 
+    it.each([
+        ["malformed JSON", "{ this is not json"],
+        ["empty body", ""],
+    ])(
+        "returns 400 VALIDATION_ERROR (not 500) for a %s body (M3)",
+        async (_label, raw) => {
+            const res = await POST(
+                new NextRequest("http://localhost/api/auth/login", { method: "POST", body: raw }),
+            )
+
+            expect(res.status).toBe(400)
+            const parsed = await res.json()
+            expect(parsed.ok).toBe(false)
+            expect(parsed.error.code).toBe("VALIDATION_ERROR")
+            expect(mocks.authenticate).not.toHaveBeenCalled()
+            expect(mocks.createSession).not.toHaveBeenCalled()
+        },
+    )
+
     it("returns 400 VALIDATION_ERROR for an invalid body and never calls authenticate", async () => {
         const res = await callPOST({ email: "not-an-email", password: "" })
 

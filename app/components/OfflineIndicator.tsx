@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { isOffline, onOnline, syncQueue } from "@/app/lib/offline"
+import { ensureOfflineScope, isOffline, onOnline, syncQueue } from "@/app/lib/offline"
 
 /**
  * نشانگر وضعیت آنلاین/آفلاین + تلاش خودکار برای سینک صف هنگام اتصال مجدد.
@@ -16,6 +16,7 @@ export default function OfflineIndicator() {
 
         const goOnline = async () => {
             setOffline(false)
+            await ensureOfflineScope() // H2: اول scope نشست، بعد صف همان کاربر
             const synced = await syncQueue()
             if (synced > 0) {
                 setJustSynced(true)
@@ -28,8 +29,11 @@ export default function OfflineIndicator() {
         const off = onOnline(goOnline)
         window.addEventListener("offline", goOffline)
 
-        // هنگام لود صفحه اگر آنلاین هستیم، صف معوق را سینک کن
-        if (!isOffline()) void syncQueue()
+        // H2: هنگام لود صفحه اول scope نشست را مشخص کن (کش/صف user-scoped)،
+        // سپس اگر آنلاین هستیم صف معوق را سینک کن.
+        void ensureOfflineScope().then(() => {
+            if (!isOffline()) void syncQueue()
+        })
 
         return () => {
             off()

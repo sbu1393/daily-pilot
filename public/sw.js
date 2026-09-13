@@ -22,6 +22,11 @@ self.addEventListener("install", (event) => {
   )
 })
 
+/* ---------- پیام‌ها (SKIP_WAITING از UI به‌روزرسانی) ---------- */
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") self.skipWaiting()
+})
+
 /* ---------- فعال‌سازی ---------- */
 self.addEventListener("activate", (event) => {
   event.waitUntil(

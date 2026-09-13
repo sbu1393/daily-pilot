@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest } from "next/server"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
 import { deleteTask, getTask, updateTask } from "@/app/lib/services/tasks.service"
 import { updateTaskSchema } from "@/app/schema/taskSchema"

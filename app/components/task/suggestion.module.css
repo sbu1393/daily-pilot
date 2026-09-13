@@ -1,0 +1,262 @@
+/* ADR-006 (Phase S3) — استایل کارت و مودال پیشنهاد روز
+   همان زبان طراحی task.module.css: شیشه‌ایِ تیره/روشن با متغیرهای موجود، RTL، گرد و نرم */
+
+/* ===== بنر بالای لیست روز ===== */
+.banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    background: var(--surface);
+    backdrop-filter: blur(18px);
+    border: 1.5px solid var(--primary);
+    border-radius: 18px;
+    padding: 13px 16px;
+    box-shadow: 0 8px 24px rgba(var(--ink-rgb), .06);
+}
+
+.bannerText {
+    font-size: .86rem;
+    font-weight: 700;
+    line-height: 1.9;
+}
+
+/* ===== مودال ===== */
+.intro {
+    margin: 0;
+    color: var(--muted);
+    font-size: .84rem;
+    line-height: 2;
+}
+
+.utilBox {
+    display: grid;
+    gap: 8px;
+    background: var(--bg);
+    border: 1px solid var(--border-soft);
+    border-radius: 16px;
+    padding: 14px;
+}
+
+.utilRow {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    font-size: .85rem;
+    color: var(--ink-2);
+}
+
+.utilRow b {
+    color: var(--text-strong);
+    font-variant-numeric: tabular-nums;
+}
+
+.bar {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--chip-bg);
+    overflow: hidden;
+}
+
+.barFill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--gradient);
+    transition: width .4s ease;
+}
+
+.sectionTitle {
+    margin: 4px 0 0;
+    font-size: .92rem;
+    font-weight: 800;
+    color: var(--text-strong);
+}
+
+.taskList {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+}
+
+.taskRow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-soft);
+    border-radius: 14px;
+    background: var(--surface);
+}
+
+.emoji {
+    flex: none;
+    font-size: .9rem;
+}
+
+.name {
+    flex: 1;
+    font-weight: 700;
+    font-size: .88rem;
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.dur {
+    flex: none;
+    color: var(--primary-dark);
+    font-weight: 800;
+    font-size: .8rem;
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.partialChip {
+    font-style: normal;
+    font-size: .68rem;
+    font-weight: 800;
+    color: var(--warning);
+    background: var(--warning-bg);
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+
+.rationale {
+    color: var(--muted-2);
+    font-size: .72rem;
+    font-weight: 600;
+    line-height: 1.8;
+}
+
+/* S4 — ردیف قابل انتخاب (تیک انتقال) — هم‌خانواده‌ی .checkRow در task.module.css */
+.pickRow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-soft);
+    border-radius: 14px;
+    background: var(--surface);
+    cursor: pointer;
+}
+
+.pickRow input {
+    accent-color: var(--primary);
+    width: 17px;
+    height: 17px;
+    flex: none;
+}
+
+.pickRow:hover {
+    border-color: var(--primary);
+}
+
+.pickRow:has(input:disabled) {
+    cursor: default;
+    opacity: .75;
+}
+
+.rationaleBox {
+    margin: 0;
+    color: var(--muted);
+    font-size: .82rem;
+    line-height: 1.9;
+    background: var(--bg);
+    border-radius: 12px;
+    padding: 10px 12px;
+}
+
+.footnote {
+    margin: 0;
+    color: var(--muted);
+    font-size: .74rem;
+    line-height: 1.9;
+    background: var(--chip-bg);
+    border-radius: 12px;
+    padding: 8px 12px;
+}
+
+.readonlyNote {
+    margin: 0;
+    color: var(--muted-2);
+    font-size: .74rem;
+    text-align: center;
+    line-height: 1.9;
+}
+
+/* ===== A1 Phase 3 — بنر کم‌سر‌و‌صدای «برنامه کهنه» (§6.3.2) ===== */
+.bannerStale {
+    border-color: var(--warning);
+    border-style: dashed;
+}
+
+.staleChip {
+    font-size: .78rem;
+    font-weight: 700;
+    color: var(--warning);
+    background: var(--warning-bg);
+    border-radius: 999px;
+    padding: 5px 12px;
+    line-height: 1.9;
+}
+
+/* ===== A1 Phase 3 — نشانِ قفلِ «در حال انجام» (محافظت موتور) ===== */
+.lockBadge {
+    font-style: normal;
+    font-weight: 800;
+    font-size: .68rem;
+    color: var(--primary-dark);
+    background: var(--primary-soft);
+    border-radius: 999px;
+    padding: 2px 8px;
+    width: max-content;
+    line-height: 1.9;
+}
+
+/* ===== A1 Phase 3 — قبل/بعدِ تخصیص: «تخصیص فعلی ➔ سهم پیشنهادی» ===== */
+.compare {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    font-size: .78rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.compareOld {
+    color: var(--muted);
+}
+
+.compareArrow {
+    color: var(--muted-2);
+}
+
+.compareNew {
+    color: var(--primary-dark);
+    font-weight: 800;
+}
+
+.delta {
+    font-style: normal;
+    font-weight: 800;
+    font-size: .68rem;
+    border-radius: 999px;
+    padding: 2px 7px;
+}
+
+.deltaDown {
+    color: var(--warning);
+    background: var(--warning-bg);
+}
+
+.deltaUp {
+    color: var(--primary-dark);
+    background: var(--primary-soft);
+}

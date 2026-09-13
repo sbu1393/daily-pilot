@@ -3,7 +3,7 @@
 import { Clock, ListChecks, Timer, Sparkles, Pencil } from "lucide-react"
 import { motion } from "framer-motion"
 import { fmtMinutes } from "@/app/lib/time"
-import type { DaySummary } from "../hooks/UseDaySummary"
+import type { DaySummary } from "../hooks/useDaySummary"
 import styles from "./dashboard.module.css"
 
 /* ورود پله‌ای کارت‌های آمار */

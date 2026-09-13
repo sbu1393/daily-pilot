@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server"
 import { okMessageResponse } from "@/app/lib/apiResponse"
 
 // POST /api/auth/logout → حذف کوکی سشن

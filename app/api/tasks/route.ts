@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/app/lib/getCurrentUser"
 import { createTask, getDayTasks } from "@/app/lib/services/tasks.service"
 import { getCanonicalToday } from "@/app/lib/canonicalDay"
 import { createTaskSchema } from "@/app/schema/taskSchema"
+import { buildAdvisor, type AdvisorResult } from "@/app/lib/planner/advisor"
 import {
     errorResponse,
     toServiceErrorResponse,
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
     }
 }
 
-// GET: تسک‌های یک روز + خلاصه (پیش‌فرض: امروز)
+// GET: تسک‌های یک روز + خلاصه + مشاور شروع (پیش‌فرض: امروز)
 export async function GET(req: NextRequest) {
     try {
         const user = await getCurrentUser()
@@ -50,8 +51,24 @@ export async function GET(req: NextRequest) {
 
         const { tasks, summary } = await getDayTasks(user.id, dayKey)
 
-        // ADR-04: { ok, data: { tasks, summary } }
-        return NextResponse.json({ ok: true, data: { tasks, summary } }, { status: 200 })
+        // Advisor (Part 2/3) — «الان با چه کاری شروع کنم؟»: محاسبه‌ی خواندنی روی همان داده‌ها.
+        // - ترتیب آرایه‌ی tasks عمداً دست‌نخورده می‌ماند (buildAdvisor ورودی را clone می‌کند،
+        //   نه sort) — نمای روز نباید به‌خاطر مشاور جابه‌جا شود.
+        // - اجرای امن: هر خطای غیرمنتظره‌ی advisor فقط لاگ می‌شود؛ مسیر GET هرگز 500 نمی‌دهد.
+        const displayName = user.firstName?.trim() || user.username
+        let advisor: AdvisorResult | null = null
+        try {
+            advisor = buildAdvisor(tasks, {
+                displayName,
+                availableMinutes: summary.openBudgetMinutes,
+            })
+        } catch (error) {
+            console.error("ADVISOR CALCULATION ERROR:", error)
+            advisor = null
+        }
+
+        // ADR-04: { ok, data: { tasks, summary, advisor } } — tasks با ترتیب اصلی سرویس
+        return NextResponse.json({ ok: true, data: { tasks, summary, advisor } }, { status: 200 })
     } catch (error) {
         const mapped = toServiceErrorResponse(error)
         if (mapped) return mapped

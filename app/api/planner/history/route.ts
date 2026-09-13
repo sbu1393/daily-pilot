@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
 import { getHistoryMarkers } from "@/app/lib/services/planner.service"
+import { isValidCanonicalDayKey } from "@/app/lib/canonicalDay"
 import {
     errorResponse,
     okResponse,
@@ -17,7 +18,15 @@ export async function GET(req: NextRequest) {
 
         const from = req.nextUrl.searchParams.get("from")
         const to = req.nextUrl.searchParams.get("to")
-        if (!from || !to || from > to) {
+        // M4/M10: هر دو سر بازه باید کلید canonical معتبر باشند (قالب + تقویم واقعی)
+        // قبل از هر کوئری؛ مقایسه‌ی رشته‌ای from/to فقط روی کلیدهای صفر-پد معنا دارد.
+        if (
+            !from ||
+            !to ||
+            !isValidCanonicalDayKey(from) ||
+            !isValidCanonicalDayKey(to) ||
+            from > to
+        ) {
             return errorResponse(400, "VALIDATION_ERROR", "بازه‌ی نامعتبر")
         }
 

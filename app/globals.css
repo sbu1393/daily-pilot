@@ -131,12 +131,21 @@ body {
   line-height: 1.55;
 }
 
-p, h1, h2, h3, h4, h5, h6 {
+p,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   margin: 0;
   line-height: 1.55;
 }
 
-h1, h2, h3, h4 {
+h1,
+h2,
+h3,
+h4 {
   letter-spacing: -.2px;
 }
 
@@ -155,6 +164,7 @@ input[type="number"]::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
+
 input[type="number"] {
   -moz-appearance: textfield;
   appearance: textfield;
@@ -173,7 +183,9 @@ textarea::placeholder {
   opacity: 1;
 }
 
-code, kbd, samp {
+code,
+kbd,
+samp {
   font-family: inherit;
 }
 
@@ -348,6 +360,33 @@ code, kbd, samp {
   color: var(--muted);
 }
 
+/* نگهدارنده لوگو */
+.dp-logo-wrapper {
+  position: relative;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.25s ease;
+  user-select: none;
+}
+
+/* کیفیت شارپ تصویر روی نمایشگرها */
+.dp-logo-wrapper img {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+}
+
+/* افکت ملایم روی هاور در دسکتاپ (وقتی موس روی لوگو در هدر یا لندینگ میره) */
+.dp-logo-wrapper:hover {
+  transform: translateY(-1px) scale(1.02);
+  /* یک درخشش فوق‌العاده نرم با رنگ برند (نیلی/آبی) پشت لوگو */
+  filter: drop-shadow(0 4px 12px rgba(99, 102, 241, 0.18));
+}
+
+/* وقتی کاربر روی لوگو کلیک می‌کنه (حس دکمه بودن میده) */
+.dp-logo-wrapper:active {
+  transform: scale(0.97);
+}
+
+
+
 .dp-link-reset {
   text-decoration: none;
   color: inherit;
@@ -408,10 +447,14 @@ code, kbd, samp {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0;               /* تمام فاصله‌های اضافه دور عکس حذف می‌شود */
-  border: none;             /* حاشیه دکمه حذف می‌شود */
-  background: transparent;  /* پس‌زمینه شفاف می‌شود تا فقط آواتار دیده شود */
-  border-radius: 50%;       /* دکمه کاملاً دایره‌ای می‌شود */
+  padding: 0;
+  /* تمام فاصله‌های اضافه دور عکس حذف می‌شود */
+  border: none;
+  /* حاشیه دکمه حذف می‌شود */
+  background: transparent;
+  /* پس‌زمینه شفاف می‌شود تا فقط آواتار دیده شود */
+  border-radius: 50%;
+  /* دکمه کاملاً دایره‌ای می‌شود */
   cursor: pointer;
   line-height: 0;
   transition: transform 0.15s ease, opacity 0.15s ease;
@@ -643,6 +686,7 @@ code, kbd, samp {
     opacity: 0;
     transform: translateY(14px) scale(.98);
   }
+
   to {
     opacity: 1;
     transform: none;

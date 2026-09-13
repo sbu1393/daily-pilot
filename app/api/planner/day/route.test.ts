@@ -18,7 +18,11 @@ vi.mock("@/app/lib/services/planner.service", () => ({
     getDaySummary: mocks.getDaySummary,
     setDayPlan: mocks.setDayPlan,
 }))
-vi.mock("@/app/lib/canonicalDay", () => ({ getCanonicalToday: mocks.getCanonicalToday }))
+// M10: فقط getCanonicalToday mock می‌شود؛ اعتبارسنجی روز باید واقعی (قالب + تقویم) تست شود
+vi.mock("@/app/lib/canonicalDay", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/lib/canonicalDay")>()),
+    getCanonicalToday: mocks.getCanonicalToday,
+}))
 
 import { GET, POST } from "./route"
 import { ServiceError } from "@/app/lib/services/errors"
@@ -66,6 +70,32 @@ describe("GET /api/planner/day", () => {
         expect(res.status).toBe(400)
         const parsed = await res.json()
         expect(parsed.error.code).toBe("VALIDATION_ERROR")
+        expect(mocks.getDaySummary).not.toHaveBeenCalled()
+    })
+
+    it("maps an infrastructure failure from getCurrentUser to 500 INTERNAL (M1 — not a misleading 401)", async () => {
+        mocks.getCurrentUser.mockRejectedValue(new Error("db down"))
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+        const res = await GET(new NextRequest(`http://localhost/api/planner/day?dayKey=${DAY_KEY}`))
+
+        expect(res.status).toBe(500)
+        await expect(res.json()).resolves.toEqual({
+            ok: false,
+            error: { code: "INTERNAL", message: "Server error" },
+        })
+        expect(mocks.getDaySummary).not.toHaveBeenCalled()
+        errorSpy.mockRestore()
+    })
+
+    it("returns 400 VALIDATION_ERROR for a calendar-invalid dayKey (M10) and never calls the service", async () => {
+        for (const bad of ["2026-02-30", "2026-13-99"]) {
+            const res = await GET(new NextRequest(`http://localhost/api/planner/day?dayKey=${bad}`))
+
+            expect(res.status).toBe(400)
+            const parsed = await res.json()
+            expect(parsed.error.code).toBe("VALIDATION_ERROR")
+        }
         expect(mocks.getDaySummary).not.toHaveBeenCalled()
     })
 
@@ -123,6 +153,20 @@ describe("POST /api/planner/day", () => {
             new NextRequest("http://localhost/api/planner/day", {
                 method: "POST",
                 body: JSON.stringify({ dayKey: "2026-1-1", availableMinutes: 120 }),
+            }),
+        )
+
+        expect(res.status).toBe(400)
+        const parsed = await res.json()
+        expect(parsed.error.code).toBe("VALIDATION_ERROR")
+        expect(mocks.setDayPlan).not.toHaveBeenCalled()
+    })
+
+    it("returns 400 VALIDATION_ERROR for a calendar-invalid dayKey in the body (M10)", async () => {
+        const res = await POST(
+            new NextRequest("http://localhost/api/planner/day", {
+                method: "POST",
+                body: JSON.stringify({ dayKey: "2026-13-99", availableMinutes: 120 }),
             }),
         )
 

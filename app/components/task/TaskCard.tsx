@@ -132,7 +132,8 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze }: Props) {
                             onClick={() => onReanalyze?.(task)}
                             title=" تحلیل باهوش مصنوعی (اولویت، امتیاز، تخمین و دسته‌بندی)"
                         >
-                            🔄 تحلیل باهوش مصنوعی
+                            <span className={styles.lblLong}>🔄 تحلیل باهوش مصنوعی</span>
+                            <span className={styles.lblShort}>🔄 تحلیل</span>
                         </button>
                     )}
                 </div>

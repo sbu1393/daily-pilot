@@ -44,8 +44,9 @@
     border-radius: 20px;
     padding: 16px 18px;
     box-shadow: 0 8px 24px rgba(var(--ink-rgb), .05);
+    --card-gap: 10px;
     display: grid;
-    gap: 10px;
+    gap: var(--card-gap);
     transition: transform .2s ease, box-shadow .2s ease;
 }
 
@@ -80,6 +81,120 @@
     background: var(--success-bg);
     padding: 4px 10px;
     border-radius: 999px;
+}
+
+/* ====== سربرگ آکاردئونی کارت ====== */
+.cardHeader {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* .cardToggle دکمهی باز/بسته است و .cardStatic سربرگ کارتهای بدون محتوای بازشدنی */
+.cardToggle,
+.cardStatic {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    text-align: start;
+}
+
+.cardToggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.cardToggle:focus-visible {
+    outline: none;
+    border-radius: 10px;
+    box-shadow: 0 0 0 4px rgba(99, 102, 241, .18);
+}
+
+.chevron {
+    margin-inline-start: auto;
+    color: var(--muted-2);
+    font-size: .7rem;
+    line-height: 1;
+    transition: transform .22s ease;
+}
+
+.chevronOpen {
+    transform: rotate(180deg);
+}
+
+/* دکمهی سریع «تمام شد» در نمای بسته — همان onComplete کارت را صدا میزند */
+.quickDone {
+    flex: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    border: 1.5px solid var(--border);
+    background: transparent;
+    color: var(--muted-2);
+    display: grid;
+    place-items: center;
+    font-size: .95rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: border-color .2s ease, background .2s ease, color .2s ease;
+}
+
+.quickDone:hover {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+    color: var(--primary);
+}
+
+.quickDone:focus-visible {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 4px rgba(99, 102, 241, .18);
+}
+
+/* ====== پنل آکاردئون (grid-template-rows: 0fr → 1fr بدون framer-motion) ====== */
+.panel {
+    display: grid;
+    grid-template-rows: 0fr;
+    /* بسته: هم از دید ناظر پنهان است و هم از دسترس کیبورد خارج */
+    visibility: hidden;
+    /* وقتی پنل بسته و بی‌ارتفاع است، فاصله‌ی grid کارت را هم لغو می‌کنیم */
+    margin-top: calc(-1 * var(--card-gap));
+    transition:
+        grid-template-rows .22s ease,
+        margin-top .22s ease,
+        visibility 0s linear .22s;
+}
+
+.panelOpen {
+    grid-template-rows: 1fr;
+    visibility: visible;
+    margin-top: 0;
+    transition:
+        grid-template-rows .22s ease,
+        margin-top .22s ease,
+        visibility 0s linear 0s;
+}
+
+.panelInner {
+    min-height: 0;
+    overflow: hidden;
+    display: grid;
+    gap: 10px;
+    padding-top: 4px;
+}
+
+/* احترام به prefers-reduced-motion — باز/بسته‌شدن بدون انیمیشن */
+@media (prefers-reduced-motion: reduce) {
+    .panel,
+    .panelOpen {
+        transition: none;
+    }
 }
 
 .chips {
@@ -210,6 +325,52 @@
     box-shadow: 0 8px 18px -8px rgba(220, 38, 38, .55);
 }
 
+/* برچسب دکمه تحلیل: نسخه بلند در دسکتاپ، نسخه کوتاه در موبایل */
+.lblLong {
+    display: inline;
+}
+
+.lblShort {
+    display: none;
+}
+
+/* ====== موبایل: دکمههای کارت هموزن با آیتمهای ظریف تنظیمات ====== */
+@media (max-width: 640px) {
+    .actions {
+        gap: 6px;
+    }
+
+    .btnPrimary,
+    .btnGhost {
+        padding: 6px 12px;
+        font-size: .78rem;
+        min-height: 34px;
+    }
+
+    .btnPrimary {
+        box-shadow: 0 4px 10px -6px rgba(99, 102, 241, .5);
+    }
+
+    .btnGhost {
+        border-width: 1px;
+    }
+
+    .lblLong {
+        display: none;
+    }
+
+    .lblShort {
+        display: inline;
+    }
+
+    /* هدف لمسی بزرگ‌تر برای دکمه‌ی سریع «تمام شد» */
+    .quickDone {
+        width: 40px;
+        height: 40px;
+        font-size: 1rem;
+    }
+}
+
 /* ====== مودال ====== */
 .overlay {
     position: fixed;
@@ -287,6 +448,8 @@
     background: var(--input-bg);
     outline: none;
     transition: border-color .2s ease;
+    font-feature-settings: "ss01";         
+    -webkit-font-feature-settings: "ss01";
 }
 
 .input:focus {
@@ -322,6 +485,8 @@
     text-align: center;
     font-weight: 700;
     font-size: 1.05rem;
+    font-feature-settings: "ss01";  /* تبدیل ارقام انگلیسی به فارسی در ظاهر */
+    -webkit-font-feature-settings: "ss01";
 }
 
 .stepBtn {
@@ -426,9 +591,8 @@
     align-items: center;
 }
 .banner>div>span {
-    margin: 0 3px;
+    margin: 3px;
 }
-
 /* کارت تسکی که در حالت آفلاین ساخته شده و هنوز سینک نشده */
 .queuedCard {
     border: 1.5px dashed rgba(245, 158, 11, .55);
@@ -505,6 +669,8 @@
     min-height: 74px;
     box-sizing: border-box;
     transition: border-color .2s ease;
+    font-feature-settings: "ss01";         
+    -webkit-font-feature-settings: "ss01";
 }
 
 .textarea:focus {

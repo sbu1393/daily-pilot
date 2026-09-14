@@ -1,6 +1,6 @@
 "use client"
 
-import { memo } from "react"
+import { memo, useEffect, useId, useState } from "react"
 import { motion } from "framer-motion"
 import { fmtMinutes, faDigits } from "@/app/lib/time"
 import TimeAgo from "../TimeAgo"
@@ -28,12 +28,29 @@ type Props = {
     task: TaskItem
     onComplete: (t: TaskItem) => void
     onDelete: (t: TaskItem) => void
-    onReanalyze?: (task: TaskItem) => void // ۲. اختیاری کردن پروپ تا خطای تایپ ندهد
+    onReanalyze?: (task: TaskItem) => void
 }
 
-// ۳. اضافه کردن onReanalyze به پارامترهای ورودی کامپوننت
+/**
+ * کارت تسک آکاردئونی.
+ *
+ * - نمای بسته (پیش‌فرض): عنوان، چیپ‌های دسته/اولویت/امتیاز، زمان ایجاد،
+ *   خلاصه‌ی کارِ انجام‌شده و دکمه‌ی سریع «تمام شد».
+ * - نمای باز: دلیل هوش مصنوعی، تخمین و سهم امروز، و دکمه‌های حذف و تحلیل مجدد.
+ *
+ * وضعیت باز/بسته محلی هر کارت است تا چند کارت هم‌زمان باز بمانند و `memo` حفظ شود.
+ * باز/بسته‌شدن پنل با CSS انجام می‌شود (`grid-template-rows: 0fr → 1fr` در
+ * `.panel`/`.panelOpen`) تا خطر جابه‌جایی‌های `layout` در framer-motion نباشد؛
+ * به همین دلیل پنل همیشه در DOM می‌ماند و با `visibility` از ناظر پنهان می‌شود.
+ * کارتِ DONE خودش جمع می‌شود؛ کارتِ DONE بدون دلیل، چیزی برای باز‌کردن ندارد.
+ */
 function TaskCard({ task, onComplete, onDelete, onReanalyze }: Props) {
     const { timezone } = useCalendar()
+    const [open, setOpen] = useState(false)
+    const uid = useId()
+    const headerId = `${uid}-header`
+    const panelId = `${uid}-panel`
+
     const done = task.status === "DONE"
     const cat = categoryInfo(task.category)
     const pr = task.priority != null ? priorityMeta[task.priority] : priorityMissingMeta
@@ -47,6 +64,14 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze }: Props) {
             ? Math.max(0, task.spentMinutes - task.allocatedMinutes)
             : 0
 
+    // با رسیدن به DONE، کارت خودش جمع می‌شود تا لیست تمیز بماند
+    useEffect(() => {
+        if (done) setOpen(false)
+    }, [done])
+
+    // کارِ انجام‌شده‌ی بدون دلیل، محتوای بازشدنی ندارد → سربرگ فقط نمایشی است
+    const canExpand = !done || Boolean(task.reason)
+
     return (
         <motion.li
             className={`${styles.card} ${done ? styles.done : ""}`}
@@ -56,9 +81,43 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze }: Props) {
             exit="exit"
             layout
         >
-            <div className={styles.topRow}>
-                <span className={styles.text}>{task.title}</span>
-                {done && <span className={styles.doneTag}>✓ انجام شد</span>}
+            <div className={styles.cardHeader}>
+                {!done && (
+                    <button
+                        type="button"
+                        className={styles.quickDone}
+                        onClick={() => onComplete(task)}
+                        aria-label={`تمام کردن «${task.title}»`}
+                        title="تمام شد"
+                    >
+                        ✓
+                    </button>
+                )}
+
+                {canExpand ? (
+                    <button
+                        type="button"
+                        id={headerId}
+                        className={styles.cardToggle}
+                        onClick={() => setOpen((prev) => !prev)}
+                        aria-expanded={open}
+                        aria-controls={panelId}
+                    >
+                        <span className={styles.text}>{task.title}</span>
+                        {done && <span className={styles.doneTag}>✓ انجام شد</span>}
+                        <span
+                            className={`${styles.chevron} ${open ? styles.chevronOpen : ""}`}
+                            aria-hidden="true"
+                        >
+                            ▾
+                        </span>
+                    </button>
+                ) : (
+                    <div className={styles.cardStatic}>
+                        <span className={styles.text}>{task.title}</span>
+                        {done && <span className={styles.doneTag}>✓ انجام شد</span>}
+                    </div>
+                )}
             </div>
 
             <div className={styles.chips}>
@@ -85,56 +144,80 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze }: Props) {
                 </span>
             </div>
 
-            {task.reason && <p className={styles.reason}>💡 {task.reason}</p>}
-
-            <div className={styles.times}>
-                {task.estimatedTime != null ? (
+            {/* خلاصه‌ی کارِ انجام‌شده در نمای بسته می‌ماند — نگاه‌کردنی است */}
+            {done && task.spentMinutes != null && (
+                <div className={styles.times}>
                     <span>
-                    تخمین AI:{" "}
-                    <b dir="rtl">
-                        {fmtMinutes(task.estimatedTime)}
-                    </b>
-                </span>
-                ) : (
-                    <span>تخمین AI: <b className="dp-ai-missing">—</b></span>
-                )}
-                {!done &&
-                    (task.allocatedMinutes != null ? (
-                        <span>
-                            سهم امروز: <b className={styles.alloc}>{fmtMinutes(task.allocatedMinutes)}</b>
-                        </span>
-                    ) : (
-                        <span className={styles.muted}>⏳ هنوز برنامه‌ریزی نشده (بودجه روز را تنظیم کن)</span>
-                    ))}
-                {done && task.spentMinutes != null && (
-                    <>
-                        <span>زمان واقعی: <b>{fmtMinutes(task.spentMinutes)}</b></span>
-                        {saved > 0 && <span className={styles.saved}>🎉 {fmtMinutes(saved)} سیو شد</span>}
-                        {overspent > 0 && (
-                            <span className={styles.overspent}>⚠️ {fmtMinutes(overspent)} بیشتر از سهم</span>
-                        )}
-                    </>
-                )}
-            </div>
-
-            {!done && (
-                <div className={styles.actions}>
-                    <button className={styles.btnPrimary} onClick={() => onComplete(task)}>
-                        تمام شد ✓
-                    </button>
-                    <button className={styles.btnGhost} onClick={() => onDelete(task)} title="حذف کار">
-                        حذف
-                    </button>
-                    {task.status === "TODO" && task.dayKey >= getCanonicalToday(timezone) && (
-                        <button
-                            type="button"
-                            className={styles.btnGhost}
-                            onClick={() => onReanalyze?.(task)}
-                            title=" تحلیل باهوش مصنوعی (اولویت، امتیاز، تخمین و دسته‌بندی)"
-                        >
-                            🔄 تحلیل باهوش مصنوعی
-                        </button>
+                        زمان واقعی: <b>{fmtMinutes(task.spentMinutes)}</b>
+                    </span>
+                    {saved > 0 && <span className={styles.saved}>🎉 {fmtMinutes(saved)} سیو شد</span>}
+                    {overspent > 0 && (
+                        <span className={styles.overspent}>⚠️ {fmtMinutes(overspent)} بیشتر از سهم</span>
                     )}
+                </div>
+            )}
+
+            {/* پنل همیشه در DOM می‌ماند؛ کلاس .panelOpen آن را باز می‌کند */}
+            {canExpand && (
+                <div
+                    id={panelId}
+                    role="region"
+                    aria-labelledby={headerId}
+                    className={`${styles.panel} ${open ? styles.panelOpen : ""}`}
+                >
+                    <div className={styles.panelInner}>
+                        {task.reason && <p className={styles.reason}>💡 {task.reason}</p>}
+
+                        {!done && (
+                            <div className={styles.times}>
+                                {task.estimatedTime != null ? (
+                                    <span>
+                                        تخمین AI: <b dir="rtl">{fmtMinutes(task.estimatedTime)}</b>
+                                    </span>
+                                ) : (
+                                    <span>
+                                        تخمین AI: <b className="dp-ai-missing">—</b>
+                                    </span>
+                                )}
+                                {task.allocatedMinutes != null ? (
+                                    <span>
+                                        سهم امروز:{" "}
+                                        <b className={styles.alloc}>{fmtMinutes(task.allocatedMinutes)}</b>
+                                    </span>
+                                ) : (
+                                    <span className={styles.muted}>
+                                        ⏳ هنوز برنامه‌ریزی نشده (بودجه روز را تنظیم کن)
+                                    </span>
+                                )}
+                            </div>
+                        )}
+
+                        {!done && (
+                            <div className={styles.actions}>
+                                <button className={styles.btnPrimary} onClick={() => onComplete(task)}>
+                                    تمام شد ✓
+                                </button>
+                                <button
+                                    className={styles.btnGhost}
+                                    onClick={() => onDelete(task)}
+                                    title="حذف کار"
+                                >
+                                    حذف
+                                </button>
+                                {task.status === "TODO" && task.dayKey >= getCanonicalToday(timezone) && (
+                                    <button
+                                        type="button"
+                                        className={styles.btnGhost}
+                                        onClick={() => onReanalyze?.(task)}
+                                        title=" تحلیل باهوش مصنوعی (اولویت، امتیاز، تخمین و دسته‌بندی)"
+                                    >
+                                        <span className={styles.lblLong}>🔄 تحلیل باهوش مصنوعی</span>
+                                        <span className={styles.lblShort}>🔄 تحلیل</span>
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </div>
             )}
         </motion.li>

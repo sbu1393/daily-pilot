@@ -326,6 +326,8 @@
     background: var(--input-bg);
     outline: none;
     transition: border-color .2s ease;
+    font-feature-settings: "ss01";         
+    -webkit-font-feature-settings: "ss01";
 }
 
 .input:focus {
@@ -361,6 +363,8 @@
     text-align: center;
     font-weight: 700;
     font-size: 1.05rem;
+    font-feature-settings: "ss01";  /* تبدیل ارقام انگلیسی به فارسی در ظاهر */
+    -webkit-font-feature-settings: "ss01";
 }
 
 .stepBtn {
@@ -543,6 +547,8 @@
     min-height: 74px;
     box-sizing: border-box;
     transition: border-color .2s ease;
+    font-feature-settings: "ss01";         
+    -webkit-font-feature-settings: "ss01";
 }
 
 .textarea:focus {

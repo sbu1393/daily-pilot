@@ -617,7 +617,7 @@ function FeedbackForm() {
         }
         const subject = encodeURIComponent("بازخورد کاربر روزچین")
         const body = encodeURIComponent(`${message.trim()}\\n\\n— از طرف: ${email.trim() || "کاربر ناشناس"}`)
-        window.location.href = `mailto:support@dailypilot.app?subject=${subject}&body=${body}`
+        window.location.href = `mailto:Roozchin@gmail.com?subject=${subject}&body=${body}`
         toast.success("برنامه‌ی ایمیل شما باز می‌شود؛ فقط کافی است ارسال را بزنید")
     }
 

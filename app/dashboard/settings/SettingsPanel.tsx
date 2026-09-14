@@ -289,17 +289,20 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                                 errors={errors}
                             />
 
-                            <FormInput
-                                formItem={{ name: "firstName", type: "text", label: "نام", placeholder: "مثلاً علی" }}
-                                register={register}
-                                errors={errors}
-                            />
+                            {/* اعداد فارسی فقط برای نام و نام خانوادگی — یوزرنیم/ایمیل/تلفن عمداً مستثنی‌اند */}
+                            <div className="fa-digits">
+                                <FormInput
+                                    formItem={{ name: "firstName", type: "text", label: "نام", placeholder: "مثلاً علی" }}
+                                    register={register}
+                                    errors={errors}
+                                />
 
-                            <FormInput
-                                formItem={{ name: "lastName", type: "text", label: "نام خانوادگی", placeholder: "مثلاً محمدی" }}
-                                register={register}
-                                errors={errors}
-                            />
+                                <FormInput
+                                    formItem={{ name: "lastName", type: "text", label: "نام خانوادگی", placeholder: "مثلاً محمدی" }}
+                                    register={register}
+                                    errors={errors}
+                                />
+                            </div>
 
                             <FormInput
                                 formItem={{ name: "phone", type: "tel", label: "شماره تماس", placeholder: "مثلاً 0912xxxxxxx" }}
@@ -645,7 +648,7 @@ function FeedbackForm() {
                         onChange={(e) => setMessage(e.target.value)}
                         rows={5}
                         placeholder="نظر، پیشنهاد یا انتقاد خود را بنویسید..."
-                        className="dp-input"
+                        className="dp-input fa-digits"
                     />
                 </div>
                 <button type="button" className="dp-btn dp-btn-primary" onClick={submit}>

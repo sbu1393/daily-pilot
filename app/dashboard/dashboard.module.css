@@ -191,6 +191,9 @@
     margin-bottom: 16px;
     transition: border-color 0.2s ease;
     text-align: center;
+    /* اعداد فارسی در متن تایپ‌شده (فقط نمایش — مقدار DOM دست‌نخورده می‌ماند) */
+    font-feature-settings: "ss01";
+    -webkit-font-feature-settings: "ss01";
   }
   .minuteInput:focus {
     outline: none;

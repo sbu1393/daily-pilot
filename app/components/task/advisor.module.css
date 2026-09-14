@@ -100,6 +100,10 @@
     color: var(--text-strong);
 }
 
+.status>div {
+    display: flex;
+    align-items: center;
+}
 /* سرریز ظرفیت — لحن هشدار (کم‌سر‌و‌صدا، بدون قرمزِ پرخاشگر) */
 .cardWarn {
     border-color: var(--warning);

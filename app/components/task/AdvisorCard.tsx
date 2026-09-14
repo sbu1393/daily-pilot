@@ -205,10 +205,10 @@ export default function AdvisorCard({
                 <p className={styles.status} role="status">
                     {view.kind === "allDone"
                         ? view.message
-                        : <>
+                        : <div>
                         <Coffee />
                         <span> کارهای امروز تمام شده — وقتشه استراحت کنی.</span>
-                        </>}
+                        </div>}
                 </p>
             ) : (
                 <>
@@ -217,7 +217,12 @@ export default function AdvisorCard({
                         role="status"
                     >
                         {status === "overflow" ? (
-                            <><TriangleAlert /> {faDigits(suggestion.unfitted.length)} تسک ممکن است امروز انجام نشود.</>
+                            <div style={{display:"flex" , alignItems:"center"}}>
+                                <TriangleAlert /> 
+                                <span style={{margin:"2px"}}>
+                                {faDigits(suggestion.unfitted.length)} تسک ممکن است امروز انجام نشود.
+                                </span>
+                                </div>
                         ) : status === "noCapacity" ? (
                             <><HourglassCog /> برای پیشنهاد دقیق، «وقت آزاد» امروزت را تعیین کن.</>
                         ) : (

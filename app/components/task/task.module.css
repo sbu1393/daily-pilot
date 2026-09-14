@@ -210,6 +210,45 @@
     box-shadow: 0 8px 18px -8px rgba(220, 38, 38, .55);
 }
 
+/* برچسب دکمه تحلیل: نسخه بلند در دسکتاپ، نسخه کوتاه در موبایل */
+.lblLong {
+    display: inline;
+}
+
+.lblShort {
+    display: none;
+}
+
+/* ====== موبایل: دکمههای کارت هموزن با آیتمهای ظریف تنظیمات ====== */
+@media (max-width: 640px) {
+    .actions {
+        gap: 6px;
+    }
+
+    .btnPrimary,
+    .btnGhost {
+        padding: 6px 12px;
+        font-size: .78rem;
+        min-height: 34px;
+    }
+
+    .btnPrimary {
+        box-shadow: 0 4px 10px -6px rgba(99, 102, 241, .5);
+    }
+
+    .btnGhost {
+        border-width: 1px;
+    }
+
+    .lblLong {
+        display: none;
+    }
+
+    .lblShort {
+        display: inline;
+    }
+}
+
 /* ====== مودال ====== */
 .overlay {
     position: fixed;
@@ -426,9 +465,8 @@
     align-items: center;
 }
 .banner>div>span {
-    margin: 0 3px;
+    margin: 3px;
 }
-
 /* کارت تسکی که در حالت آفلاین ساخته شده و هنوز سینک نشده */
 .queuedCard {
     border: 1.5px dashed rgba(245, 158, 11, .55);

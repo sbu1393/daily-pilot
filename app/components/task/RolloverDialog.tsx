@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { faDigits } from "@/app/lib/time"
+import { faDigits, formatCanonicalToJalali } from "@/app/lib/time"
 import { type TaskItem } from "./taskTypes"
 import AnimatedModal from "../motion/AnimatedModal"
 import styles from "./task.module.css"
@@ -55,7 +55,7 @@ export default function RolloverDialog({ tasks, onClose, onConfirm, busy }: Prop
                         <label key={t.id} className={styles.checkRow}>
                             <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggle(t.id)} />
                             <span className={styles.checkText}>{t.title}</span>
-                            <span className={styles.checkMeta}>{faDigits(t.dayKey.replaceAll("-", "/"))}</span>
+                            <span className={styles.checkMeta}>{formatCanonicalToJalali(t.dayKey)}</span>
                         </label>
                     ))}
                 </div>

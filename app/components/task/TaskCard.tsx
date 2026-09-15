@@ -8,6 +8,7 @@ import { getCanonicalToday } from "@/app/lib/canonicalDay"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import { categoryInfo, priorityMeta, priorityMissingMeta, type TaskItem } from "./taskTypes"
 import styles from "./task.module.css"
+import { ChevronDown } from "lucide-react"
 
 /* انیمیشن ورود کارت (لیست با stagger هماهنگ می‌شود) */
 const cardVariants = {
@@ -109,7 +110,7 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze }: Props) {
                             className={`${styles.chevron} ${open ? styles.chevronOpen : ""}`}
                             aria-hidden="true"
                         >
-                            ▾
+                            <ChevronDown />
                         </span>
                     </button>
                 ) : (

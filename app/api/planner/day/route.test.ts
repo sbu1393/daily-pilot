@@ -162,6 +162,35 @@ describe("POST /api/planner/day", () => {
         expect(mocks.setDayPlan).not.toHaveBeenCalled()
     })
 
+    it("returns 400 VALIDATION_ERROR for availableMinutes=0 (Bug 1 regression — must reject zero budget)", async () => {
+        const res = await POST(
+            new NextRequest("http://localhost/api/planner/day", {
+                method: "POST",
+                body: JSON.stringify({ dayKey: DAY_KEY, availableMinutes: 0 }),
+            }),
+        )
+
+        expect(res.status).toBe(400)
+        const parsed = await res.json()
+        expect(parsed.error.code).toBe("VALIDATION_ERROR")
+        expect(mocks.setDayPlan).not.toHaveBeenCalled()
+    })
+
+    it("accepts availableMinutes=1 (minimum valid positive budget)", async () => {
+        const plan = { id: 1, dayKey: DAY_KEY, availableMinutes: 1, planVersion: 1 }
+        mocks.setDayPlan.mockResolvedValue({ plan, summary: SUMMARY })
+
+        const res = await POST(
+            new NextRequest("http://localhost/api/planner/day", {
+                method: "POST",
+                body: JSON.stringify({ dayKey: DAY_KEY, availableMinutes: 1 }),
+            }),
+        )
+
+        expect(res.status).toBe(200)
+        expect(mocks.setDayPlan).toHaveBeenCalledWith(1, DAY_KEY, 1)
+    })
+
     it("returns 400 VALIDATION_ERROR for a calendar-invalid dayKey in the body (M10)", async () => {
         const res = await POST(
             new NextRequest("http://localhost/api/planner/day", {

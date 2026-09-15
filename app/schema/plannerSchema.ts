@@ -14,7 +14,7 @@ export const dayPlanSchema = z.object({
     availableMinutes: z.coerce
         .number()
         .int()
-        .min(0, "نمی‌تواند منفی باشد")
+        .min(1, "بودجه‌ی روز باید حداقل ۱ دقیقه باشد")
         .max(1440, "حداکثر ۲۴ ساعت"),
 })
 export const reanalyzeTaskSchema = z.object({

@@ -1,5 +1,7 @@
 .calendarWidget {
     margin-top: 8px;
+    margin-inline: auto;
+    max-width: 600px;
     padding: 20px;
     border: 1px solid var(--border);
     border-radius: 26px;
@@ -11,7 +13,7 @@
 .calendarToolbar {
     display: flex;
     justify-content: flex-start;
-    margin-bottom: 18px;
+    margin-bottom: 12px;
 }
 
 .viewToggle {
@@ -48,10 +50,10 @@
 
 .monthNavigation {
     display: grid;
-    grid-template-columns: 40px 1fr 40px;
+    grid-template-columns: 36px 1fr 36px;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 16px;
+    gap: 8px;
+    margin-bottom: 12px;
     text-align: center;
 }
 
@@ -61,7 +63,7 @@
 }
 
 .monthNavigation strong {
-    font-size: 1.05rem;
+    font-size: 1rem;
     color: var(--ink);
 }
 
@@ -71,8 +73,8 @@
 }
 
 .monthNavButton {
-    width: 40px;
-    height: 40px;
+    width: 36px;
+    height: 36px;
     display: grid;
     place-items: center;
     border: 1px solid var(--border);
@@ -91,14 +93,14 @@
 
 .monthGrid {
     display: grid;
-    gap: 8px;
+    gap: 6px;
 }
 
 .weekdays,
 .gridCells {
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 8px;
+    gap: 6px;
 }
 
 .weekdays {
@@ -107,7 +109,7 @@
 
 .weekday {
     text-align: center;
-    font-size: .72rem;
+    font-size: .68rem;
     font-weight: 800;
 }
 
@@ -118,7 +120,7 @@
     display: grid;
     place-items: center;
     border: 1px solid var(--border);
-    border-radius: 15px;
+    border-radius: 13px;
     background: var(--surface-solid);
     color: var(--ink);
     font: inherit;
@@ -150,7 +152,7 @@
 }
 
 .gridDayNumber {
-    font-size: 1rem;
+    font-size: .95rem;
     font-weight: 800;
     line-height: 1;
 }
@@ -177,6 +179,26 @@
     color: var(--primary-dark);
 }
 
+/* تبلت — سطح میانی بین دسکتاپ و موبایل */
+@media (max-width: 900px) {
+    .calendarWidget {
+        padding: 16px;
+    }
+
+    .weekdays,
+    .gridCells {
+        gap: 5px;
+    }
+
+    .weekday {
+        font-size: .66rem;
+    }
+
+    .gridDayNumber {
+        font-size: .9rem;
+    }
+}
+
 @media (max-width: 560px) {
     .calendarWidget {
         padding: 14px;
@@ -185,7 +207,17 @@
 
     .weekdays,
     .gridCells {
-        gap: 5px;
+        gap: 4px;
+    }
+
+    .monthNavigation {
+        grid-template-columns: 34px 1fr 34px;
+        margin-bottom: 10px;
+    }
+
+    .monthNavButton {
+        width: 34px;
+        height: 34px;
     }
 
     .gridDay {
@@ -197,7 +229,14 @@
     }
 
     .gridDayNumber {
-        font-size: .9rem;
+        font-size: .82rem;
+    }
+
+    .gridMarker {
+        min-width: 15px;
+        height: 15px;
+        font-size: .54rem;
+        line-height: 15px;
     }
 }
 
@@ -314,4 +353,37 @@
     background: #fff;
     color: var(--primary-dark);
     box-shadow: none;
+}
+
+/* ====== نمای «روزهای نزدیک» — تبلت/موبایل فشردهتر ====== */
+/* بعد از ruleهای پایه قرار میگیرد تا در cascade برنده شود */
+@media (max-width: 900px) {
+    .dayBtn {
+        width: 70px;
+        height: 92px;
+    }
+}
+
+@media (max-width: 560px) {
+    .scroll {
+        gap: 10px;
+    }
+
+    .dayBtn {
+        width: 64px;
+        height: 84px;
+        border-radius: 18px;
+    }
+
+    .dayName {
+        font-size: .66rem;
+    }
+
+    .dayNumber {
+        font-size: 1.4rem;
+    }
+
+    .dayMonth {
+        font-size: .62rem;
+    }
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { isValidCanonicalDayKey } from "./canonicalDay"
+import {
+    canonicalKeyToLocalMidnight,
+    getCanonicalDayKey,
+    isValidCanonicalDayKey,
+    shiftCanonicalKey,
+} from "./canonicalDay"
 
 /* ------------------------------------------------------------------ */
 /* M10 (audit) — اعتبارسنجی سخت‌گیرانه‌ی dayKey ورودی: قالب + تقویم.     */
@@ -37,5 +42,34 @@ describe("isValidCanonicalDayKey (M10)", () => {
     it("rejects years Date.UTC would reinterpret (0–99 → 19xx)", () => {
         expect(isValidCanonicalDayKey("0026-01-01")).toBe(false)
         expect(isValidCanonicalDayKey("0099-12-31")).toBe(false)
+    })
+
+    it.each([
+        "2026-02-30",
+        "2026-04-31",
+        "2026-13-01",
+        "2026-01-00",
+        "0000-01-01",
+        "0026-01-01",
+        "0099-12-31",
+    ])("rejects %s consistently across canonical-day consumers", (key) => {
+        expect(isValidCanonicalDayKey(key)).toBe(false)
+        expect(() => canonicalKeyToLocalMidnight(key, "UTC")).toThrow(RangeError)
+        expect(() => shiftCanonicalKey(key, 1)).toThrow(RangeError)
+    })
+
+    it("accepts leap day 2028 in canonicalKeyToLocalMidnight and shifts it correctly", () => {
+        expect(() =>
+            canonicalKeyToLocalMidnight("2028-02-29", "UTC")
+        ).not.toThrow()
+        expect(shiftCanonicalKey("2028-02-29", 1)).toBe("2028-03-01")
+    })
+
+    it("keeps keys produced by getCanonicalDayKey valid and unchanged", () => {
+        const key = getCanonicalDayKey(new Date("2026-11-30T12:00:00.000Z"), "UTC")
+
+        expect(key).toBe("2026-11-30")
+        expect(isValidCanonicalDayKey(key)).toBe(true)
+        expect(() => canonicalKeyToLocalMidnight(key, "UTC")).not.toThrow()
     })
 })

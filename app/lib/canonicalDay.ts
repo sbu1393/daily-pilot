@@ -11,10 +11,26 @@ const CANONICAL_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
 
 /** اعتبارسنجی تقویمی (ماه ۱–۱۲، روز ۱–۳۱) تا Date.UTC مقدار خارج از محدوده را بیصدا نرمالایز نکند. */
 function assertValidKeyParts(key: string): [number, number, number] {
-    const [year, month, day] = key.split("-").map(Number)
-    if (month < 1 || month > 12 || day < 1 || day > 31) {
+    if (!CANONICAL_KEY_RE.test(key)) {
         throw new RangeError(`Invalid canonical dayKey: "${key}"`)
     }
+
+    const [year, month, day] = key.split("-").map(Number)
+
+    if (year < 100 || month < 1 || month > 12 || day < 1 || day > 31) {
+        throw new RangeError(`Invalid canonical dayKey: "${key}"`)
+    }
+
+    const d = new Date(Date.UTC(year, month - 1, day))
+
+    if (
+        d.getUTCFullYear() !== year ||
+        d.getUTCMonth() !== month - 1 ||
+        d.getUTCDate() !== day
+    ) {
+        throw new RangeError(`Invalid canonical dayKey: "${key}"`)
+    }
+
     return [year, month, day]
 }
 
@@ -25,13 +41,12 @@ function assertValidKeyParts(key: string): [number, number, number] {
  * سال‌های ۰–۹۹ هم رد می‌شوند چون Date.UTC آن‌ها را ۱۹xx تفسیر می‌کند.
  */
 export function isValidCanonicalDayKey(key: string): boolean {
-    if (!CANONICAL_KEY_RE.test(key)) return false
-
-    const [year, month, day] = key.split("-").map(Number)
-    if (month < 1 || month > 12 || day < 1 || day > 31) return false
-
-    const d = new Date(Date.UTC(year, month - 1, day))
-    return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day
+    try {
+        assertValidKeyParts(key)
+        return true
+    } catch {
+        return false
+    }
 }
 
 function dayParts(date: Date, timezone: string): DayParts {
@@ -112,10 +127,6 @@ export function getLocalMidnight(date: Date, timezone: string): Date {
  * کلید نامعتبر → RangeError صریح.
  */
 export function canonicalKeyToLocalMidnight(key: string, timezone: string): Date {
-    if (!CANONICAL_KEY_RE.test(key)) {
-        throw new RangeError(`Invalid canonical dayKey: "${key}"`)
-    }
-
     const [year, month, day] = assertValidKeyParts(key)
     const midnightUtc = Date.UTC(year, month - 1, day)
 
@@ -130,10 +141,6 @@ export function canonicalKeyToLocalMidnight(key: string, timezone: string): Date
  * کلید یک برچسب تقویمی مستقل از timezone است؛ جابهجایی روی خود کلید انجام میشود.
  */
 export function shiftCanonicalKey(key: string, days: number): string {
-    if (!CANONICAL_KEY_RE.test(key)) {
-        throw new RangeError(`Invalid canonical dayKey: "${key}"`)
-    }
-
     const [year, month, day] = assertValidKeyParts(key)
     const shifted = new Date(Date.UTC(year, month - 1, day + days))
 

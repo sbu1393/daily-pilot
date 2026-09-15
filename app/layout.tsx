@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import { Vazirmatn } from "next/font/google"
+import localFont from "next/font/local"
 import "./globals.css"
 import "react-toastify/dist/ReactToastify.css"
 import { CalendarProvider } from "./contexts/CalenderContext"
@@ -9,10 +9,20 @@ import OfflineIndicator from "./components/OfflineIndicator"
 import Splash from "./components/Splash"
 import { ToastContainer } from "react-toastify"
 
-const vazir = Vazirmatn({
-  subsets: ["arabic"],
-  variable: "--font-vazir",
+/**
+ * فونت وزیرمتن سلف‌هاست‌شده (نسخه رسمی v33.003).
+ *
+ * چرا محلی و نه next/font/google؟
+ * نسخه‌ی Google Fonts فونت، مجموعه‌ی استایلیستی «ss01» (تبدیل ارقام لاتین به
+ * فارسی ۰-۹) را در خط تولید خود حذف می‌کند؛ بنابراین
+ * `font-feature-settings: "ss01"` روی آن بی‌اثر است. فایل رسمی این ویژگی را
+ * دارد و کلاس کمکی `.fa-digits` در globals.css را فعال می‌کند.
+ */
+const vazir = localFont({
+  src: "./fonts/Vazirmatn-Variable.woff2",
+  weight: "100 900",
   display: "swap",
+  variable: "--font-vazir",
 })
 
 export const metadata: Metadata = {

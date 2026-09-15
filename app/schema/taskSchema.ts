@@ -1,3 +1,4 @@
+import { canonicalKeyToLocalMidnight } from "@/app/lib/canonicalDay"
 import { z } from "zod"
 
 // C1 — Task CRUD validation (Phase C1: Task CRUD Foundation)
@@ -21,52 +22,60 @@ const dateOnlyString = z.string().refine((s) => {
     return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day
 }, "تاریخ نامعتبر است")
 
-const scheduledDateField = z
-    .union([
-        dateOnlyString,
-        z.string().datetime({ offset: true, message: "تاریخ نامعتبر است" }),
-        z.number(),
-    ])
-    .transform((v) => new Date(v))
-    .refine((d) => !Number.isNaN(d.getTime()), "تاریخ نامعتبر است")
+function makeScheduledDateField(timezone: string) {
+    return z
+        .union([
+            dateOnlyString,
+            z.string().datetime({ offset: true, message: "تاریخ نامعتبر است" }),
+            z.number(),
+        ])
+        .transform((v) => typeof v === "string" && dateOnlyRe.test(v)
+            ? canonicalKeyToLocalMidnight(v, timezone)
+            : new Date(v))
+        .refine((d) => !Number.isNaN(d.getTime()), "تاریخ نامعتبر است")
+}
 
-export const createTaskSchema = z.object({
-    title: z
-        .string()
-        .trim()
-        .min(1, "عنوان نمی‌تواند خالی باشد")
-        .max(200, "عنوان خیلی طولانی است"),
-    scheduledDate: scheduledDateField,
-})
-
-// فیلدهای مجاز ویرایش (C1): status، title، scheduledDate، category
-// status فقط TODO/IN_PROGRESS — DONE از مسیر اختصاصی /complete (Time Tracking) انجام می‌شود
-export const updateTaskSchema = z
-    .object({
+export function makeCreateTaskSchema(timezone: string) {
+    return z.object({
         title: z
             .string()
             .trim()
             .min(1, "عنوان نمی‌تواند خالی باشد")
-            .max(200, "عنوان خیلی طولانی است")
-            .optional(),
-        status: z.enum(["TODO", "IN_PROGRESS"]).optional(),
-        scheduledDate: scheduledDateField.optional(),
-        category: z
-            .string()
-            .trim()
-            .min(1, "دسته‌بندی خالی است")
-            .max(30, "دسته‌بندی حداکثر ۳۰ کاراکتر است")
-            .nullable()
-            .optional(),
+            .max(200, "عنوان خیلی طولانی است"),
+        scheduledDate: makeScheduledDateField(timezone),
     })
-    .refine(
-        (d) =>
-            d.title !== undefined ||
-            d.status !== undefined ||
-            d.scheduledDate !== undefined ||
-            d.category !== undefined,
-        { message: "هیچ تغییری ارسال نشده است" },
-    )
+}
+
+// فیلدهای مجاز ویرایش (C1): status، title، scheduledDate، category
+// status فقط TODO/IN_PROGRESS — DONE از مسیر اختصاصی /complete (Time Tracking) انجام می‌شود
+export function makeUpdateTaskSchema(timezone: string) {
+    return z
+        .object({
+            title: z
+                .string()
+                .trim()
+                .min(1, "عنوان نمی‌تواند خالی باشد")
+                .max(200, "عنوان خیلی طولانی است")
+                .optional(),
+            status: z.enum(["TODO", "IN_PROGRESS"]).optional(),
+            scheduledDate: makeScheduledDateField(timezone).optional(),
+            category: z
+                .string()
+                .trim()
+                .min(1, "دسته‌بندی خالی است")
+                .max(30, "دسته‌بندی حداکثر ۳۰ کاراکتر است")
+                .nullable()
+                .optional(),
+        })
+        .refine(
+            (d) =>
+                d.title !== undefined ||
+                d.status !== undefined ||
+                d.scheduledDate !== undefined ||
+                d.category !== undefined,
+            { message: "هیچ تغییری ارسال نشده است" },
+        )
+}
 
 // C2 — اتمام تسک و Time Tracking (§3.10-C / §5.4.1)
 // spentMinutes = مدت واقعی اعلام‌شده؛ عدد صحیح نامنفی.

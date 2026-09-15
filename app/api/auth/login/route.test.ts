@@ -65,6 +65,25 @@ describe("POST /api/auth/login", () => {
         expect(res.cookies.get("token")?.value).toBe("mocked-jwt")
     })
 
+    it("normalizes email before rate limiting and authentication", async () => {
+        mocks.authenticate.mockResolvedValue(USER)
+
+        const res = await callPOST({
+            email: "  TEST@Example.COM  ",
+            password: "secret123",
+        })
+
+        expect(res.status).toBe(200)
+        expect(mocks.isRateLimited).toHaveBeenCalledWith(
+            "login:email:test@example.com",
+            5,
+        )
+        expect(mocks.authenticate).toHaveBeenCalledWith(
+            "test@example.com",
+            "secret123",
+        )
+    })
+
     it("returns 429 RATE_LIMITED when the IP bucket is exhausted (before body/validation)", async () => {
         mocks.isRateLimited.mockImplementation((key: string) => key.startsWith("login:ip:"))
 

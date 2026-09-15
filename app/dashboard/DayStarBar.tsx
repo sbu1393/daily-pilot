@@ -1,6 +1,6 @@
 "use client"
 
-import { Clock, ListChecks, Timer, Sparkles, Pencil } from "lucide-react"
+import { Clock, ListChecks, Timer, Sparkles } from "lucide-react"
 import { motion } from "framer-motion"
 import { fmtMinutes } from "@/app/lib/time"
 import type { DaySummary } from "../hooks/useDaySummary"
@@ -19,10 +19,8 @@ const item = {
 
 export default function DayStatsBar({
     summary,
-    onEdit,
 }: {
     summary: DaySummary
-    onEdit: () => void
 }) {
     const over = summary.overCommittedMinutes > 0
     const pct =
@@ -105,12 +103,6 @@ export default function DayStatsBar({
                     </motion.div>
                 ))}
             </motion.div>
-
-            <div className={styles.statsFooter}>
-                <button className={styles.editBtn} onClick={onEdit}>
-                    <Pencil size={14} /> تنظیم وقت روز
-                </button>
-            </div>
         </>
     )
 }

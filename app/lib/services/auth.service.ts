@@ -25,6 +25,12 @@ export async function registerUser(input: {
     const exist = await prisma.user.findUnique({ where: { email } })
     if (exist) throw new EmailTakenError()
 
+    const usernameExists = await prisma.user.findUnique({
+        where: { username },
+        select: { id: true },
+    })
+    if (usernameExists) throw new UsernameTakenError()
+
     const hashedPassword = await bcrypt.hash(password, BCRYPT_COST)
 
     try {

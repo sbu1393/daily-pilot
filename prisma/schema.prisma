@@ -39,7 +39,7 @@ enum TaskEventType {
 
 model User {
   id         Int         @id @default(autoincrement())
-  username   String
+  username   String      @unique
   email      String      @unique
   password   String
   firstName  String?

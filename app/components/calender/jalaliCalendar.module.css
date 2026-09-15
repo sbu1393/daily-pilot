@@ -1,3 +1,245 @@
+.calendarWidget {
+    margin-top: 8px;
+    margin-inline: auto;
+    max-width: 600px;
+    padding: 20px;
+    border: 1px solid var(--border);
+    border-radius: 26px;
+    background: var(--surface);
+    box-shadow: var(--shadow-ghost);
+    backdrop-filter: blur(20px);
+}
+
+.calendarToolbar {
+    display: flex;
+    justify-content: flex-start;
+    margin-bottom: 12px;
+}
+
+.viewToggle {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border-radius: 999px;
+    background: var(--chip-bg);
+    border: 1px solid var(--border-soft);
+}
+
+.viewToggle button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: none;
+    border-radius: 999px;
+    padding: 8px 12px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: .78rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.viewToggle button:hover,
+.viewToggle .toggleActive {
+    background: var(--surface-solid);
+    color: var(--primary-dark);
+    box-shadow: var(--shadow-xs);
+}
+
+.monthNavigation {
+    display: grid;
+    grid-template-columns: 36px 1fr 36px;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    text-align: center;
+}
+
+.monthNavigation > div {
+    display: grid;
+    gap: 2px;
+}
+
+.monthNavigation strong {
+    font-size: 1rem;
+    color: var(--ink);
+}
+
+.monthNavigation span {
+    color: var(--muted);
+    font-size: .78rem;
+}
+
+.monthNavButton {
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface-solid);
+    color: var(--ink-2);
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.monthNavButton:hover {
+    color: var(--primary-dark);
+    border-color: var(--primary);
+    background: var(--primary-soft);
+}
+
+.monthGrid {
+    display: grid;
+    gap: 6px;
+}
+
+.weekdays,
+.gridCells {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.weekdays {
+    color: var(--muted);
+}
+
+.weekday {
+    text-align: center;
+    font-size: .68rem;
+    font-weight: 800;
+}
+
+.gridDay {
+    position: relative;
+    min-width: 0;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    background: var(--surface-solid);
+    color: var(--ink);
+    font: inherit;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.gridDay:hover:not(:disabled) {
+    transform: translateY(-2px);
+    border-color: var(--primary);
+    box-shadow: var(--shadow-sm);
+}
+
+.gridDay.today:not(.selected) {
+    border: 2px solid var(--primary);
+}
+
+.gridDay.selected {
+    border-color: transparent;
+    color: #fff;
+    background: var(--gradient);
+    box-shadow: 0 12px 24px -10px rgba(79, 70, 229, .65);
+}
+
+.gridDay.outsideMonth {
+    opacity: .38;
+    cursor: default;
+    background: var(--chip-bg);
+}
+
+.gridDayNumber {
+    font-size: .95rem;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.gridMarker {
+    position: absolute;
+    top: 4px;
+    inset-inline-start: 4px;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    background: var(--gradient);
+    color: #fff;
+    font-size: .58rem;
+    font-weight: 800;
+    line-height: 17px;
+}
+
+.gridDay.selected .gridMarker {
+    background: #fff;
+    color: var(--primary-dark);
+}
+
+/* تبلت — سطح میانی بین دسکتاپ و موبایل */
+@media (max-width: 900px) {
+    .calendarWidget {
+        padding: 16px;
+    }
+
+    .weekdays,
+    .gridCells {
+        gap: 5px;
+    }
+
+    .weekday {
+        font-size: .66rem;
+    }
+
+    .gridDayNumber {
+        font-size: .9rem;
+    }
+}
+
+@media (max-width: 560px) {
+    .calendarWidget {
+        padding: 14px;
+        border-radius: 22px;
+    }
+
+    .weekdays,
+    .gridCells {
+        gap: 4px;
+    }
+
+    .monthNavigation {
+        grid-template-columns: 34px 1fr 34px;
+        margin-bottom: 10px;
+    }
+
+    .monthNavButton {
+        width: 34px;
+        height: 34px;
+    }
+
+    .gridDay {
+        border-radius: 11px;
+    }
+
+    .weekday {
+        font-size: .64rem;
+    }
+
+    .gridDayNumber {
+        font-size: .82rem;
+    }
+
+    .gridMarker {
+        min-width: 15px;
+        height: 15px;
+        font-size: .54rem;
+        line-height: 15px;
+    }
+}
+
 .scroll {
     display: flex;
     gap: 12px;
@@ -111,4 +353,37 @@
     background: #fff;
     color: var(--primary-dark);
     box-shadow: none;
+}
+
+/* ====== نمای «روزهای نزدیک» — تبلت/موبایل فشردهتر ====== */
+/* بعد از ruleهای پایه قرار میگیرد تا در cascade برنده شود */
+@media (max-width: 900px) {
+    .dayBtn {
+        width: 70px;
+        height: 92px;
+    }
+}
+
+@media (max-width: 560px) {
+    .scroll {
+        gap: 10px;
+    }
+
+    .dayBtn {
+        width: 64px;
+        height: 84px;
+        border-radius: 18px;
+    }
+
+    .dayName {
+        font-size: .66rem;
+    }
+
+    .dayNumber {
+        font-size: 1.4rem;
+    }
+
+    .dayMonth {
+        font-size: .62rem;
+    }
 }

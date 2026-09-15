@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
 import { deleteTask, getTask, updateTask } from "@/app/lib/services/tasks.service"
-import { updateTaskSchema } from "@/app/schema/taskSchema"
+import { makeUpdateTaskSchema } from "@/app/schema/taskSchema"
 import {
     errorResponse,
     okResponse,
@@ -84,7 +84,7 @@ export async function PATCH(
 
         // Malformed JSON → 400 VALIDATION_ERROR (الگوی P2) نه 500
         const body = await req.json().catch(() => ({}))
-        const parsed = updateTaskSchema.safeParse(body)
+        const parsed = makeUpdateTaskSchema(user.timezone).safeParse(body)
         if (!parsed.success) {
             return validationErrorResponse(parsed.error.flatten())
         }

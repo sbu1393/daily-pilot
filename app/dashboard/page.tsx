@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {toast} from "react-toastify" 
 
 import JalaliCalendar from "@/app/components/calender/jalili"
+import DayHeader from "./DayHeader"
 import DayStatsBar from "./DayStarBar"
 import DayStartModal from "./DayStarModal"
 import { useDaySummary } from "../hooks/useDaySummary"
@@ -44,11 +45,10 @@ export default function Dashboard() {
         <div className="container">
             <JalaliCalendar />
 
+            <DayHeader onEdit={() => setModal({ open: true, isEdit: true })} />
+
             {summary && !loading && (
-                <DayStatsBar 
-                    summary={summary} 
-                    onEdit={() => setModal({ open: true, isEdit: true })} 
-                />
+                <DayStatsBar summary={summary} />
             )}
 
             <DayTaskArea />

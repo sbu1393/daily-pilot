@@ -40,10 +40,10 @@ export function parseSpentMinutes(raw: string): SpentMinutesParse {
         return { ok: false, error: "مدت باید عدد صحیح باشد" }
     }
     if (value < SPENT_MINUTES_MIN) {
-        return { ok: false, error: `مدت باید حداقل ${SPENT_MINUTES_MIN} دقیقه باشد` }
+        return { ok: false, error: `مدت باید حداقل ${faDigits(SPENT_MINUTES_MIN)} دقیقه باشد` }
     }
     if (value > SPENT_MINUTES_MAX) {
-        return { ok: false, error: `مدت نمی‌تواند بیشتر از ${SPENT_MINUTES_MAX} دقیقه باشد` }
+        return { ok: false, error: `مدت نمی‌تواند بیشتر از ${faDigits(SPENT_MINUTES_MAX)} دقیقه باشد` }
     }
     return { ok: true, value }
 }

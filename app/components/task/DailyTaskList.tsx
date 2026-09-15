@@ -32,7 +32,6 @@ import AdvisorCard from "./AdvisorCard"
 import { useDaySuggestion } from "@/app/hooks/useDaySuggestion"
 import { orderTasksByAdvisor } from "@/app/lib/planner/advisorOrder"
 import { type AdvisorResult } from "@/app/lib/planner/advisor"
-import { formatCanonicalToJalali } from "../../lib/time"
 import { LayersPlus, Megaphone, RotateCwFadingClock } from "lucide-react"
 
 const priorityWeight: Record<TaskPriority, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 }
@@ -278,14 +277,13 @@ export default function DailyTaskList() {
 
     return (
         <section className={styles.section}>
-            <div className={styles.headerRow}>
-                <h3>برنامه‌ی روز {formatCanonicalToJalali(selectedDate)}</h3>
-                {tasks.length > 0 && (
+            {tasks.length > 0 && (
+                <div className={styles.headerRow}>
                     <span className={styles.count}>
                         {faDigits(doneCount)} از {faDigits(tasks.length)} انجام شده
                     </span>
-                )}
-            </div>
+                </div>
+            )}
 
             {overCommitted && (
                 <div className={styles.warningBar}>

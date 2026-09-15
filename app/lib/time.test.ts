@@ -45,7 +45,23 @@ describe("parseSpentMinutes (C6 — §5.4.1 Validate duration)", () => {
     it("rejects values above the 600-minute server contract", () => {
         const out = parseSpentMinutes("601")
         expect(out.ok).toBe(false)
-        if (!out.ok) expect(out.error).toContain(String(SPENT_MINUTES_MAX))
+        if (!out.ok) expect(out.error).toContain(faDigits(SPENT_MINUTES_MAX))
+    })
+
+    it("renders visible limit numbers in the error messages as Persian digits (UI-only presentation)", () => {
+        const below = parseSpentMinutes("0")
+        expect(below.ok).toBe(false)
+        if (!below.ok) {
+            expect(below.error).toContain(faDigits(SPENT_MINUTES_MIN)) // «۱»
+            expect(below.error).not.toMatch(/[0-9]/) // هیچ رقم لاتین قابل مشاهده نباشد
+        }
+
+        const above = parseSpentMinutes("601")
+        expect(above.ok).toBe(false)
+        if (!above.ok) {
+            expect(above.error).toContain(faDigits(SPENT_MINUTES_MAX)) // «۶۰۰»
+            expect(above.error).not.toMatch(/[0-9]/)
+        }
     })
 
     it("exposes the same boundaries as the server schema (1..600)", () => {

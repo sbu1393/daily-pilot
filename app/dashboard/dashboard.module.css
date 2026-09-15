@@ -90,6 +90,38 @@
     color: var(--primary-dark);
   }
   
+.dayHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-top: 24px;
+    min-height: 44px;
+}
+
+.dayTitle {
+    margin: 0;
+    font-size: 1.2rem;
+    font-weight: 800;
+    color: var(--ink);
+}
+
+.dayHeader .editBtn {
+    flex: none;
+}
+
+@media (max-width: 520px) {
+    .dayHeader {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .dayHeader .editBtn {
+        align-self: flex-start;
+    }
+}
+
   /* ===== مودال شروع روز ===== */
   .overlay {
     position: fixed;

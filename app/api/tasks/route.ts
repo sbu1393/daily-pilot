@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
 import { createTask, getDayTasks } from "@/app/lib/services/tasks.service"
-import { getCanonicalToday } from "@/app/lib/canonicalDay"
+import { getCanonicalToday, isValidCanonicalDayKey } from "@/app/lib/canonicalDay"
 import { createTaskSchema } from "@/app/schema/taskSchema"
 import { buildAdvisor, type AdvisorResult } from "@/app/lib/planner/advisor"
 import {
@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
         if (!user) return unauthorizedResponse()
 
         const dayKey = req.nextUrl.searchParams.get("dayKey") ?? getCanonicalToday(user.timezone)
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+        if (!isValidCanonicalDayKey(dayKey)) {
             return errorResponse(400, "VALIDATION_ERROR", "فرمت روز نامعتبر است")
         }
 

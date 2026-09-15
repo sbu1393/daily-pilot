@@ -26,7 +26,10 @@ vi.mock("@/app/lib/services/tasks.service", () => ({
     createTask: mocks.createTask,
     getDayTasks: mocks.getDayTasks,
 }))
-vi.mock("@/app/lib/canonicalDay", () => ({ getCanonicalToday: mocks.getCanonicalToday }))
+vi.mock("@/app/lib/canonicalDay", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("@/app/lib/canonicalDay")>()
+    return { ...actual, getCanonicalToday: mocks.getCanonicalToday }
+})
 // Advisor: واقعی به‌صورت پیش‌فرض (pass-through) — فقط تست خطا mock را override می‌کند
 vi.mock("@/app/lib/planner/advisor", async (importOriginal) => {
     const actual = await importOriginal<typeof import("@/app/lib/planner/advisor")>()
@@ -260,6 +263,16 @@ describe("GET /api/tasks", () => {
 
         expect(res.status).toBe(400)
         const parsed = await res.json()
+        expect(parsed.error.code).toBe("VALIDATION_ERROR")
+        expect(mocks.getDayTasks).not.toHaveBeenCalled()
+    })
+
+    it("returns 400 VALIDATION_ERROR for a calendar-invalid dayKey and never calls the service", async () => {
+        const res = await GET(new NextRequest("http://localhost/api/tasks?dayKey=2026-02-30"))
+
+        expect(res.status).toBe(400)
+        const parsed = await res.json()
+        expect(parsed.ok).toBe(false)
         expect(parsed.error.code).toBe("VALIDATION_ERROR")
         expect(mocks.getDayTasks).not.toHaveBeenCalled()
     })

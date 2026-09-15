@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
 import { createTask, getDayTasks } from "@/app/lib/services/tasks.service"
 import { getCanonicalToday, isValidCanonicalDayKey } from "@/app/lib/canonicalDay"
-import { createTaskSchema } from "@/app/schema/taskSchema"
+import { makeCreateTaskSchema } from "@/app/schema/taskSchema"
 import { buildAdvisor, type AdvisorResult } from "@/app/lib/planner/advisor"
 import {
     errorResponse,
@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
 
         // Malformed JSON → 400 VALIDATION_ERROR (الگوی P2) نه 500
         const body = await req.json().catch(() => ({}))
-        const parsed = createTaskSchema.safeParse(body)
+        const parsed = makeCreateTaskSchema(user.timezone).safeParse(body)
         if (!parsed.success) {
             return validationErrorResponse(parsed.error.flatten())
         }

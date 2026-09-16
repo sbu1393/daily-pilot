@@ -9,25 +9,62 @@ const mocks = vi.hoisted(() => ({
     getCurrentUser: vi.fn(),
     isRateLimited: vi.fn(),
     runAiSamples: vi.fn(),
+    touchAuthenticatedActivity: vi.fn(),
+    reserveQuota: vi.fn(),
+    completeQuota: vi.fn(),
+    releaseQuota: vi.fn(),
+    getPrisma: vi.fn(),
 }))
 
 vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: mocks.getCurrentUser }))
 vi.mock("@/app/lib/rateLimit", () => ({ isRateLimited: mocks.isRateLimited }))
 vi.mock("@/app/lib/services/analysis.service", () => ({ runAiSamples: mocks.runAiSamples }))
+vi.mock("@/app/lib/services/userActivity.service", () => ({
+    touchAuthenticatedActivity: mocks.touchAuthenticatedActivity,
+}))
+vi.mock("@/app/lib/services/aiQuota.service", () => ({
+    reserveQuota: mocks.reserveQuota,
+    completeQuota: mocks.completeQuota,
+    releaseQuota: mocks.releaseQuota,
+}))
+vi.mock("@/app/lib/getPrisma", () => ({ getPrisma: mocks.getPrisma }))
 
 import { GET } from "./route"
+import { QuotaExceededError } from "@/app/lib/services/errors"
 
-const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran" }
+const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran", plan: "FREE" }
 const SAMPLES = [
     { source: "1xai", analysis: { priority: "HIGH", score: 90, estimatedMinutes: 45, reason: "دلیل", category: "Work" }, attempts: 1 },
     { source: "mock", analysis: { priority: "LOW", score: 40, estimatedMinutes: 15, reason: "دلیل", category: "Personal" }, attempts: 0 },
 ]
 
+describe("GET /api/ai/test — production guard (فاز ۱ — سند §16)", () => {
+    it("returns 404 in production as the FIRST business action — no rate limit, no quota, no AI", async () => {
+        vi.stubEnv("NODE_ENV", "production")
+
+        const res = await GET()
+
+        expect(res.status).toBe(404)
+        await expect(res.json()).resolves.toMatchObject({ ok: false })
+        // گارد اولین action است — هیچ چیز دیگری اجرا نشده
+        expect(mocks.getCurrentUser).not.toHaveBeenCalled()
+        expect(mocks.isRateLimited).not.toHaveBeenCalled()
+        expect(mocks.reserveQuota).not.toHaveBeenCalled()
+        expect(mocks.runAiSamples).not.toHaveBeenCalled()
+    })
+})
+
 describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        vi.unstubAllEnvs()
         mocks.getCurrentUser.mockResolvedValue(USER)
         mocks.isRateLimited.mockReturnValue(false)
+        mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
+        mocks.reserveQuota.mockResolvedValue(undefined)
+        mocks.completeQuota.mockResolvedValue(true)
+        mocks.releaseQuota.mockResolvedValue(true)
+        mocks.getPrisma.mockReturnValue({})
     })
 
     it("returns 200 with the standard success envelope { ok: true, data: results }", async () => {
@@ -39,6 +76,12 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
         await expect(res.json()).resolves.toEqual({ ok: true, data: SAMPLES })
         expect(mocks.runAiSamples).toHaveBeenCalledTimes(1)
         expect(mocks.isRateLimited).toHaveBeenCalledWith("ai-test:user:1", 1, 60 * 60 * 1000)
+        // فاز ۱ — reserve 3 units (all-or-nothing) → complete
+        expect(mocks.reserveQuota).toHaveBeenCalledTimes(1)
+        expect(mocks.reserveQuota.mock.calls[0][1].units).toBe(3)
+        expect(mocks.reserveQuota.mock.calls[0][1].feature).toBe("ai-test")
+        expect(mocks.completeQuota).toHaveBeenCalledTimes(1)
+        expect(mocks.releaseQuota).not.toHaveBeenCalled()
     })
 
     it("returns 429 RATE_LIMITED and never calls runAiSamples when the user limit is exhausted", async () => {
@@ -81,6 +124,38 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
             error: { code: "UNAUTHORIZED", message: "Unauthorized" },
         })
         expect(mocks.runAiSamples).not.toHaveBeenCalled()
+    })
+
+    it("returns 429 QUOTA_EXCEEDED when the 3-unit reservation is over the remaining limit (no partial reserve)", async () => {
+        mocks.reserveQuota.mockRejectedValue(new QuotaExceededError())
+
+        const res = await GET()
+
+        expect(res.status).toBe(429)
+        const parsed = await res.json()
+        expect(parsed.error.code).toBe("QUOTA_EXCEEDED")
+        expect(mocks.runAiSamples).not.toHaveBeenCalled()
+        expect(mocks.completeQuota).not.toHaveBeenCalled()
+    })
+
+    it("releases the reservation when runAiSamples fails (§12) and keeps envelope", async () => {
+        mocks.runAiSamples.mockRejectedValue(new Error("provider down"))
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+        const res = await GET()
+
+        expect(mocks.releaseQuota).toHaveBeenCalledTimes(1)
+        expect(mocks.completeQuota).not.toHaveBeenCalled()
+        expect(res.status).toBe(500)
+        errorSpy.mockRestore()
+    })
+
+    it("preserves X-Request-ID header on success responses", async () => {
+        mocks.runAiSamples.mockResolvedValue(SAMPLES)
+
+        const res = await GET()
+
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
     })
 
     it("propagates ServiceError through the standard error envelope", async () => {

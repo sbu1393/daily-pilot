@@ -1,7 +1,7 @@
 .calendarWidget {
     margin-top: 8px;
     margin-inline: auto;
-    max-width: 600px;
+    max-width: 480px;
     padding: 20px;
     border: 1px solid var(--border);
     border-radius: 26px;
@@ -208,6 +208,8 @@
     .weekdays,
     .gridCells {
         gap: 4px;
+        /* سلول‌های روز با عرض ثابت در مرکز هر ستون — جلوگیری از سلول‌های بزرگ عرضی */
+        justify-items: center;
     }
 
     .monthNavigation {
@@ -221,6 +223,8 @@
     }
 
     .gridDay {
+        width: min(100%, 38px);
+        justify-self: center;
         border-radius: 11px;
     }
 
@@ -258,12 +262,22 @@
 
 /* برای اینکه نوار اسکرول زیبا و باریک دیده شود و متوجه اسکرول بشوی: */
 .scroll::-webkit-scrollbar {
-    height: 4px;
+    height: 6px;
 }
 
 .scroll::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(var(--ink-rgb), 0.18);
     border-radius: 4px;
+}
+
+.scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(var(--ink-rgb), 0.3);
+}
+
+.scroll {
+    /* Firefox — همان thumb تیره‌ی ملایم */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(var(--ink-rgb), 0.18) transparent;
 }
 
 

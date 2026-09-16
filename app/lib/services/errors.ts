@@ -2,17 +2,32 @@
 // Route فقط status/message را به شکل Envelope ADR-04 ({ ok:false, error:{code,message,errors?} })
 // به Client برمی‌گرداند (A6).
 
+// فاز صفر Observability — دسته‌بندی/شدت اختیاری خطا.
+// کاملاً Backward Compatible: پارامترهای جدید اختیاری‌اند و هیچ فراخوانی قبلی سازنده نمی‌شکند.
+import type { ErrorCategory, ErrorSeverity } from "@/src/lib/observability/types"
+
 export class ServiceError extends Error {
     readonly status: number
     readonly code: string
     readonly errors?: unknown
+    readonly category?: ErrorCategory
+    readonly severity?: ErrorSeverity
 
-    constructor(status: number, code: string, message: string, errors?: unknown) {
+    constructor(
+        status: number,
+        code: string,
+        message: string,
+        errors?: unknown,
+        category?: ErrorCategory,
+        severity?: ErrorSeverity,
+    ) {
         super(message)
         this.name = new.target.name
         this.status = status
         this.code = code
         this.errors = errors
+        this.category = category
+        this.severity = severity
     }
 }
 
@@ -162,5 +177,46 @@ export class SamePasswordError extends ServiceError {
 export class UsernameTakenError extends ServiceError {
     constructor() {
         super(409, "USERNAME_TAKEN", "این نام کاربری قبلاً استفاده شده است")
+    }
+}
+
+// ---------- فاز ۱ — Quota / Idempotency ----------
+// نگاشت کدها طبق سند فاز یک (§19/§20):
+// QUOTA_EXCEEDED / IDEMPOTENCY_CONFLICT / AI_USAGE_CONFLICT → business/conflict → recordError = false
+// QUOTA_UNAVAILABLE / AI_PROVIDER_UNAVAILABLE → زیرساختی/وابستگی → recordError = true (fail-closed)
+// category/severity برای recordError و فیلتر آینده‌ی لاگ‌ها هستند (فاز صفر).
+
+/** 429 — ظرفیت ماهانه تمام شده؛ business/expected — recordError = false */
+export class QuotaExceededError extends ServiceError {
+    constructor() {
+        super(429, "QUOTA_EXCEEDED", "سهمیه‌ی ماهانه‌ی هوش مصنوعی تمام شده است", undefined, "RATE_LIMIT", "INFO")
+    }
+}
+
+/** 503 — خرابی DB کووتا؛ infrastructure fail-closed — recordError = true */
+export class QuotaUnavailableError extends ServiceError {
+    constructor() {
+        super(503, "QUOTA_UNAVAILABLE", "سرویس سهمیه در دسترس نیست؛ بعداً تلاش کن", undefined, "DATABASE", "CRITICAL")
+    }
+}
+
+/** 503 — شکست نهایی provider؛ dependency failure — recordError = true */
+export class AiProviderUnavailableError extends ServiceError {
+    constructor() {
+        super(503, "AI_PROVIDER_UNAVAILABLE", "سرویس هوش مصنوعی در دسترس نیست؛ بعداً تلاش کن", undefined, "EXTERNAL_SERVICE", "ERROR")
+    }
+}
+
+/** 409 — درخواست تکراری با requestId مشابه غیرقابل replay — recordError = false */
+export class IdempotencyConflictError extends ServiceError {
+    constructor() {
+        super(409, "IDEMPOTENCY_CONFLICT", "این درخواست قبلاً ثبت شده است", undefined, "CONFLICT", "INFO")
+    }
+}
+
+/** 409 — transition نامعتبر در چرخه‌ی حیات event — recordError = false مگر unexpected */
+export class AiUsageConflictError extends ServiceError {
+    constructor() {
+        super(409, "AI_USAGE_CONFLICT", "وضعیت رویداد مصرف با درخواست سازگار نیست", undefined, "CONFLICT", "WARNING")
     }
 }

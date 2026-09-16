@@ -37,6 +37,18 @@ enum TaskEventType {
   COMPLETED
 }
 
+// فاز ۱ — پریود کووتا AI (فقط ماهانه)
+enum AiUsagePeriodType {
+  MONTHLY
+}
+
+// فاز ۱ — چرخه‌ی حیات رویداد مصرف AI
+enum AiUsageEventStatus {
+  RESERVED
+  CONSUMED
+  RELEASED
+}
+
 model User {
   id         Int         @id @default(autoincrement())
   username   String      @unique
@@ -51,8 +63,11 @@ model User {
   locale     String      @default("fa")
   calendar   CalendarType @default(JALALI)
   plan       UserPlan    @default(FREE)
+  lastSeenAt DateTime? // فاز ۱ — آخرین فعالیت احرازهویت‌شده (throttle 30 دقیقه)
   tasks      Task[]
   dailyPlans DailyPlan[]
+  aiUsages AiUsage[]
+  aiUsageEvents AiUsageEvent[]
 }
 
 model Task {
@@ -104,4 +119,66 @@ model TaskEvent {
   task      Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@index([taskId, createdAt])
+}
+
+// فاز ۱ — ظرفیت ماهانه‌ی AI per user (source of truth quota)
+model AiUsage {
+  id            Int                @id @default(autoincrement())
+  userId        Int
+  periodType    AiUsagePeriodType  @default(MONTHLY)
+  periodStart   DateTime
+  reservedUnits Int                @default(0)
+  consumedUnits Int                @default(0)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, periodType, periodStart])
+  @@index([userId, periodStart])
+}
+
+// فاز ۲ — تاریخچه خطاهای عملیاتی (source of truth error history؛ fail-open telemetry)
+model ErrorLog {
+  id          String   @id @default(cuid())
+  requestId   String
+  userId      Int?
+  endpoint    String
+  feature     String?
+  errorCode   String
+  statusCode  Int
+  category    String
+  severity    String
+  message     String
+  stack       String?
+  metadata    Json?
+  environment String?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([errorCode, createdAt])
+  @@index([category, createdAt])
+  @@index([severity, createdAt])
+  @@index([endpoint, createdAt])
+  @@index([userId, createdAt])
+  @@index([requestId])
+}
+
+// فاز ۱ — رویداد مصرف AI برای audit و idempotency (requestId = idempotency key)
+model AiUsageEvent {
+  id          Int                @id @default(autoincrement())
+  requestId   String             @unique
+  userId      Int
+  feature     String
+  model       String?
+  units       Int                @default(1)
+  status      AiUsageEventStatus
+  attempts    Int                @default(1)
+  failureCode String?
+  durationMs  Int?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, status])
 }

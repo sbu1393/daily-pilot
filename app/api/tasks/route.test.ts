@@ -240,7 +240,10 @@ describe("GET /api/tasks", () => {
         // tasks و summary سالم‌اند — فقط advisor حذف شده
         expect(parsed.data.tasks).toEqual(GET_TASKS)
         expect(parsed.data.summary).toEqual(GET_SUMMARY)
-        expect(errorSpy).toHaveBeenCalledWith("ADVISOR CALCULATION ERROR:", expect.any(Error))
+        // فاز صفر Observability — لاگ خام با recordError جایگزین شد؛ خروجی Structured JSON با severity WARNING
+        expect(errorSpy).toHaveBeenCalledWith(
+            expect.stringContaining('"severity":"WARNING"'),
+        )
         errorSpy.mockRestore()
     })
 

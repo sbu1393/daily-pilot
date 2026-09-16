@@ -95,7 +95,10 @@ export async function getCurrentUser(){
 
                 phone:true,
 
-                timezone:true
+                timezone:true,
+
+                // فاز ۱ — plan برای planPolicy (resolve سهمیه ماهانه AI؛ سند §5)
+                plan:true,
 
             }
 

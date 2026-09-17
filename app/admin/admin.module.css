@@ -1,0 +1,467 @@
+// فاز ۴ — Step 7: استایل‌های ماژولار صفحات Admin
+//
+// فقط از CSS variables موجود globals.css استفاده می‌شود (هیچ token/theme جدید).
+// کلاس‌های مشترک dp-btn/dp-card سراسری باقی‌اند؛ این ماژول فقط چیدمان اختصاصی admin است.
+
+.page {
+    display: grid;
+    gap: 18px;
+}
+
+/* ---------- هدر صفحه + ناوبری ---------- */
+.pageHead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+}
+.pageTitle {
+    margin: 0;
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: var(--ink);
+}
+.pageSub {
+    margin: 2px 0 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+.headSpacer {
+    flex: 1;
+}
+
+.navTabs {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.navTab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--ink-2);
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-decoration: none;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.navTab:hover {
+    border-color: var(--primary);
+    color: var(--primary-dark);
+}
+.navTabActive {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+}
+.navTab:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+/* ---------- widgetهای آمار (الگوی statsWrap/statsCard داشبورد) ---------- */
+.statsWrap {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 14px;
+}
+.statCard {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 14px 16px;
+    box-shadow: 0 8px 24px rgba(var(--ink-rgb), 0.05);
+    backdrop-filter: blur(16px);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.statHead {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+.statValue {
+    font-size: 1.2rem;
+    font-weight: 800;
+    color: var(--ink);
+}
+.statHint {
+    color: var(--muted-2);
+    font-size: 0.72rem;
+}
+
+/* ---------- کارت بخش ---------- */
+.section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 16px 18px;
+    box-shadow: 0 8px 24px rgba(var(--ink-rgb), 0.05);
+    display: grid;
+    gap: 12px;
+}
+.sectionTitle {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: var(--ink);
+}
+.sectionGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+}
+
+/* ---------- فیلترها / جستجو ---------- */
+.filterBar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+.filterInput {
+    border: 1.5px solid var(--border);
+    background: var(--surface-solid);
+    color: var(--ink);
+    border-radius: 12px;
+    padding: 9px 12px;
+    font-size: 0.85rem;
+    font-family: inherit;
+    min-width: 0;
+}
+.filterInput:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+.filterInput:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+}
+.filterInputSearch {
+    flex: 1 1 200px;
+}
+.filterSelect {
+    flex: 0 1 auto;
+    cursor: pointer;
+}
+.filterLabel {
+    display: grid;
+    gap: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--muted);
+}
+
+/* ---------- جدول‌ها (responsive: زیر 720px به لیست کارت تبدیل می‌شود) ---------- */
+.tableScroll {
+    overflow-x: auto;
+}
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+.table th {
+    text-align: right;
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+.table td {
+    padding: 10px;
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--ink-2);
+    vertical-align: top;
+}
+.table tbody tr:hover {
+    background: var(--border-soft);
+}
+.rowLink {
+    color: var(--primary-dark);
+    font-weight: 700;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.rowLink:hover {
+    text-decoration: underline;
+}
+.rowLink:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: 6px;
+}
+
+/* ---------- chipها ---------- */
+.chipRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    border: 1px solid var(--border);
+    background: var(--surface-solid);
+    color: var(--ink-2);
+}
+.chipPlanPro {
+    background: var(--primary-soft);
+    border-color: var(--primary);
+    color: var(--primary-dark);
+}
+.chipRoleAdmin {
+    background: var(--warning-bg);
+    border-color: var(--amber);
+    color: var(--ink);
+}
+.chipCritical {
+    background: var(--danger-bg-strong);
+    border-color: var(--danger-strong);
+    color: var(--danger-strong);
+}
+.chipError {
+    background: var(--danger-bg);
+    border-color: var(--danger);
+    color: var(--danger-strong);
+}
+.chipWarning {
+    background: var(--warning-bg);
+    border-color: var(--amber);
+    color: var(--ink-2);
+}
+.chipInfo {
+    background: var(--primary-soft);
+    border-color: var(--primary);
+    color: var(--primary-dark);
+}
+
+/* ---------- حالت‌ها: loading / empty / error / access ---------- */
+.stateBox {
+    border: 1.5px dashed var(--border);
+    border-radius: 16px;
+    padding: 26px 18px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+    display: grid;
+    gap: 10px;
+    justify-items: center;
+}
+.stateBoxError {
+    border-color: var(--danger);
+    color: var(--danger-strong);
+    background: var(--danger-bg);
+}
+.stateTitle {
+    font-weight: 800;
+    color: var(--ink-2);
+}
+.stateBoxError .stateTitle {
+    color: var(--danger-strong);
+}
+.skeleton {
+    display: block;
+    height: 14px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--border-soft), var(--border), var(--border-soft));
+    background-size: 200% 100%;
+    animation: adminShimmer 1.4s ease infinite;
+}
+.skeletonWide {
+    width: 100%;
+}
+@keyframes adminShimmer {
+    from {
+        background-position: 200% 0;
+    }
+    to {
+        background-position: -200% 0;
+    }
+}
+
+.spin {
+    animation: adminSpin 0.9s linear infinite;
+}
+@keyframes adminSpin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ---------- pagination ---------- */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.pageInfo {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+.pageBtn {
+    border: 1.5px solid var(--border);
+    background: var(--surface-solid);
+    color: var(--ink-2);
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+.pageBtn:hover:not(:disabled) {
+    border-color: var(--primary);
+    color: var(--primary-dark);
+}
+.pageBtn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+.pageBtn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+/* ---------- کارت کاربر / ردیف جزئیات ---------- */
+.identityRow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 12px;
+}
+.identityName {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: var(--ink);
+}
+.identityMeta {
+    color: var(--muted);
+    font-size: 0.78rem;
+}
+.defList {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 14px;
+    font-size: 0.85rem;
+    margin: 0;
+}
+.defList dt {
+    color: var(--muted);
+    font-weight: 700;
+}
+.defList dd {
+    margin: 0;
+    color: var(--ink-2);
+}
+.barTrack {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--primary-soft);
+    overflow: hidden;
+}
+.barFill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--gradient);
+    transition: width 0.4s ease;
+}
+.countList {
+    display: grid;
+    gap: 6px;
+    font-size: 0.82rem;
+}
+.countRow {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    border-bottom: 1px dashed var(--border-soft);
+    padding-bottom: 5px;
+    color: var(--ink-2);
+}
+.countRow span:last-child {
+    font-weight: 800;
+    color: var(--ink);
+}
+
+/* ---------- Responsive: جدول → لیست ---------- */
+.cardList {
+    display: none;
+    grid-template-columns: 1fr;
+    gap: 10px;
+}
+.cardItem {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 12px 14px;
+    display: grid;
+    gap: 8px;
+    background: var(--surface-solid);
+}
+.cardItemTop {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.cardItemTitle {
+    font-weight: 800;
+    color: var(--ink);
+    font-size: 0.9rem;
+}
+.cardItemMeta {
+    color: var(--muted);
+    font-size: 0.76rem;
+}
+.cardItemMsg {
+    color: var(--ink-2);
+    font-size: 0.8rem;
+    line-height: 1.8;
+    word-break: break-word;
+}
+.mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.72rem;
+    color: var(--muted);
+    word-break: break-all;
+}
+.emptyCell {
+    color: var(--muted-2);
+}
+
+@media (max-width: 720px) {
+    .tableScroll {
+        display: none;
+    }
+    .cardList {
+        display: grid;
+    }
+}

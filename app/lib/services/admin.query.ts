@@ -577,6 +577,12 @@ export interface AdminUserDetail {
     } | null
     aiQuotaSummary: AdminAiQuotaSummary | null
     recentErrors: AdminErrorLogView[]
+    /**
+     * فاز ۵ — گام ۱۶ (سند فاز ۵ §۲۴): نمای read-only بیلیینگ.
+     * `null` یعنی خواندن موفق نشد (fail-open مثل سایر summaryها)؛ هیچ mutation/effective-plan
+     * resolve/lazy expiration در این مسیر رخ نمیدهد.
+     */
+    billingSummary: AdminBillingSummary | null
 }
 
 export interface AdminDetailOptions {
@@ -587,6 +593,9 @@ export interface AdminDetailOptions {
             findMany: (args: unknown) => Promise<unknown[]>
             count: (args: unknown) => Promise<number>
         }
+        // فاز ۵ — گام ۱۶: فقط خواندن‌های read-only نمای بیلیینگ (§۲۴)
+        entitlement: { findUnique: (args: unknown) => Promise<unknown> }
+        paymentOrder: { findFirst: (args: unknown) => Promise<unknown> }
     }
     /** تزریق client productEvent برای activity summary (الگوی getEventUsageStats) */
     productEventOptions?: ProductEventQueryOptions
@@ -664,6 +673,22 @@ export async function getUserDetail(
         aiQuotaSummary = null
     }
 
+    // summary 4 — billing / entitlement (فاز ۵ — گام ۱۶، سند §۲۴؛ کاملاً read-only)
+    // شکست این بخش فقط خودش را null می‌کند و هیچ تأثیری روی بخش‌های دیگر ندارد (§۱۲).
+    // هیچ resolveEffectivePlan/lazy expiration/نوشتنی در این مسیر نیست؛ پلن فقط آینه‌ی
+    // ذخیره‌شده‌ی `User.plan` و وضعیت entitlement همان state ذخیره‌شده است.
+    let billingSummary: AdminBillingSummary | null = null
+    try {
+        billingSummary = await getAdminBillingSummary(userId, {
+            // پلن همان آینه‌ی ردیف کاربر که همین‌جا خوانده شد — بدون read دوم و بدون effective-plan resolve
+            plan: typeof row?.plan === "string" ? row.plan : "FREE",
+            prisma: client,
+            now,
+        })
+    } catch {
+        billingSummary = null
+    }
+
     // summary 3 — recent errors (حداکثر ۵؛ شکست → خالی)
     let recentErrors: AdminErrorLogView[] = []
     try {
@@ -684,7 +709,7 @@ export async function getUserDetail(
         recentErrors = []
     }
 
-    return { user, activitySummary, aiQuotaSummary, recentErrors }
+    return { user, activitySummary, aiQuotaSummary, recentErrors, billingSummary }
 }
 
 export interface GetUserAiUsageInput {
@@ -824,6 +849,8 @@ export interface AdminErrorLogsInput {
     category?: string
     severity?: string
     endpoint?: string
+    /** فاز ۵ — گام ۱۶: فیلتر feature (مثلاً "billing") — همان ستون موجود ErrorLog.feature. */
+    feature?: string
     from?: Date
     to?: Date
     page?: number
@@ -912,6 +939,7 @@ export async function getAdminErrorLogs(
         ["category", input.category],
         ["severity", input.severity],
         ["endpoint", input.endpoint],
+        ["feature", input.feature],
     ] as const) {
         if (typeof value === "string" && value.length > 0) where[key] = value
     }
@@ -1031,7 +1059,234 @@ export async function getAdminGlobalActivity(
 }
 
 // =====================================================================
-// ۹) Default admin client — یک factory مشترک برای خواننده‌های Step 6
+// ۹) فاز ۵ — گام ۱۶: نمای read-only بیلیینگ برای admin (سند فاز ۵ §۲۴)
+// =====================================================================
+//
+// قواعد قفل‌شده:
+// - **کاملاً read-only**: فقط findUnique/findFirst/findMany — هیچ mutation، هیچ
+//   resolveEffectivePlan()، هیچ lazy expiration، هیچ provider call، هیچ AdminAuditLog.
+// - پلن فقط آینه‌ی سروری `User.plan` است و وضعیت entitlement همان state ذخیره‌شده (§۲۴).
+// - Privacy (§۱۵/§۲۱ فاز ۴ + §۳۳ فاز ۵): هیچ Authority/reference خام، هیچ secret/merchant،
+//   هیچ raw payment payload و هیچ شناسه‌ی حساسی برنمی‌گردد؛ reference provider فقط **ماسک‌شده**
+//   (۴ کاراکتر آخر) و DTOها allowlist-based هستند (بدون object spread از رکورد Prisma).
+
+/** نمای entitlement برای admin — فقط فیلدهای §۲۴ (بدون id/userId). */
+export interface AdminBillingEntitlementView {
+    status: string
+    planCode: string
+    provider: string
+    currentPeriodStart: string
+    currentPeriodEnd: string
+}
+
+/** نمای آخرین سفارش پرداخت (فاز ۵ §۳۰) — reference فقط ماسک‌شده. */
+export interface AdminBillingPaymentView {
+    status: string
+    provider: string
+    amount: number
+    currency: string
+    entitlementDays: number
+    createdAt: string
+    paidAt: string | null
+    /** هرگز مقدار خام نیست — فقط «••••abcd». */
+    providerReferenceMasked: string | null
+}
+
+/** خلاصه‌ی بیلیینگ یک کاربر (بخش مستقل getUserDetail — §۱۲). */
+export interface AdminBillingSummary {
+    /** آینه‌ی سروری `User.plan` (هرگز plan مشتق/محاسبه‌شده — §۲۴). */
+    plan: AdminPlan
+    entitlement: AdminBillingEntitlementView | null
+    latestPayment: AdminBillingPaymentView | null
+    /** خطاهای عملیاتی همین دامنه (feature="billing") — بدون stack، همان redaction فاز ۲. */
+    errorLogs: AdminErrorLogView[]
+}
+
+/** کلاینت read-only موردنیاز نمای بیلیینگ (تزریق‌پذیر — الگوی AdminAiUsageClient). */
+export interface AdminBillingClient {
+    user: { findUnique: (args: unknown) => Promise<unknown> }
+    entitlement: { findUnique: (args: unknown) => Promise<unknown> }
+    paymentOrder: { findFirst: (args: unknown) => Promise<unknown> }
+    errorLog: {
+        findMany: (args: unknown) => Promise<unknown[]>
+        count: (args: unknown) => Promise<number>
+    }
+}
+
+export interface AdminBillingOptions {
+    /**
+     * آینه‌ی `User.plan` که caller از قبل خوانده است (مثل getUserDetail) — تا read تکراری نباشد.
+     * اگر تعریف نشده باشد، همین تابع خودش ردیف کاربر را می‌خواند (و user ناموجود → USER_NOT_FOUND).
+     */
+    plan?: string | null
+    prisma?: AdminBillingClient
+    now?: Date
+}
+
+/** حداکثر خطای بیلیینگ نمایش‌دادهشده در summary — bounded (الگوی recentErrors). */
+export const ADMIN_BILLING_ERROR_LIMIT = 5
+
+/** مقدار ماسک‌شده — هرگز مقدار خام authority/reference. */
+const MASKED_PREFIX = "••••"
+
+/**
+ * maskProviderReference — ماسک کردن شناسه‌ی عملیاتی provider (§۲۴: «masked provider reference»).
+ *
+ * - فقط **۴ کاراکتر آخر** حفظ می‌شود (`••••1234`) و بقیه حذف می‌شود.
+ * - مقدار کوتاه/خالی (≤ ۴ کاراکتر) **کامل** پوشانده می‌شود؛ چون نمایش آخرین ۴ کاراکتر
+ *   در آن حالت معادل افشای کل مقدار است.
+ * - مقادیر غیررشته/null → null (بدون ساخت مقدار جعلی).
+ * Pure/deterministic — بدون I/O.
+ */
+export function maskProviderReference(reference: string | null | undefined): string | null {
+    if (typeof reference !== "string") return null
+    const value = reference.trim()
+    if (value.length === 0) return null
+    if (value.length <= 4) return MASKED_PREFIX
+    return `${MASKED_PREFIX}${value.slice(-4)}`
+}
+
+/** projection مستقل entitlement — ردیف نامعتبر/ناقص → null (بدون افشای محتوا). */
+function toAdminBillingEntitlementView(row: unknown): AdminBillingEntitlementView | null {
+    try {
+        const r = row as Record<string, unknown> | null
+        if (r === null || typeof r !== "object") return null
+        if (typeof r.status !== "string" || typeof r.provider !== "string") return null
+        if (typeof r.planCode !== "string") return null
+        if (!(r.currentPeriodStart instanceof Date) || !(r.currentPeriodEnd instanceof Date)) return null
+        return {
+            status: r.status,
+            planCode: r.planCode,
+            provider: r.provider,
+            currentPeriodStart: r.currentPeriodStart.toISOString(),
+            currentPeriodEnd: r.currentPeriodEnd.toISOString(),
+        }
+    } catch {
+        return null
+    }
+}
+
+/** projection مستقل آخرین سفارش — هیچ فیلد حساسی وارد DTO نمی‌شود (allowlist صریح). */
+function toAdminBillingPaymentView(row: unknown): AdminBillingPaymentView | null {
+    try {
+        const r = row as Record<string, unknown> | null
+        if (r === null || typeof r !== "object") return null
+        if (typeof r.status !== "string" || typeof r.provider !== "string") return null
+        if (typeof r.amount !== "number" || typeof r.currency !== "string") return null
+        if (typeof r.entitlementDays !== "number") return null
+        if (!(r.createdAt instanceof Date)) return null
+        return {
+            status: r.status,
+            provider: r.provider,
+            amount: r.amount,
+            currency: r.currency,
+            entitlementDays: r.entitlementDays,
+            createdAt: r.createdAt.toISOString(),
+            paidAt: r.paidAt instanceof Date ? r.paidAt.toISOString() : null,
+            providerReferenceMasked: maskProviderReference(
+                typeof r.providerReference === "string" ? r.providerReference : null,
+            ),
+        }
+    } catch {
+        return null
+    }
+}
+
+/**
+ * getAdminBillingSummary — نمای read-only بیلیینگ یک کاربر (فاز ۵ §۲۴).
+ *
+ * - user ناموجود → 404 USER_NOT_FOUND (fail-closed؛ همان قرارداد getUserDetail).
+ * - سه بخش مستقل‌اند و شکست هر بخش فقط همان بخش را null/خالی می‌کند (§۱۲):
+ *   entitlement · latestPayment · errorLogs (feature="billing").
+ * - فقط read؛ هیچ mutation روی entitlement/plan/سفارش و هیچ effective-plan resolve.
+ */
+export async function getAdminBillingSummary(
+    userId: number,
+    options: AdminBillingOptions = {},
+): Promise<AdminBillingSummary> {
+    const client = options.prisma ?? makeDefaultAdminClient()
+    const now = isValidDate(options.now) ? options.now : new Date()
+
+    // آینه‌ی سروری plan — مقدار نامعتبر/غایب → FREE (هم‌قرارداد getUserDetail).
+    // مسیر getUserDetail پلن را از ردیف اصلی پاس می‌دهد تا این بخش هیچ read اضافه و هیچ
+    // نقطه‌ی شکست مضاعفی نداشته باشد؛ فراخوان مستقل، خودش ردیف را می‌خواند.
+    let plan: AdminPlan
+    if (options.plan === undefined) {
+        const userRow = (await client.user.findUnique({
+            where: { id: userId },
+            select: { plan: true },
+        })) as Record<string, unknown> | null
+        if (userRow === null) throw new UserNotFoundError()
+        plan = (typeof userRow.plan === "string" ? userRow.plan : "FREE") as AdminPlan
+    } else {
+        plan = (typeof options.plan === "string" ? options.plan : "FREE") as AdminPlan
+    }
+
+    let entitlement: AdminBillingEntitlementView | null = null
+    try {
+        entitlement = toAdminBillingEntitlementView(
+            await client.entitlement.findUnique({
+                where: { userId },
+                select: {
+                    status: true,
+                    planCode: true,
+                    provider: true,
+                    currentPeriodStart: true,
+                    currentPeriodEnd: true,
+                },
+            }),
+        )
+    } catch {
+        entitlement = null
+    }
+
+    let latestPayment: AdminBillingPaymentView | null = null
+    try {
+        latestPayment = toAdminBillingPaymentView(
+            await client.paymentOrder.findFirst({
+                where: { userId },
+                orderBy: { createdAt: "desc" },
+                select: {
+                    status: true,
+                    provider: true,
+                    amount: true,
+                    currency: true,
+                    entitlementDays: true,
+                    createdAt: true,
+                    paidAt: true,
+                    providerReference: true,
+                },
+            }),
+        )
+    } catch {
+        latestPayment = null
+    }
+
+    // ErrorLog بیلیینگ — از reader موجود فاز ۴ استفاده می‌شود (redaction/stack-free فاز ۲ حفظ می‌شود)
+    let errorLogs: AdminErrorLogView[] = []
+    try {
+        const billingErrors = await getAdminErrorLogs(
+            { userId, feature: "billing", page: 1, pageSize: ADMIN_BILLING_ERROR_LIMIT },
+            {
+                prisma: {
+                    errorLog: {
+                        findMany: client.errorLog.findMany,
+                        count: client.errorLog.count,
+                    },
+                },
+                now,
+            },
+        )
+        errorLogs = billingErrors.logs
+    } catch {
+        errorLogs = []
+    }
+
+    return { plan, entitlement, latestPayment, errorLogs }
+}
+
+// =====================================================================
+// ۱۰) Default admin client — یک factory مشترک برای خواننده‌های Step 6
 // =====================================================================
 
 function makeDefaultAdminClient() {
@@ -1041,6 +1296,13 @@ function makeDefaultAdminClient() {
             findUnique: (args: unknown) => real.user.findUnique(args as never),
             findMany: (args: unknown) => real.user.findMany(args as never),
             count: (args: unknown) => real.user.count(args as never),
+        },
+        // فاز ۵ — گام ۱۶: فقط خواندن برای نمای بیلیینگ (read-only)
+        entitlement: {
+            findUnique: (args: unknown) => real.entitlement.findUnique(args as never),
+        },
+        paymentOrder: {
+            findFirst: (args: unknown) => real.paymentOrder.findFirst(args as never),
         },
         aiUsage: {
             findUnique: (args: unknown) => real.aiUsage.findUnique(args as never),

@@ -25,7 +25,13 @@ import { getCurrentUser } from "./getCurrentUser"
 
 const SECRET = "unit-test-secret"
 const OTHER_SECRET = "another-secret"
-const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran" }
+const USER = {
+    id: 1,
+    username: "test",
+    email: "test@example.com",
+    timezone: "Asia/Tehran",
+    role: "USER",
+}
 
 const cookieWith = (token: string) => ({ value: token })
 
@@ -58,8 +64,47 @@ describe("getCurrentUser (M1 — auth vs infrastructure failures)", () => {
                 username: true,
                 email: true,
                 timezone: true,
+                role: true,
             }),
         })
+    })
+
+    it("returns role from the DB (Phase 4 — Step 3)", async () => {
+        await expect(getCurrentUser()).resolves.toMatchObject({ role: "USER" })
+
+        // DB lookup per request — role is only ever sourced from the DB select
+        expect(mocks.findUnique).toHaveBeenCalledWith(
+            expect.objectContaining({
+                select: expect.objectContaining({ role: true }),
+            }),
+        )
+    })
+
+    it("returns role=ADMIN when the DB row is ADMIN (Phase 4 — Step 3)", async () => {
+        mocks.findUnique.mockResolvedValue({ ...USER, role: "ADMIN" })
+
+        await expect(getCurrentUser()).resolves.toMatchObject({ role: "ADMIN" })
+    })
+
+    it("reflects a DB role change on the next request — no role cache (Phase 4 — Step 3)", async () => {
+        mocks.findUnique.mockResolvedValue({ ...USER, role: "USER" })
+        await expect(getCurrentUser()).resolves.toMatchObject({ role: "USER" })
+
+        // همان session/JWT، بدون هیچ cache — role فقط از DB هر بار خوانده می‌شود
+        mocks.findUnique.mockResolvedValue({ ...USER, role: "ADMIN" })
+        await expect(getCurrentUser()).resolves.toMatchObject({ role: "ADMIN" })
+        expect(mocks.findUnique).toHaveBeenCalledTimes(2)
+    })
+
+    it("never sources role from the JWT payload (JWT stays exactly {id, email})", async () => {
+        // توکن حاوی یک claim غیرمجاز role است — باید کاملاً نادیده گرفته شود؛
+        // مقدار برگشتی فقط از DB می‌آید
+        mocks.cookieToken.mockReturnValue(
+            cookieWith(jwt.sign({ id: 1, email: "test@example.com", role: "ADMIN" }, SECRET)),
+        )
+        mocks.findUnique.mockResolvedValue({ ...USER, role: "USER" })
+
+        await expect(getCurrentUser()).resolves.toMatchObject({ role: "USER" })
     })
 
     it("returns null (no DB call) when the session cookie is absent", async () => {

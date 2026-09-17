@@ -1,0 +1,1062 @@
+// فاز ۴ — Step 5 + Step 6: Admin Dashboard — read-only query foundation
+//
+// فقط read؛ هیچ mutation/reserve/complete/release/quota-change در این لایه مجاز نیست.
+// Authorization اینجا انجام نمی‌شود (requireAdmin در مرز route است) — duplication ممنوع.
+// Privacy: DTOهای allowlist-based (هرگز object spread از Prisma model)؛ password/hash/
+// JWT/cookie/secret/phone/raw AI prompt-response/payment هرگز برگردانده نمی‌شود.
+// منبع هر dataset فقط primitiveهای موجود فازهای قبلی است — هیچ AdminStats table/model،
+// cache یا persistent aggregate جدید ساخته نمی‌شود.
+//
+// Failure semantics (قرارداد Step 6، گزارش‌شده):
+//   - خواندنی‌های روی primitiveهای فاز ۲/۳ (activity, stats, active users) → fail-open
+//     (قرارداد قفل‌شده‌ی همان primitiveها حفظ می‌شود).
+//   - خواننده‌های جدید admin (searchUsers/getUserDetail/getUserAiUsage/getAdminErrorLogs/
+//     getAdminGlobalActivity) → fail-closed: خطای DB به route می‌رود → 500 مطابق §22
+//     (فهرست خالیِ فریبنده برای داشبورد عملیاتی مجاز نیست).
+//
+// Step 6 تصمیم تأییدشده (User ordering): User.createdAt وجود ندارد → ordering لیست
+// کاربران «id DESC» (tie-break deterministic با خود id — unique است)؛ بدون schema change.
+
+import { getPrisma } from "@/app/lib/getPrisma"
+import { UserNotFoundError } from "./errors"
+import { getMonthlyPeriod, resolvePlanPolicy } from "./planPolicy.service"
+import { listErrorLogs, getErrorStats } from "@/src/lib/observability/errorReporting"
+import {
+    listProductEvents,
+    getEventUsageStats,
+    type ProductEventQueryOptions,
+    type ProductEventView,
+} from "./productEvent.query"
+import { getActiveUserStats } from "./userActivity.service"
+
+// ---------- Shared bounds (الگوی productEvent.query: clamp سخت، بدون unbounded) ----------
+
+export const ADMIN_QUERY_MAX_PAGE_SIZE = 100
+export const ADMIN_QUERY_DEFAULT_PAGE_SIZE = 20
+/** پنجره‌ی پیش‌فرض list endpointها بدون from/to — مطابق الگوی ۷ روزه‌ی فاز ۲/۳ (bounded). */
+const ADMIN_DEFAULT_WINDOW_HOURS = 24 * 7
+
+function clampInt(value: number | undefined, min: number, max: number, fallback: number): number {
+    if (typeof value !== "number" || !Number.isFinite(value)) return fallback
+    const floored = Math.floor(value)
+    return Math.min(max, Math.max(min, floored))
+}
+
+function clampPage(page: number | undefined): number {
+    return clampInt(page, 1, Number.MAX_SAFE_INTEGER, 1)
+}
+
+function isValidDate(value: Date | undefined): value is Date {
+    return value instanceof Date && !Number.isNaN(value.getTime())
+}
+
+/** userId فیلتر اختیاری — فقط integer مثبت معتبر است (server-side identity). */
+function optionalUserId(value: unknown): number | undefined {
+    return typeof value === "number" && Number.isInteger(value) && value > 0
+        ? value
+        : undefined
+}
+
+// =====================================================================
+// ۲) Admin activity — ProductEvent (فاز ۳) + آمار رویداد
+// =====================================================================
+
+export interface AdminActivityView {
+    events: ProductEventView[]
+    page: number
+    pageSize: number
+    total: number
+}
+
+export interface AdminActivityInput {
+    /** فیلتر اختیاری کاربر — بدون آن، رویداد همه‌ی کاربران (via getEventUsageStats) */
+    userId?: number
+    eventName?: string
+    feature?: string
+    since?: Date
+    until?: Date
+    page?: number
+    /** ۱..۱۰۰ (پیش‌فرض ۲۰) — clamp سخت */
+    pageSize?: number
+}
+
+/**
+ * getAdminActivity — history رویدادهای ProductEvent یک کاربر برای Admin Dashboard.
+ * منبع: فقط listProductEvents (فاز ۳) — هیچ aggregation/query جدیدی روی ProductEvent.
+ * Fail-open با primitive زیرین (هرگز throw نمی‌کند). فقط read.
+ */
+export async function getAdminActivity(
+    input: AdminActivityInput = {},
+): Promise<AdminActivityView> {
+    const page = clampPage(input.page)
+    const pageSize = clampInt(
+        input.pageSize,
+        1,
+        ADMIN_QUERY_MAX_PAGE_SIZE,
+        ADMIN_QUERY_DEFAULT_PAGE_SIZE,
+    )
+    const userId = optionalUserId(input.userId)
+
+    // listProductEvents userId الزامی دارد؛ بدون فیلتر کاربر، خروجی تهی. آمار سراسری
+    // از getAdminActivityStats / getAdminGlobalActivity (پایین).
+    if (userId === undefined) return { events: [], page, pageSize, total: 0 }
+
+    return listProductEvents({
+        userId,
+        eventName: input.eventName,
+        feature: input.feature,
+        since: input.since,
+        until: input.until,
+        page,
+        pageSize,
+    })
+}
+
+export async function getAdminActivityStats(windowHours?: number) {
+    return getEventUsageStats({ windowHours })
+}
+
+// =====================================================================
+// ۳) Admin AI usage — AiUsage (quota) + AiUsageEvent (history)
+// =====================================================================
+
+/** DTO allowlist — هرگز model خام AiUsage برنمی‌گردد. */
+export interface AdminAiUsageView {
+    id: number
+    userId: number
+    periodType: string
+    periodStart: string
+    reservedUnits: number
+    consumedUnits: number
+}
+
+export interface AdminAiEventView {
+    id: number
+    requestId: string | null
+    userId: number
+    feature: string
+    model: string | null
+    units: number
+    status: string
+    attempts: number
+    failureCode: string | null
+    durationMs: number | null
+    createdAt: string // ISO UTC
+}
+
+export interface AdminAiUsageInput {
+    userId?: number
+    page?: number
+    /** ۱..۱۰۰ (پیش‌فرض ۲۰) — clamp سخت */
+    pageSize?: number
+}
+
+export interface AdminAiUsageResult {
+    quota: AdminAiUsageView[]
+    events: AdminAiEventView[]
+    page: number
+    pageSize: number
+    total: number
+}
+
+/** Client injection (الگوی productEvent.query / errorReporting فاز ۲ گام ۵). */
+export interface AdminAiUsageOptions {
+    prisma?: {
+        aiUsage: {
+            findMany: (args: unknown) => Promise<unknown[]>
+        }
+        aiUsageEvent: {
+            findMany: (args: unknown) => Promise<unknown[]>
+            count: (args: unknown) => Promise<number>
+        }
+    }
+    now?: Date
+    timeoutMs?: number
+}
+
+export const ADMIN_AI_QUERY_TIMEOUT_MS = 2000
+
+// getPrisma در ماژول‌لود import می‌شود ولی فقط داخل فراخوانی runtime استفاده می‌شود
+function getPrismaLate() {
+    return getPrisma()
+}
+
+function makeDefaultAiClient(): NonNullable<AdminAiUsageOptions["prisma"]> {
+    const real = getPrismaLate()
+    return {
+        aiUsage: {
+            findMany: (args) =>
+                real.aiUsage.findMany(args as Parameters<typeof real.aiUsage.findMany>[0]) as Promise<unknown[]>,
+        },
+        aiUsageEvent: {
+            findMany: (args) =>
+                real.aiUsageEvent.findMany(
+                    args as Parameters<typeof real.aiUsageEvent.findMany>[0],
+                ) as Promise<unknown[]>,
+            count: (args) =>
+                real.aiUsageEvent.count(args as Parameters<typeof real.aiUsageEvent.count>[0]) as Promise<number>,
+        },
+    }
+}
+
+async function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T | null> {
+    try {
+        return await Promise.race([
+            work,
+            new Promise<null>((resolve) => {
+                const t = setTimeout(() => resolve(null), timeoutMs)
+                if (typeof t.unref === "function") t.unref()
+            }),
+        ])
+    } catch {
+        return null
+    }
+}
+
+/** allowlist projection ردیف AiUsage — فیلدهای خارج از allowlist هرگز خارج نمی‌شوند. */
+function toAiUsageView(row: unknown): AdminAiUsageView | null {
+    try {
+        const r = row as Record<string, unknown>
+        if (typeof r.id !== "number" || typeof r.userId !== "number") return null
+        if (typeof r.periodType !== "string" || !(r.periodStart instanceof Date)) return null
+        return {
+            id: r.id,
+            userId: r.userId,
+            periodType: r.periodType,
+            periodStart: r.periodStart.toISOString(),
+            reservedUnits: typeof r.reservedUnits === "number" ? r.reservedUnits : 0,
+            consumedUnits: typeof r.consumedUnits === "number" ? r.consumedUnits : 0,
+        }
+    } catch {
+        return null
+    }
+}
+
+/** allowlist projection ردیف AiUsageEvent — بدون prompt/response/payload خام. */
+function toAiEventView(row: unknown): AdminAiEventView | null {
+    try {
+        const r = row as Record<string, unknown>
+        if (typeof r.id !== "number" || typeof r.userId !== "number") return null
+        if (typeof r.feature !== "string" || typeof r.status !== "string") return null
+        return {
+            id: r.id,
+            requestId: typeof r.requestId === "string" ? r.requestId : null,
+            userId: r.userId,
+            feature: r.feature,
+            model: typeof r.model === "string" ? r.model : null,
+            units: typeof r.units === "number" ? r.units : 0,
+            status: r.status,
+            attempts: typeof r.attempts === "number" ? r.attempts : 0,
+            failureCode: typeof r.failureCode === "string" ? r.failureCode : null,
+            durationMs: typeof r.durationMs === "number" ? r.durationMs : null,
+            createdAt:
+                r.createdAt instanceof Date
+                    ? r.createdAt.toISOString()
+                    : new Date(0).toISOString(),
+        }
+    } catch {
+        return null
+    }
+}
+
+/**
+ * getAdminAiUsage — quota/usage از AiUsage + history از AiUsageEvent.
+ * کاملاً read-only: فقط findMany/count — هیچ reserve/complete/release.
+ * Fail-open: شکست DB / timeout → نتیجه‌ی تهی با همان page/pageSize (هرگز throw).
+ * Ordering deterministic: createdAt DESC سپس id DESC (هر دو ستون واقعاً موجودند).
+ */
+export async function getAdminAiUsage(
+    input: AdminAiUsageInput = {},
+    options: AdminAiUsageOptions = {},
+): Promise<AdminAiUsageResult> {
+    const page = clampPage(input.page)
+    const pageSize = clampInt(
+        input.pageSize,
+        1,
+        ADMIN_QUERY_MAX_PAGE_SIZE,
+        ADMIN_QUERY_DEFAULT_PAGE_SIZE,
+    )
+    const userId = optionalUserId(input.userId)
+    const empty: AdminAiUsageResult = {
+        quota: [],
+        events: [],
+        page,
+        pageSize,
+        total: 0,
+    }
+
+    const client = options.prisma ?? (process.env.VITEST ? undefined : makeDefaultAiClient())
+    if (!client) return empty
+
+    const timeoutMs = options.timeoutMs ?? ADMIN_AI_QUERY_TIMEOUT_MS
+    const userWhere = userId !== undefined ? { userId } : {}
+    const orderBy = [{ createdAt: "desc" }, { id: "desc" }] as const
+
+    const [quotaRows, eventRows, total] = await Promise.all([
+        withTimeout(
+            client.aiUsage.findMany({
+                where: userWhere,
+                orderBy: [{ periodStart: "desc" }, { id: "desc" }],
+                take: ADMIN_QUERY_MAX_PAGE_SIZE,
+            }),
+            timeoutMs,
+        ),
+        withTimeout(
+            client.aiUsageEvent.findMany({
+                where: userWhere,
+                orderBy,
+                skip: (page - 1) * pageSize,
+                take: pageSize,
+            }),
+            timeoutMs,
+        ),
+        withTimeout(client.aiUsageEvent.count({ where: userWhere }), timeoutMs),
+    ])
+    if (quotaRows === null || eventRows === null || total === null) return empty
+
+    const quota: AdminAiUsageView[] = []
+    for (const row of quotaRows) {
+        const view = toAiUsageView(row)
+        if (view !== null) quota.push(view)
+    }
+    const events: AdminAiEventView[] = []
+    for (const row of eventRows) {
+        const view = toAiEventView(row)
+        if (view !== null) events.push(view)
+    }
+
+    return { quota, events, page, pageSize, total }
+}
+
+// =====================================================================
+// ۴) Admin errors — wrapper روی primitive موجود Phase 2 (redaction حفظ می‌شود)
+// =====================================================================
+
+export async function getAdminErrors(
+    input: Parameters<typeof listErrorLogs>[0] = {},
+    options: Parameters<typeof listErrorLogs>[1] = {},
+) {
+    // listErrorLogs خودش fail-open است، stack را حذف می‌کند و redaction فاز ۲ را اعمال کرده —
+    // این wrapper هیچ فیلد جدیدی اضافه نمی‌کند و هیچ data جدیدی expose نمی‌کند.
+    return listErrorLogs(input, options)
+}
+
+export async function getAdminErrorStats(
+    input: Parameters<typeof getErrorStats>[0] = {},
+    options: Parameters<typeof getErrorStats>[1] = {},
+) {
+    return getErrorStats(input, options)
+}
+
+// =====================================================================
+// ۵) Admin overview/metrics — widgetهای مستقل (§12)
+// =====================================================================
+
+export interface AdminAiQuotaWidget {
+    periodStart: string
+    reservedUnits: number
+    consumedUnits: number
+}
+
+export interface AdminOverviewOptions {
+    /** تزریق client شمارش active users (الگوی getActiveUserStats) */
+    prismaClient?: Parameters<typeof getActiveUserStats>[1]
+    /** تزریق client aggregate سهمیه AI برای widget aiQuota */
+    prisma?: {
+        aiUsage: { aggregate: (args: unknown) => Promise<unknown> }
+    }
+    now?: Date
+}
+
+/**
+ * getAdminOverview — چهار widget مستقل داشبورد (§12):
+ *   users    → getActiveUserStats (فاز ۳؛ User.lastSeenAt؛ fail-open zeros)
+ *   activity → getEventUsageStats (فاز ۳؛ ProductEvent؛ fail-open)
+ *   aiQuota  → aggregateAiUsage دوره‌ی جاری (خواندنی جدید؛ شکست → null = unavailable)
+ *   errors   → getErrorStats (فاز ۲؛ fail-open)
+ * شکست یک widget فقط همان widget را تحت تأثیر می‌گذارد؛ هیچ AdminStats/cache جدید.
+ */
+export async function getAdminOverview(options: AdminOverviewOptions = {}) {
+    const now = isValidDate(options.now) ? options.now : new Date()
+
+    // widget 1 — users (قرارداد fail-open فاز ۳ حفظ می‌شود)
+    const prismaClient =
+        options.prismaClient ??
+        (process.env.VITEST
+            ? undefined
+            : ({
+                  user: {
+                      count: (args: { where: { lastSeenAt: { gte: Date } } }) =>
+                          getPrismaLate().user.count(args),
+                  },
+              } as Parameters<typeof getActiveUserStats>[1]))
+    const users = prismaClient
+        ? await getActiveUserStats(now, prismaClient)
+        : { dau: 0, wau: 0, mau: 0 }
+
+    // widget 2 — activity (fail-open فاز ۳)
+    const activity = await getEventUsageStats({ windowHours: 24 }, { now })
+
+    // widget 3 — aiQuota (aggregate دوره‌ی جاری؛ فقط read؛ شکست → null)
+    let aiQuota: AdminAiQuotaWidget | null = null
+    try {
+        const aggregateClient =
+            options.prisma ?? (process.env.VITEST ? undefined : makeDefaultAdminClient())
+        if (aggregateClient) {
+            const periodStart = getMonthlyPeriod(now).periodStart
+            const agg = (await aggregateClient.aiUsage.aggregate({
+                where: { periodType: "MONTHLY", periodStart },
+                _sum: { reservedUnits: true, consumedUnits: true },
+            })) as { _sum?: Record<string, unknown> }
+            aiQuota = {
+                periodStart: periodStart.toISOString(),
+                reservedUnits:
+                    typeof agg._sum?.reservedUnits === "number" ? agg._sum.reservedUnits : 0,
+                consumedUnits:
+                    typeof agg._sum?.consumedUnits === "number" ? agg._sum.consumedUnits : 0,
+            }
+        }
+    } catch {
+        aiQuota = null // widget فقط خودش unavailable می‌شود (§12)
+    }
+
+    // widget 4 — errors (fail-open فاز ۲)
+    const errors = await getErrorStats({ windowHours: 24 }, { now })
+
+    return { users, activity, aiQuota, errors }
+}
+
+// =====================================================================
+// ۶) Admin users — search / detail (Step 6 — تصمیم تأییدشده: ordering «id DESC»)
+// =====================================================================
+
+export type AdminPlan = "FREE" | "PRO"
+export type AdminRole = "USER" | "ADMIN"
+
+/** email masking — فقط حروف اول local + *** + دامنه (Privacy §21). Pure/deterministic. */
+export function maskEmail(email: string): string {
+    const at = email.indexOf("@")
+    if (at <= 0) return "***"
+    const local = email.slice(0, at)
+    const visible = local.slice(0, Math.min(2, local.length))
+    return `${visible}***${email.slice(at)}`
+}
+
+export interface AdminUserView {
+    id: number
+    username: string
+    emailMasked: string
+    plan: AdminPlan
+    role: AdminRole
+    timezone: string
+    lastSeenAt: string | null
+}
+
+export interface SearchUsersInput {
+    /** id exact (عددی) / email exact (شامل @) / username prefix case-insensitive (§14) */
+    q?: string
+    plan?: AdminPlan
+    role?: AdminRole
+    page?: number
+    limit?: number
+    sort?: "id_asc" | "id_desc"
+}
+
+export interface AdminUsersOptions {
+    prisma?: {
+        user: {
+            findMany: (args: unknown) => Promise<unknown[]>
+            count: (args: unknown) => Promise<number>
+        }
+    }
+}
+
+function toAdminUserView(row: unknown): AdminUserView | null {
+    try {
+        const r = row as Record<string, unknown>
+        if (typeof r.id !== "number") return null
+        if (typeof r.username !== "string" || typeof r.email !== "string") return null
+        if (typeof r.plan !== "string" || typeof r.role !== "string") return null
+        if (typeof r.timezone !== "string") return null
+        return {
+            id: r.id,
+            username: r.username,
+            emailMasked: maskEmail(r.email),
+            plan: r.plan as AdminPlan,
+            role: r.role as AdminRole,
+            timezone: r.timezone,
+            lastSeenAt: r.lastSeenAt instanceof Date ? r.lastSeenAt.toISOString() : null,
+        }
+    } catch {
+        return null
+    }
+}
+
+function buildUserSearchWhere(input: SearchUsersInput): Record<string, unknown> {
+    const where: Record<string, unknown> = {}
+    const q = typeof input.q === "string" ? input.q.trim() : ""
+    if (q.length > 0) {
+        // §14 — جستجوی bounded: id exact / email exact / username prefix.
+        // جستجوی unbounded %term% استفاده نمی‌شود.
+        if (/^\d+$/.test(q)) {
+            where.id = Number(q)
+        } else if (q.includes("@")) {
+            where.email = q
+        } else {
+            where.username = { startsWith: q, mode: "insensitive" }
+        }
+    }
+    if (input.plan !== undefined) where.plan = input.plan
+    if (input.role !== undefined) where.role = input.role
+    return where
+}
+
+/**
+ * searchUsers — فهرست/جستجوی کاربران برای Admin.
+ * Ordering (تصمیم تأییدشده Step 6): «id DESC» (id unique → deterministic).
+ * select محدود (§20) + DTO allowlist + email masked. phone/password select نمی‌شوند.
+ * Fail-closed (§22): خطای DB propagate می‌شود → route → 500.
+ */
+export async function searchUsers(
+    input: SearchUsersInput = {},
+    options: AdminUsersOptions = {},
+): Promise<{ users: AdminUserView[]; page: number; pageSize: number; total: number }> {
+    const page = clampPage(input.page)
+    const limit = clampInt(input.limit, 1, ADMIN_QUERY_MAX_PAGE_SIZE, ADMIN_QUERY_DEFAULT_PAGE_SIZE)
+    const empty = { users: [] as AdminUserView[], page, pageSize: limit, total: 0 }
+
+    const client = options.prisma ?? (process.env.VITEST ? undefined : makeDefaultAdminClient())
+    if (!client) return empty
+
+    const where = buildUserSearchWhere(input)
+    const sortDir = input.sort === "id_asc" ? "asc" : "desc"
+
+    const [rows, total] = await Promise.all([
+        client.user.findMany({
+            where,
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                plan: true,
+                role: true,
+                timezone: true,
+                lastSeenAt: true,
+            },
+            orderBy: [{ id: sortDir }],
+            skip: (page - 1) * limit,
+            take: limit,
+        }),
+        client.user.count({ where }),
+    ])
+
+    const users: AdminUserView[] = []
+    for (const row of rows) {
+        const view = toAdminUserView(row)
+        if (view !== null) users.push(view)
+    }
+    return { users, page, pageSize: limit, total }
+}
+
+export interface AdminAiQuotaSummary {
+    plan: AdminPlan
+    periodType: string
+    periodStart: string
+    allowedUnits: number
+    reservedUnits: number
+    consumedUnits: number
+    utilization: number // 0..1
+}
+
+export interface AdminUserDetail {
+    user: AdminUserView
+    activitySummary: {
+        windowHours: number
+        totalEvents: number
+        byEventName: { eventName: string; count: number }[]
+    } | null
+    aiQuotaSummary: AdminAiQuotaSummary | null
+    recentErrors: AdminErrorLogView[]
+}
+
+export interface AdminDetailOptions {
+    prisma?: {
+        user: { findUnique: (args: unknown) => Promise<unknown> }
+        aiUsage: { findUnique: (args: unknown) => Promise<unknown> }
+        errorLog: {
+            findMany: (args: unknown) => Promise<unknown[]>
+            count: (args: unknown) => Promise<number>
+        }
+    }
+    /** تزریق client productEvent برای activity summary (الگوی getEventUsageStats) */
+    productEventOptions?: ProductEventQueryOptions
+    now?: Date
+}
+
+/**
+ * getUserDetail — safe identity + summaryها (§15).
+ * خود user fetch: fail-closed (not-found → 404 USER_NOT_FOUND؛ خطای DB → 500).
+ * هر summary مستقل است و شکستش فقط همان بخش را null/خالی می‌کند (§12).
+ * هیچ phone/password/image	select یا serialize نمی‌شود؛ email فقط masked.
+ */
+export async function getUserDetail(
+    userId: number,
+    options: AdminDetailOptions = {},
+): Promise<AdminUserDetail> {
+    const client = options.prisma ?? makeDefaultAdminClient()
+    const now = isValidDate(options.now) ? options.now : new Date()
+
+    const row = (await client.user.findUnique({
+        where: { id: userId },
+        select: {
+            id: true,
+            username: true,
+            email: true,
+            plan: true,
+            role: true,
+            timezone: true,
+            lastSeenAt: true,
+        },
+    })) as Record<string, unknown> | null
+    const user = row === null ? null : toAdminUserView(row)
+    if (user === null) throw new UserNotFoundError()
+
+    // summary 1 — activity (ProductEvent؛ fail-open primitive فاز ۳؛ شکست → null)
+    let activitySummary: AdminUserDetail["activitySummary"] = null
+    try {
+        const stats = await getEventUsageStats(
+            { userId, windowHours: 24 * 7 },
+            { now, ...(options.productEventOptions ?? {}) },
+        )
+        activitySummary = {
+            windowHours: stats.windowHours,
+            totalEvents: stats.totalInWindow,
+            byEventName: stats.byEventName,
+        }
+    } catch {
+        activitySummary = null
+    }
+
+    // summary 2 — AI quota دوره‌ی جاری (read؛ شکست → null)
+    let aiQuotaSummary: AdminAiQuotaSummary | null = null
+    try {
+        const plan = (typeof row?.plan === "string" ? row.plan : "FREE") as AdminPlan
+        const policy = resolvePlanPolicy({ plan })
+        const periodStart = getMonthlyPeriod(now).periodStart
+        const quotaRow = (await client.aiUsage.findUnique({
+            where: { userId_periodType_periodStart: { userId, periodType: "MONTHLY", periodStart } },
+            select: { reservedUnits: true, consumedUnits: true },
+        })) as Record<string, unknown> | null
+        const reserved =
+            quotaRow && typeof quotaRow.reservedUnits === "number" ? quotaRow.reservedUnits : 0
+        const consumed =
+            quotaRow && typeof quotaRow.consumedUnits === "number" ? quotaRow.consumedUnits : 0
+        aiQuotaSummary = {
+            plan,
+            periodType: "MONTHLY",
+            periodStart: periodStart.toISOString(),
+            allowedUnits: policy.allowedUnits,
+            reservedUnits: reserved,
+            consumedUnits: consumed,
+            utilization: policy.allowedUnits > 0 ? Math.min(1, consumed / policy.allowedUnits) : 0,
+        }
+    } catch {
+        aiQuotaSummary = null
+    }
+
+    // summary 3 — recent errors (حداکثر ۵؛ شکست → خالی)
+    let recentErrors: AdminErrorLogView[] = []
+    try {
+        const errs = await getAdminErrorLogs(
+            { userId, page: 1, pageSize: 5 },
+            {
+                prisma: {
+                    errorLog: {
+                        findMany: client.errorLog.findMany,
+                        count: client.errorLog.count,
+                    },
+                },
+                now,
+            },
+        )
+        recentErrors = errs.logs
+    } catch {
+        recentErrors = []
+    }
+
+    return { user, activitySummary, aiQuotaSummary, recentErrors }
+}
+
+export interface GetUserAiUsageInput {
+    /** فقط MONTHLY در schema واقعی وجود دارد (AiUsagePeriodType) */
+    period?: "MONTHLY"
+    status?: "RESERVED" | "CONSUMED" | "RELEASED"
+    page?: number
+    limit?: number
+}
+
+export interface AdminAiUsageClient {
+    user: { findUnique: (args: unknown) => Promise<unknown> }
+    aiUsage: { findUnique: (args: unknown) => Promise<unknown> }
+    aiUsageEvent: {
+        findMany: (args: unknown) => Promise<unknown[]>
+        count: (args: unknown) => Promise<number>
+    }
+}
+
+/**
+ * getUserAiUsage — نمای §16 برای یک کاربر: plan + دوره‌ی جاری + allowed/reserved/consumed
+ * + utilization + recent usage events. کاملاً read-only (فقط findUnique/findMany/count —
+ * هیچ reserve/complete/release). Fail-closed؛ user ناموجود → 404 USER_NOT_FOUND.
+ * نبودن ردیف AiUsage برای دوره‌ی جاری حالت عادی است → صفرها (نه failure).
+ */
+export async function getUserAiUsage(
+    userId: number,
+    input: GetUserAiUsageInput = {},
+    options: { prisma?: AdminAiUsageClient; now?: Date } = {},
+): Promise<{
+    plan: AdminPlan
+    period: { periodType: string; periodStart: string }
+    allowedUnits: number
+    reservedUnits: number
+    consumedUnits: number
+    utilization: number
+    events: AdminAiEventView[]
+    page: number
+    pageSize: number
+    total: number
+}> {
+    const page = clampPage(input.page)
+    const limit = clampInt(input.limit, 1, ADMIN_QUERY_MAX_PAGE_SIZE, ADMIN_QUERY_DEFAULT_PAGE_SIZE)
+    const now = isValidDate(options.now) ? options.now : new Date()
+
+    const client = options.prisma ?? makeDefaultAdminClient()
+
+    const userRow = (await client.user.findUnique({
+        where: { id: userId },
+        select: { plan: true },
+    })) as { plan?: unknown } | null
+    if (userRow === null || typeof userRow.plan !== "string") throw new UserNotFoundError()
+    const plan = userRow.plan as AdminPlan
+
+    const policy = resolvePlanPolicy({ plan })
+    const periodStart = getMonthlyPeriod(now).periodStart
+
+    const quotaRow = (await client.aiUsage.findUnique({
+        where: { userId_periodType_periodStart: { userId, periodType: "MONTHLY", periodStart } },
+        select: { reservedUnits: true, consumedUnits: true },
+    })) as Record<string, unknown> | null
+    const reserved =
+        quotaRow && typeof quotaRow.reservedUnits === "number" ? quotaRow.reservedUnits : 0
+    const consumed =
+        quotaRow && typeof quotaRow.consumedUnits === "number" ? quotaRow.consumedUnits : 0
+
+    const eventWhere: Record<string, unknown> = { userId }
+    if (input.status !== undefined) eventWhere.status = input.status
+
+    const [rows, total] = await Promise.all([
+        client.aiUsageEvent.findMany({
+            where: eventWhere,
+            select: {
+                id: true,
+                requestId: true,
+                userId: true,
+                feature: true,
+                model: true,
+                units: true,
+                status: true,
+                attempts: true,
+                failureCode: true,
+                durationMs: true,
+                createdAt: true,
+            },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            skip: (page - 1) * limit,
+            take: limit,
+        }),
+        client.aiUsageEvent.count({ where: eventWhere }),
+    ])
+
+    const events: AdminAiEventView[] = []
+    for (const row of rows) {
+        const view = toAiEventView(row)
+        if (view !== null) events.push(view)
+    }
+
+    return {
+        plan,
+        period: { periodType: "MONTHLY", periodStart: periodStart.toISOString() },
+        allowedUnits: policy.allowedUnits,
+        reservedUnits: reserved,
+        consumedUnits: consumed,
+        utilization: policy.allowedUnits > 0 ? Math.min(1, consumed / policy.allowedUnits) : 0,
+        events,
+        page,
+        pageSize: limit,
+        total,
+    }
+}
+
+// =====================================================================
+// ۷) Admin ErrorLog reader — فیلترهای §10 که primitive فاز ۲ پوشش نمی‌دهد
+// =====================================================================
+
+export interface AdminErrorLogView {
+    id: string
+    requestId: string | null
+    userId: number | null
+    endpoint: string
+    feature: string | null
+    errorCode: string
+    statusCode: number
+    category: string
+    severity: string
+    message: string
+    metadata?: Record<string, unknown>
+    environment: string | null
+    createdAt: string
+    // stack عمداً حذف می‌شود — همان قرارداد ErrorLogView فاز ۲
+}
+
+export interface AdminErrorLogsInput {
+    userId?: number
+    errorCode?: string
+    category?: string
+    severity?: string
+    endpoint?: string
+    from?: Date
+    to?: Date
+    page?: number
+    pageSize?: number
+}
+
+export interface AdminErrorLogsOptions {
+    prisma?: {
+        errorLog: {
+            findMany: (args: unknown) => Promise<unknown[]>
+            count: (args: unknown) => Promise<number>
+        }
+    }
+    now?: Date
+}
+
+/**
+ * toAdminErrorLogView — projection با همان فیلدهای امن ErrorLogView فاز ۲ (بدون stack).
+ * داده‌ها در زمان write با redaction فاز ۲ sanitize شده‌اند؛ این projection هیچ فیلد
+ * جدیدی expose نمی‌کند → redaction bypass نمی‌شود.
+ */
+function toAdminErrorLogView(row: unknown): AdminErrorLogView | null {
+    try {
+        const r = row as Record<string, unknown>
+        if (typeof r.id !== "string" || typeof r.endpoint !== "string") return null
+        if (
+            typeof r.errorCode !== "string" ||
+            typeof r.category !== "string" ||
+            typeof r.severity !== "string" ||
+            typeof r.message !== "string"
+        )
+            return null
+        return {
+            id: r.id,
+            requestId: typeof r.requestId === "string" ? r.requestId : null,
+            userId: typeof r.userId === "number" ? r.userId : null,
+            endpoint: r.endpoint,
+            feature: typeof r.feature === "string" ? r.feature : null,
+            errorCode: r.errorCode,
+            statusCode: typeof r.statusCode === "number" ? r.statusCode : 0,
+            category: r.category,
+            severity: r.severity,
+            message: r.message,
+            metadata:
+                r.metadata !== null &&
+                typeof r.metadata === "object" &&
+                !Array.isArray(r.metadata)
+                    ? (r.metadata as Record<string, unknown>)
+                    : undefined,
+            environment: typeof r.environment === "string" ? r.environment : null,
+            createdAt:
+                r.createdAt instanceof Date
+                    ? r.createdAt.toISOString()
+                    : new Date(0).toISOString(),
+        }
+    } catch {
+        return null
+    }
+}
+
+/**
+ * getAdminErrorLogs — خواننده‌ی bounded ErrorLog با فیلترهای blueprint §10
+ * (code/category/severity/endpoint/userId/from/to/page/limit).
+ * چرا primitive فاز ۲ مستقیماً استفاده نشد: listErrorLogs فقط
+ * severity/errorCode/feature/پنجره را پشتیبانی می‌کند؛ فیلترهای userId/category/endpoint
+ * در قرارداد آن نیست (§9: بخش وابسته بر اساس قرارداد واقعی پیاده و گزارش می‌شود).
+ * redaction حفظ شده (write-time) + projection بدون stack. Fail-closed (§22).
+ */
+export async function getAdminErrorLogs(
+    input: AdminErrorLogsInput = {},
+    options: AdminErrorLogsOptions = {},
+): Promise<{ logs: AdminErrorLogView[]; page: number; pageSize: number; total: number }> {
+    const page = clampPage(input.page)
+    const pageSize = clampInt(input.pageSize, 1, ADMIN_QUERY_MAX_PAGE_SIZE, ADMIN_QUERY_DEFAULT_PAGE_SIZE)
+    const now = isValidDate(options.now) ? options.now : new Date()
+    const to = isValidDate(input.to) ? input.to : now
+    const from = isValidDate(input.from)
+        ? input.from
+        : new Date(to.getTime() - ADMIN_DEFAULT_WINDOW_HOURS * 60 * 60 * 1000)
+
+    const where: Record<string, unknown> = { createdAt: { gte: from, lte: to } }
+    const userId = optionalUserId(input.userId)
+    if (userId !== undefined) where.userId = userId
+    for (const [key, value] of [
+        ["errorCode", input.errorCode],
+        ["category", input.category],
+        ["severity", input.severity],
+        ["endpoint", input.endpoint],
+    ] as const) {
+        if (typeof value === "string" && value.length > 0) where[key] = value
+    }
+
+    const client = options.prisma ?? makeDefaultAdminClient()
+    const [rows, total] = await Promise.all([
+        client.errorLog.findMany({
+            where,
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            skip: (page - 1) * pageSize,
+            take: pageSize,
+        }),
+        client.errorLog.count({ where }),
+    ])
+
+    const logs: AdminErrorLogView[] = []
+    for (const row of rows) {
+        const view = toAdminErrorLogView(row)
+        if (view !== null) logs.push(view)
+    }
+    return { logs, page, pageSize, total }
+}
+
+// =====================================================================
+// ۸) Admin global activity — ProductEvent برای همه‌ی کاربران
+// =====================================================================
+
+export interface AdminGlobalActivityInput {
+    eventName?: string
+    since?: Date
+    until?: Date
+    page?: number
+    pageSize?: number
+}
+
+export interface AdminGlobalActivityOptions {
+    prisma?: {
+        productEvent: {
+            findMany: (args: unknown) => Promise<unknown[]>
+            count: (args: unknown) => Promise<number>
+        }
+    }
+    now?: Date
+}
+
+/** projection امن — همان شکل ProductEventView فاز ۳ (properties همان JSON ذخیره‌شده). */
+function toGlobalEventView(row: unknown): ProductEventView | null {
+    try {
+        const r = row as Record<string, unknown>
+        if (typeof r.id !== "string" || typeof r.eventName !== "string") return null
+        if (typeof r.userId !== "number") return null
+        return {
+            id: r.id,
+            userId: r.userId,
+            requestId: typeof r.requestId === "string" ? r.requestId : null,
+            eventName: r.eventName,
+            feature: typeof r.feature === "string" ? r.feature : null,
+            properties:
+                r.properties !== null &&
+                typeof r.properties === "object" &&
+                !Array.isArray(r.properties)
+                    ? (r.properties as Record<string, unknown>)
+                    : null,
+            createdAt:
+                r.createdAt instanceof Date
+                    ? r.createdAt.toISOString()
+                    : typeof r.createdAt === "string"
+                      ? r.createdAt
+                      : new Date(0).toISOString(),
+        }
+    } catch {
+        return null
+    }
+}
+
+/**
+ * getAdminGlobalActivity — فهرست سراسری ProductEvent برای Admin.
+ * چرا listProductEvents مستقیماً استفاده نشد: قرارداد قفل‌شده‌ی فاز ۳ آن per-user است
+ * (userId الزامی)؛ نمای سراسری blueprint §10 نیازمند خواننده‌ی bounded بدون userId است.
+ * Ordering: createdAt DESC, id DESC (هر دو ستون واقعاً موجودند — §11).
+ * پنجره‌ی پیش‌فرض ۷ روز (bounded) — index [createdAt]. Fail-closed (§22).
+ */
+export async function getAdminGlobalActivity(
+    input: AdminGlobalActivityInput = {},
+    options: AdminGlobalActivityOptions = {},
+): Promise<AdminActivityView> {
+    const page = clampPage(input.page)
+    const pageSize = clampInt(input.pageSize, 1, ADMIN_QUERY_MAX_PAGE_SIZE, ADMIN_QUERY_DEFAULT_PAGE_SIZE)
+    const now = isValidDate(options.now) ? options.now : new Date()
+    const until = isValidDate(input.until) ? input.until : now
+    const since = isValidDate(input.since)
+        ? input.since
+        : new Date(until.getTime() - ADMIN_DEFAULT_WINDOW_HOURS * 60 * 60 * 1000)
+
+    const where: Record<string, unknown> = { createdAt: { gte: since, lte: until } }
+    if (typeof input.eventName === "string" && input.eventName.length > 0) {
+        where.eventName = input.eventName
+    }
+
+    const client = options.prisma ?? makeDefaultAdminClient()
+    const [rows, total] = await Promise.all([
+        client.productEvent.findMany({
+            where,
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            skip: (page - 1) * pageSize,
+            take: pageSize,
+        }),
+        client.productEvent.count({ where }),
+    ])
+
+    const events: ProductEventView[] = []
+    for (const row of rows) {
+        const view = toGlobalEventView(row)
+        if (view !== null) events.push(view)
+    }
+    return { events, page, pageSize, total }
+}
+
+// =====================================================================
+// ۹) Default admin client — یک factory مشترک برای خواننده‌های Step 6
+// =====================================================================
+
+function makeDefaultAdminClient() {
+    const real = getPrismaLate()
+    return {
+        user: {
+            findUnique: (args: unknown) => real.user.findUnique(args as never),
+            findMany: (args: unknown) => real.user.findMany(args as never),
+            count: (args: unknown) => real.user.count(args as never),
+        },
+        aiUsage: {
+            findUnique: (args: unknown) => real.aiUsage.findUnique(args as never),
+            aggregate: (args: unknown) => real.aiUsage.aggregate(args as never),
+        },
+        aiUsageEvent: {
+            findMany: (args: unknown) => real.aiUsageEvent.findMany(args as never),
+            count: (args: unknown) => real.aiUsageEvent.count(args as never),
+        },
+        errorLog: {
+            findMany: (args: unknown) => real.errorLog.findMany(args as never),
+            count: (args: unknown) => real.errorLog.count(args as never),
+        },
+        productEvent: {
+            findMany: (args: unknown) => real.productEvent.findMany(args as never),
+            count: (args: unknown) => real.productEvent.count(args as never),
+        },
+    }
+}

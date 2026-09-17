@@ -99,6 +99,9 @@ export async function getCurrentUser(){
 
                 // فاز ۱ — plan برای planPolicy (resolve سهمیه ماهانه AI؛ سند §5)
                 plan:true,
+                // فاز ۴ — role از DB در هر request خوانده می‌شود؛ هرگز داخل JWT نمی‌رود
+                // (revocation فوری در request بعدی؛ سند Phase 4 «Role Model»)
+                role:true,
 
             }
 

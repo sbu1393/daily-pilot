@@ -20,6 +20,10 @@
 // گام ۱۰ (checkout): دو کلید سروری دیگر به همین ماژول اضافه شد — `BILLING_ORDER_TTL_MS`
 // (`orderTtlMs`) و `BILLING_ZARINPAL_DESCRIPTION` (`zarinpal.description`). متن/عدد آن‌ها هنوز
 // هیچ‌جا hard-code نمی‌شود و هیچ secretی log/return نمی‌شود.
+//
+// گام ۱۱ (callback): دو مقصد ثابت ریدایرکت مرورگر اضافه شد — `BILLING_RESULT_URL_SUCCESS` و
+// `BILLING_RESULT_URL_FAILURE` (`resultUrls`). هر دو الزامی‌اند و فقط از config سروری می‌آیند
+// (مطلق http(s)) تا هیچ مقصدی از query param کلاینت ساخته نشود — بدون open redirect (سند §11/§33).
 
 import type { UserPlan } from "@prisma/client"
 
@@ -60,6 +64,15 @@ export interface ZarinpalBillingConfig {
     readonly timeoutMs: number
 }
 
+/**
+ * گام ۱۱ — مقصدهای ثابت نتیجه‌ی پرداخت (browser-facing). این‌ها deployment config هستند و
+ * مرورگر کاربر پس از callback فقط به همین دو URL هدایت می‌شود؛ هیچ ورودی کلاینت در آن دخالت ندارد.
+ */
+export interface BillingResultUrls {
+    readonly success: string
+    readonly failure: string
+}
+
 export interface BillingConfig {
     readonly provider: BillingProviderId
     /**
@@ -69,6 +82,8 @@ export interface BillingConfig {
     readonly orderTtlMs: number
     readonly pro: BillingProductConfig
     readonly zarinpal: ZarinpalBillingConfig
+    /** گام ۱۱ — مقصدهای ریدایرکت callback؛ الزامی و فقط سرور-محور (سند §11). */
+    readonly resultUrls: BillingResultUrls
 }
 
 /** منبع env — تزریق‌پذیر تا resolver خالص و بدون دست‌زدن به env واقعی قابل تست باشد. */
@@ -92,6 +107,8 @@ export const BILLING_ENV = {
     zarinpalDescription: "BILLING_ZARINPAL_DESCRIPTION",
     providerTimeoutMs: "BILLING_PROVIDER_TIMEOUT_MS",
     orderTtlMs: "BILLING_ORDER_TTL_MS",
+    resultUrlSuccess: "BILLING_RESULT_URL_SUCCESS",
+    resultUrlFailure: "BILLING_RESULT_URL_FAILURE",
 } as const
 
 /** مقادیر فنی پیش‌فرض (نه business value) — هم‌سبک با AI_TIMEOUT_MS در analyzeTask.ts. */
@@ -196,6 +213,11 @@ export function resolveBillingConfig(env: BillingEnvSource): BillingConfig {
             callbackUrl: httpUrl(env, BILLING_ENV.callbackUrl),
             description: requiredString(env, BILLING_ENV.zarinpalDescription),
             timeoutMs: providerTimeoutMs(env),
+        },
+        // مقصدهای ریدایرکت callback: هر دو الزامی و مطلق http(s) — بدون default حدسی (سند §11).
+        resultUrls: {
+            success: httpUrl(env, BILLING_ENV.resultUrlSuccess),
+            failure: httpUrl(env, BILLING_ENV.resultUrlFailure),
         },
     }
 }

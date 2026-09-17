@@ -104,6 +104,37 @@ describe("normalizeError — quota/provider mapping (Phase 1 taxonomy §6)", () 
     })
 })
 
+describe("normalizeError — billing/entitlement taxonomy (Phase 5 §20/§21 — Step 14)", () => {
+    const CASES: Array<[string, number, string, string]> = [
+        ["PAYMENT_PROVIDER_UNAVAILABLE", 503, "EXTERNAL_SERVICE", "ERROR"],
+        ["PAYMENT_PROVIDER_REJECTED", 503, "EXTERNAL_SERVICE", "ERROR"],
+        ["PAYMENT_PROVIDER_INVALID_RESPONSE", 503, "EXTERNAL_SERVICE", "ERROR"],
+        ["PAYMENT_STATE_UNRESOLVED", 503, "EXTERNAL_SERVICE", "ERROR"],
+        ["PAYMENT_VERIFICATION_FAILED", 402, "EXTERNAL_SERVICE", "ERROR"],
+        ["PAYMENT_INVALID_AMOUNT", 409, "CONFLICT", "CRITICAL"],
+        ["PAYMENT_CONFIGURATION_ERROR", 500, "INTERNAL", "CRITICAL"],
+        ["ENTITLEMENT_CONFLICT", 409, "CONFLICT", "WARNING"],
+        ["PAYMENT_IDEMPOTENCY_CONFLICT", 409, "CONFLICT", "INFO"],
+        ["PAYMENT_NOT_FOUND", 404, "NOT_FOUND", "INFO"],
+    ]
+
+    for (const [code, status, category, severity] of CASES) {
+        it(`${code} → ${category}/${severity} with ${status} (no INTERNAL fallback)`, () => {
+            const out = normalizeError(new ServiceError(status, code, "safe message"))
+
+            expect(out.errorCode).toBe(code)
+            expect(out.statusCode).toBe(status)
+            expect(out.category).toBe(category)
+            expect(out.severity).toBe(severity)
+        })
+    }
+
+    it("keeps the billing message safe and never derives it from provider details", () => {
+        const out = normalizeError(new ServiceError(503, "PAYMENT_PROVIDER_UNAVAILABLE", "سرویس پرداخت در دسترس نیست"))
+        expect(out.safeMessage).toBe("سرویس پرداخت در دسترس نیست")
+    })
+})
+
 describe("normalizeError — Prisma mapping (duck-typed, §9.11 boundary)", () => {
     it("P2002 → CONFLICT/CONFLICT/WARNING/409 with prismaCode metadata", () => {
         const out = normalizeError({ code: "P2002", message: "Unique constraint failed" })

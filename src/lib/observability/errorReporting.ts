@@ -128,7 +128,6 @@ function makeDefaultClient(): ReportingOptions["prisma"] {
             count: (args) =>
                 real.count(args as Parameters<typeof real.count>[0]) as Promise<number>,
             groupBy: (args) =>
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 real.groupBy(args as any) as Promise<unknown[]>,
         },
     }

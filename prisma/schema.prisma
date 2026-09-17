@@ -29,6 +29,12 @@ enum UserPlan {
   PRO
 }
 
+// فاز ۴ — نقش کاربر؛ کاملاً مستقل از UserPlan (Role ≠ Plan، سند §Locked)
+enum UserRole {
+  USER
+  ADMIN
+}
+
 enum TaskEventType {
   CREATED
   ANALYZED
@@ -63,6 +69,8 @@ model User {
   locale     String      @default("fa")
   calendar   CalendarType @default(JALALI)
   plan       UserPlan    @default(FREE)
+  // فاز ۴ — role از DB خوانده می‌شود (هرگز داخل JWT نمی‌رود؛ revocation فوری)
+  role       UserRole    @default(USER)
   lastSeenAt DateTime? // فاز ۱ — آخرین فعالیت احرازهویت‌شده (throttle 30 دقیقه)
   tasks      Task[]
   dailyPlans DailyPlan[]

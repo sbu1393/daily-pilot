@@ -8,6 +8,10 @@ import {
     toServiceErrorResponse,
     validationErrorResponse,
 } from "@/app/lib/apiResponse"
+import { createObservabilityContext } from "@/src/lib/observability/context"
+import { getPrisma } from "@/app/lib/getPrisma"
+import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
+import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 
 export async function POST(req: NextRequest) {
     try {
@@ -41,6 +45,24 @@ export async function POST(req: NextRequest) {
         }
 
         const user = await authenticate(email, password)
+
+        // فاز ۳ — گام ۷: auth.login_succeeded فقط بعد از موفقیت واقعی authentication،
+        // قبل از ساخت session (مرز موفقیت auth)؛ خارج از business transaction؛
+        // fail-open — هرگز نتیجه‌ی login را تغییر نمی‌دهد (سند §17).
+        try {
+            const context = createObservabilityContext("/api/auth/login", "auth")
+            context.userId = user.id
+            const prisma = getPrisma()
+            await touchAuthenticatedActivity(user.id, new Date(), prisma)
+            await recordProductEvent(
+                user.id,
+                "auth.login_succeeded",
+                undefined, // بدون properties (§8)
+                { requestId: context.requestId, endpoint: "/api/auth/login", feature: "auth" },
+            )
+        } catch {
+            // fail-open — analytics failure هرگز login را fail نمی‌کند
+        }
 
         const response = NextResponse.json(
             {

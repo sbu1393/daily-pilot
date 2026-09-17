@@ -9,6 +9,10 @@ import {
     unauthorizedResponse,
     validationErrorResponse,
 } from "@/app/lib/apiResponse"
+import { createObservabilityContext } from "@/src/lib/observability/context"
+import { getPrisma } from "@/app/lib/getPrisma"
+import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
+import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 
 function parseTaskId(raw: string): number | null {
     const id = Number(raw)
@@ -57,6 +61,23 @@ export async function DELETE(
 
         const { id: deletedId, summary } = await deleteTask(user.id, taskId)
 
+        // فاز ۳ — گام ۷: فقط بعد از delete موفق (not-found → مسیر error، بدون event/touch).
+        // خارج از business transaction؛ fail-open (§17).
+        try {
+            const context = createObservabilityContext("/api/tasks/[id]", "tasks")
+            context.userId = user.id
+            const prisma = getPrisma()
+            await touchAuthenticatedActivity(user.id, new Date(), prisma)
+            await recordProductEvent(
+                user.id,
+                "task.deleted",
+                { taskId: deletedId }, // فقط allowlist گام ۳
+                { requestId: context.requestId, endpoint: "/api/tasks/[id]", feature: "tasks" },
+            )
+        } catch {
+            // fail-open — analytics failure هرگز پاسخ را fail نمی‌کند
+        }
+
         return okResponse({ id: deletedId, summary }, { message: "تسک حذف شد" })
     } catch (error) {
         const mapped = toServiceErrorResponse(error)
@@ -89,7 +110,27 @@ export async function PATCH(
             return validationErrorResponse(parsed.error.flatten())
         }
 
-        const { task } = await updateTask(user.id, user.timezone, taskId, parsed.data)
+        const { task, changed, changedFields } = await updateTask(user.id, user.timezone, taskId, parsed.data)
+
+        // فاز ۳ — گام ۸: task.updated فقط برای mutation واقعی (changed === true).
+        // no-op → بدون event و بدون touch. خارج از business transaction؛ fail-open (§17).
+        if (changed) {
+            try {
+                const context = createObservabilityContext("/api/tasks/[id]", "tasks")
+                context.userId = user.id
+                const prisma = getPrisma()
+                await touchAuthenticatedActivity(user.id, new Date(), prisma)
+                await recordProductEvent(
+                    user.id,
+                    "task.updated",
+                    // فقط allowlist گام ۳: taskId + نام فیلدها؛ هرگز title/description/content (§8)
+                    { taskId, changedFields },
+                    { requestId: context.requestId, endpoint: "/api/tasks/[id]", feature: "tasks" },
+                )
+            } catch {
+                // fail-open — analytics failure هرگز پاسخ را fail نمی‌کند
+            }
+        }
 
         return okResponse(task, { message: "تسک به‌روزرسانی شد" })
     } catch (error) {

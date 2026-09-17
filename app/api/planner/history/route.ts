@@ -8,6 +8,10 @@ import {
     toServiceErrorResponse,
     unauthorizedResponse,
 } from "@/app/lib/apiResponse"
+import { createObservabilityContext } from "@/src/lib/observability/context"
+import { getPrisma } from "@/app/lib/getPrisma"
+import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
+import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 
 // GET /api/planner/history?from=2026-01-01&to=2026-01-31
 // کلیدهای روز صفر-پد هستند (canonical میلادی) → مقایسه‌ی رشته‌ای from/to درسته
@@ -31,6 +35,25 @@ export async function GET(req: NextRequest) {
         }
 
         const markers = await getHistoryMarkers(user.id, from, to)
+
+        // فاز ۳ — گام ۱۰: planner.history_viewed فقط بعد از verified successful view؛
+        // touch + event خارج از business operation؛ fail-open (§17). properties خالی (allowlist گام ۳).
+        try {
+            const context = createObservabilityContext("/api/planner/history", "planner")
+            context.userId = user.id
+            const prisma = getPrisma()
+            await touchAuthenticatedActivity(user.id, new Date(), prisma)
+            await recordProductEvent(
+                user.id,
+                "planner.history_viewed",
+                // allowlist گام ۳ این event خالی است — هیچ history/date-range/content (§8)
+                undefined,
+                { requestId: context.requestId, endpoint: "/api/planner/history", feature: "planner" },
+            )
+        } catch {
+            // fail-open — analytics failure هرگز پاسخ را fail نمی‌کند
+        }
+
         return okResponse(markers)
     } catch (error) {
         const mapped = toServiceErrorResponse(error)

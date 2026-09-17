@@ -10,10 +10,20 @@ const mocks = vi.hoisted(() => ({
     getCurrentUser: vi.fn(),
     getDaySuggestion: vi.fn(),
     getCanonicalToday: vi.fn(),
+    touchAuthenticatedActivity: vi.fn(),
+    recordProductEvent: vi.fn(),
+    getPrisma: vi.fn(),
 }))
 
 vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: mocks.getCurrentUser }))
 vi.mock("@/app/lib/services/planner.service", () => ({ getDaySuggestion: mocks.getDaySuggestion }))
+vi.mock("@/app/lib/getPrisma", () => ({ getPrisma: mocks.getPrisma }))
+vi.mock("@/app/lib/services/userActivity.service", () => ({
+    touchAuthenticatedActivity: mocks.touchAuthenticatedActivity,
+}))
+vi.mock("@/app/lib/services/productEvent.service", () => ({
+    recordProductEvent: mocks.recordProductEvent,
+}))
 // M10: فقط getCanonicalToday mock می‌شود؛ اعتبارسنجی روز باید واقعی (قالب + تقویم) تست شود
 vi.mock("@/app/lib/canonicalDay", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@/app/lib/canonicalDay")>()),
@@ -53,6 +63,12 @@ describe("GET /api/planner/suggestion", () => {
         vi.clearAllMocks()
         mocks.getCurrentUser.mockResolvedValue(USER)
         mocks.getCanonicalToday.mockReturnValue(DAY_KEY)
+        mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
+        mocks.recordProductEvent.mockResolvedValue({
+            recorded: true,
+            eventName: "planner.suggestion_viewed",
+        })
+        mocks.getPrisma.mockReturnValue({})
     })
 
     it("returns 200 with { ok: true, data: suggestion } for an explicit date", async () => {
@@ -162,5 +178,116 @@ describe("GET /api/planner/suggestion", () => {
         const parsed = await res.json()
         expect(parsed.error.code).toBe("INTERNAL")
         expect(parsed.error.message).not.toContain("db down")
+    })
+
+    /* ---------------------------------------------------------------- */
+    /* فاز ۳ — گام ۱۰: integration تحلیل (touch + planner.suggestion_viewed) */
+    /* ---------------------------------------------------------------- */
+
+    it("touches activity and records planner.suggestion_viewed after successful view", async () => {
+        mocks.getDaySuggestion.mockResolvedValue(SUGGESTION)
+
+        const res = await callGET(`?date=${DAY_KEY}`)
+
+        expect(res.status).toBe(200)
+        expect(mocks.touchAuthenticatedActivity).toHaveBeenCalledTimes(1)
+        expect(mocks.recordProductEvent).toHaveBeenCalledTimes(1)
+        expect(mocks.recordProductEvent).toHaveBeenCalledWith(
+            1,
+            "planner.suggestion_viewed",
+            undefined, // allowlist خالی — بدون properties
+            expect.objectContaining({
+                requestId: expect.any(String),
+                endpoint: "/api/planner/suggestion",
+                feature: "planner",
+            }),
+        )
+    })
+
+    it("orders the analytics boundary: business success < touch < product event", async () => {
+        mocks.getDaySuggestion.mockResolvedValue(SUGGESTION)
+
+        await callGET(`?date=${DAY_KEY}`)
+
+        const businessOrder = mocks.getDaySuggestion.mock.invocationCallOrder[0]
+        const touchOrder = mocks.touchAuthenticatedActivity.mock.invocationCallOrder[0]
+        const eventOrder = mocks.recordProductEvent.mock.invocationCallOrder[0]
+        expect(touchOrder).toBeGreaterThan(businessOrder)
+        expect(eventOrder).toBeGreaterThan(touchOrder)
+    })
+
+    it("event properties are empty (undefined) — no suggestion/task content leakage", async () => {
+        mocks.getDaySuggestion.mockResolvedValue(SUGGESTION)
+
+        await callGET(`?date=${DAY_KEY}`)
+
+        const props = mocks.recordProductEvent.mock.calls[0][2]
+        expect(props).toBeUndefined()
+        const args = JSON.stringify(mocks.recordProductEvent.mock.calls[0])
+        expect(args).not.toContain("planned")
+        expect(args).not.toContain("unfitted")
+        expect(args).not.toContain("taskId")
+        expect(args).not.toContain(DAY_KEY)
+    })
+
+    it("propagates the requestId (correlation only)", async () => {
+        mocks.getDaySuggestion.mockResolvedValue(SUGGESTION)
+
+        await callGET(`?date=${DAY_KEY}`)
+
+        const ctx = mocks.recordProductEvent.mock.calls[0][3]
+        expect(ctx.requestId).toEqual(expect.any(String))
+        expect(ctx.endpoint).toBe("/api/planner/suggestion")
+        expect(ctx.feature).toBe("planner")
+    })
+
+    it("emits no event and no touch on validation failure", async () => {
+        const res = await callGET("?date=2026-13-99")
+
+        expect(res.status).toBe(400)
+        expect(mocks.recordProductEvent).not.toHaveBeenCalled()
+        expect(mocks.touchAuthenticatedActivity).not.toHaveBeenCalled()
+    })
+
+    it("emits no event and no touch on auth failure", async () => {
+        mocks.getCurrentUser.mockResolvedValue(null)
+
+        await callGET(`?date=${DAY_KEY}`)
+
+        expect(mocks.recordProductEvent).not.toHaveBeenCalled()
+        expect(mocks.touchAuthenticatedActivity).not.toHaveBeenCalled()
+    })
+
+    it("emits no event and no touch on business/view failure (DAY_NOT_FOUND)", async () => {
+        mocks.getDaySuggestion.mockRejectedValue(
+            new ServiceError(404, "DAY_NOT_FOUND", "برنامهای برای این روز ثبت نشده"),
+        )
+
+        const res = await callGET(`?date=${DAY_KEY}`)
+
+        expect(res.status).toBe(404)
+        expect(mocks.recordProductEvent).not.toHaveBeenCalled()
+        expect(mocks.touchAuthenticatedActivity).not.toHaveBeenCalled()
+    })
+
+    it("keeps the 200 response unchanged when touch fails (fail-open), event still recorded", async () => {
+        mocks.getDaySuggestion.mockResolvedValue(SUGGESTION)
+        mocks.touchAuthenticatedActivity.mockRejectedValue(new Error("analytics db down"))
+
+        const res = await callGET(`?date=${DAY_KEY}`)
+
+        expect(res.status).toBe(200)
+        await expect(res.json()).resolves.toEqual({ ok: true, data: SUGGESTION })
+        expect(mocks.recordProductEvent).not.toHaveBeenCalled()
+    })
+
+    it("keeps the 200 response unchanged when event persistence fails (fail-open)", async () => {
+        mocks.getDaySuggestion.mockResolvedValue(SUGGESTION)
+        mocks.recordProductEvent.mockRejectedValue(new Error("event insert failed"))
+
+        const res = await callGET(`?date=${DAY_KEY}`)
+
+        expect(res.status).toBe(200)
+        await expect(res.json()).resolves.toEqual({ ok: true, data: SUGGESTION })
     })
 })

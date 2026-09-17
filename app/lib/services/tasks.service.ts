@@ -387,7 +387,7 @@ export async function updateTask(
         scheduledDate?: Date
         category?: string | null
     },
-): Promise<{ task: Task }> {
+): Promise<{ task: Task; changed: boolean; changedFields: string[] }> {
     const prisma = getPrisma()
     const task = await prisma.task.findFirst({ where: { id: taskId, userId } })
     if (!task) throw new TaskNotFoundError()
@@ -425,8 +425,16 @@ export async function updateTask(
 
     const isContent = titleChanged // §6.3.5: تغییر متن = Content Mutation
     if (!titleChanged && !dayChanged && !statusChanged && !categoryChanged) {
-        return { task } // درخواست بدون تغییر واقعی → no-op
+        // درخواست بدون تغییر واقعی → no-op؛ گام ۸: changed=false صریح در قرارداد بازگشتی
+        return { task, changed: false, changedFields: [] }
     }
+
+    // گام ۸: نام فیلدهای واقعاً تغییرکرده (فقط نام‌ها؛ هرگز مقادیر — §8 قرارداد ProductEvent)
+    const changedFields: string[] = []
+    if (titleChanged) changedFields.push("title")
+    if (dayChanged) changedFields.push("day")
+    if (statusChanged) changedFields.push("status")
+    if (categoryChanged) changedFields.push("category")
 
     if (isContent) {
         // §6.3.5/§7.6: فقط گروه AI null می‌شود؛ category و allocatedMinutes untouched می‌مانند.
@@ -440,7 +448,7 @@ export async function updateTask(
     const isPlanningAffecting = titleChanged || dayChanged || statusChanged
     if (!isPlanningAffecting) {
         const updated = await prisma.task.update({ where: { id: task.id }, data })
-        return { task: updated }
+        return { task: updated, changed: true, changedFields }
     }
 
     // روزهای affected: روز فعلی + روز مقصد (در صورت reschedule)
@@ -465,5 +473,5 @@ export async function updateTask(
     }
 
     const [updated] = (await prisma.$transaction(ops)) as [Task]
-    return { task: updated }
+    return { task: updated, changed: true, changedFields }
 }

@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
     getDayTasks: vi.fn(),
     getCanonicalToday: vi.fn(),
     buildAdvisor: vi.fn(),
+    touchAuthenticatedActivity: vi.fn(),
+    recordProductEvent: vi.fn(),
+    getPrisma: vi.fn(),
     // پیاده‌سازی واقعی — در فکتوری ماژول موک گرفته می‌شود
     realBuildAdvisor: null as null |
         ((
@@ -25,6 +28,13 @@ vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: mocks.getCurrentUse
 vi.mock("@/app/lib/services/tasks.service", () => ({
     createTask: mocks.createTask,
     getDayTasks: mocks.getDayTasks,
+}))
+vi.mock("@/app/lib/getPrisma", () => ({ getPrisma: mocks.getPrisma }))
+vi.mock("@/app/lib/services/userActivity.service", () => ({
+    touchAuthenticatedActivity: mocks.touchAuthenticatedActivity,
+}))
+vi.mock("@/app/lib/services/productEvent.service", () => ({
+    recordProductEvent: mocks.recordProductEvent,
 }))
 vi.mock("@/app/lib/canonicalDay", async (importOriginal) => {
     const actual = await importOriginal<typeof import("@/app/lib/canonicalDay")>()
@@ -43,11 +53,14 @@ import { ServiceError } from "@/app/lib/services/errors"
 const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran" }
 const DAY_KEY = "2026-01-01"
 const SCHEDULED_DATE = "2026-01-01T00:00:00.000Z"
-const TASK = { id: 10, title: "خرید نان", dayKey: DAY_KEY }
+const TASK = { id: 10, title: "خرید نان", dayKey: DAY_KEY, category: "Work", status: "TODO" }
 describe("POST /api/tasks", () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mocks.getCurrentUser.mockResolvedValue(USER)
+        mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
+        mocks.recordProductEvent.mockResolvedValue({ recorded: true, eventName: "task.created" })
+        mocks.getPrisma.mockReturnValue({})
     })
 
     it("returns 201 with the ADR-04 envelope { ok: true, data: { task } } and forwards title + scheduledDate", async () => {
@@ -149,6 +162,71 @@ describe("POST /api/tasks", () => {
             error: { code: "UNAUTHORIZED", message: "Unauthorized" },
         })
         expect(mocks.createTask).not.toHaveBeenCalled()
+    })
+
+    /* فاز ۳ — گام ۷: integration analysis (touch + task.created) */
+
+    it("touches activity and records task.created with safe allowlisted properties after success", async () => {
+        mocks.createTask.mockResolvedValue({ task: TASK })
+
+        const res = await POST(
+            new NextRequest("http://localhost/api/tasks", {
+                method: "POST",
+                body: JSON.stringify({ title: "خرید نان", scheduledDate: SCHEDULED_DATE }),
+            }),
+        )
+
+        expect(res.status).toBe(201)
+        expect(mocks.touchAuthenticatedActivity).toHaveBeenCalledTimes(1)
+        expect(mocks.touchAuthenticatedActivity).toHaveBeenCalledWith(
+            1,
+            expect.any(Date),
+            expect.anything(),
+        )
+        expect(mocks.recordProductEvent).toHaveBeenCalledTimes(1)
+        expect(mocks.recordProductEvent).toHaveBeenCalledWith(
+            1,
+            "task.created",
+            // فقط allowlist — هیچ title/content
+            { taskId: 10, category: "Work", status: "TODO" },
+            expect.objectContaining({ requestId: expect.any(String), feature: "tasks" }),
+        )
+        // هیچ محتوای حساسی در آرگومان‌های event نیست
+        const args = JSON.stringify(mocks.recordProductEvent.mock.calls[0])
+        expect(args).not.toContain("خرید نان")
+    })
+
+    it("emits no event and no touch when createTask fails", async () => {
+        mocks.createTask.mockRejectedValue(new ServiceError(409, "PLAN_CONFLICT", "test"))
+
+        const res = await POST(
+            new NextRequest("http://localhost/api/tasks", {
+                method: "POST",
+                body: JSON.stringify({ title: "خرید نان", scheduledDate: SCHEDULED_DATE }),
+            }),
+        )
+
+        expect(res.status).toBe(409)
+        expect(mocks.recordProductEvent).not.toHaveBeenCalled()
+        expect(mocks.touchAuthenticatedActivity).not.toHaveBeenCalled()
+    })
+
+    it("keeps the 201 response unchanged when analytics fails (fail-open)", async () => {
+        mocks.createTask.mockResolvedValue({ task: TASK })
+        mocks.touchAuthenticatedActivity.mockRejectedValue(new Error("analytics db down"))
+
+        const res = await POST(
+            new NextRequest("http://localhost/api/tasks", {
+                method: "POST",
+                body: JSON.stringify({ title: "خرید نان", scheduledDate: SCHEDULED_DATE }),
+            }),
+        )
+
+        expect(res.status).toBe(201)
+        const parsed = await res.json()
+        expect(parsed.ok).toBe(true)
+        expect(parsed.data.task.id).toBe(10)
+        expect(mocks.recordProductEvent).not.toHaveBeenCalled()
     })
 })
 

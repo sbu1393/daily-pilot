@@ -8,6 +8,10 @@ import {
     unauthorizedResponse,
     validationErrorResponse,
 } from "@/app/lib/apiResponse"
+import { createObservabilityContext } from "@/src/lib/observability/context"
+import { getPrisma } from "@/app/lib/getPrisma"
+import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
+import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 
 export async function PATCH(
     req: NextRequest,
@@ -33,6 +37,29 @@ export async function PATCH(
         const { task, result, summaries } = await completeTask(user.id, user.timezone, taskId, {
             spentMinutes,
         })
+
+        // فاز ۳ — گام ۷: فقط بعد از first successful completion — سرویس گارد اتمیک
+        // ضد double-completion دارد (TaskAlreadyDoneError → مسیر error، بدون event/touch).
+        // خارج از business transaction؛ fail-open (§17).
+        try {
+            const context = createObservabilityContext("/api/tasks/[id]/complete", "tasks")
+            context.userId = user.id
+            const prisma = getPrisma()
+            await touchAuthenticatedActivity(user.id, new Date(), prisma)
+            await recordProductEvent(
+                user.id,
+                "task.completed",
+                // فقط allowlist گام ۳ — داده‌ی واقعاً موجود در نتیجه؛ هرگز title/content
+                { taskId: task.id, category: task.category, status: task.status },
+                {
+                    requestId: context.requestId,
+                    endpoint: "/api/tasks/[id]/complete",
+                    feature: "tasks",
+                },
+            )
+        } catch {
+            // fail-open — analytics failure هرگز پاسخ را fail نمی‌کند
+        }
 
         // ADR-04: { ok, data: { task, result, summaries } }
         return NextResponse.json({ ok: true, data: { task, result, summaries } }, { status: 200 })

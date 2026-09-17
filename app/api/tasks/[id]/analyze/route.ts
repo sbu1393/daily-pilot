@@ -8,6 +8,7 @@ import { createObservabilityContext } from "@/src/lib/observability/context"
 import { recordError } from "@/src/lib/observability/recordError"
 import { resolvePlanPolicy, getMonthlyPeriod } from "@/app/lib/services/planPolicy.service"
 import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
+import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 import { reserveQuota, completeQuota, releaseQuota } from "@/app/lib/services/aiQuota.service"
 import { QuotaUnavailableError } from "@/app/lib/services/errors"
 import {
@@ -22,8 +23,10 @@ import {
 export const maxDuration = 60
 
 // فاز ۱ — ترتیب LOCKED سند §23:
-// context → auth → validation → rate limit → user activity → plan policy → quota reserve
+// context → auth → validation → rate limit → plan policy → quota reserve
 // → AI call (خارج از هر transaction کووتا) → complete/release → response
+// فاز ۳ — گام ۹ (بازنویسی placement): touch از pre-quota حذف شد؛ touch +
+// ai.analysis_succeeded فقط بعد از verified production success (§17).
 
 export async function PATCH(
     req: NextRequest,
@@ -63,10 +66,7 @@ export async function PATCH(
             )
         }
 
-        // فاز ۱ — ثبت فعالیت (throttle 30 دقیقه) — بعد از rate limit، قبل از plan/quota (سند §17)
-        // Fail-safe: خطای داخلی هرگز مسیر اصلی نمی‌شکند.
         const prisma = getPrisma()
-        await touchAuthenticatedActivity(user.id, new Date(), prisma)
 
         // فاز ۱ — plan policy (سند §5): سقف ماهانه فقط از سرویس؛ هرگز hard-code (§26)
         const policy = resolvePlanPolicy({ plan: user.plan })
@@ -96,6 +96,27 @@ export async function PATCH(
 
         // موفقیت → complete (سند §11)
         await completeQuota(prisma, context.requestId)
+
+        // فاز ۳ — گام ۹: verified production success فقط اینجا است (بعد از complete موفق).
+        // Mock هرگز production success نیست: بدون touch و بدون event (§8).
+        if (result.aiSource !== "mock") {
+            try {
+                await touchAuthenticatedActivity(user.id, new Date(), prisma)
+                await recordProductEvent(
+                    user.id,
+                    "ai.analysis_succeeded",
+                    // فقط allowlist گام ۳ — هرگز prompt/response/provider payload/user content (§8)
+                    { units: 1, aiSource: result.aiSource, status: "success" },
+                    {
+                        requestId: context.requestId,
+                        endpoint: "/api/tasks/[id]/analyze",
+                        feature: "analyze",
+                    },
+                )
+            } catch {
+                // fail-open — analytics failure هرگز پاسخ را fail نمی‌کند (§17)
+            }
+        }
 
         // ADR-04: { ok, data: { task, aiSource } } — summary حذف شد (A3/A6)
         return okResponse({ task: result.task, aiSource: result.aiSource }, { requestId: context.requestId })

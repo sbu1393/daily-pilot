@@ -68,6 +68,7 @@ model User {
   dailyPlans DailyPlan[]
   aiUsages AiUsage[]
   aiUsageEvents AiUsageEvent[]
+  productEvents ProductEvent[] // فاز ۳ — رویدادهای تحلیلی محصول
 }
 
 model Task {
@@ -161,6 +162,23 @@ model ErrorLog {
   @@index([endpoint, createdAt])
   @@index([userId, createdAt])
   @@index([requestId])
+}
+
+// فاز ۳ — رویدادهای تحلیلی محصول (سند فاز ۳ §5) — مستقل از TaskEvent/AiUsageEvent/ErrorLog
+model ProductEvent {
+  id         String   @id @default(cuid())
+  userId     Int
+  requestId  String? // فقط correlation — غیر-unique، غیر-dedup (سند §13)
+  eventName  String
+  feature    String?
+  properties Json?
+  createdAt  DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([eventName, createdAt])
+  @@index([createdAt])
 }
 
 // فاز ۱ — رویداد مصرف AI برای audit و idempotency (requestId = idempotency key)

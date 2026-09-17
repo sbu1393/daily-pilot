@@ -55,32 +55,54 @@ enum AiUsageEventStatus {
   RELEASED
 }
 
+// فاز ۵ — ارائه‌دهنده‌ی پرداخت (سند §3.1؛ فقط providerهای واقعاً پیاده‌شده)
+enum BillingProvider {
+  ZARINPAL
+}
+
+// فاز ۵ — وضعیت سفارش پرداخت (سند §3.2)؛ حالت‌های نهایی: PAID/FAILED/EXPIRED/CANCELED
+enum PaymentOrderStatus {
+  PENDING
+  PAID
+  FAILED
+  EXPIRED
+  CANCELED
+}
+
+// فاز ۵ — وضعیت دوره‌ی دسترسی کاربر (سند §3.3)
+enum EntitlementStatus {
+  ACTIVE
+  EXPIRED
+}
+
 model User {
-  id         Int         @id @default(autoincrement())
-  username   String      @unique
-  email      String      @unique
-  password   String
-  firstName  String?
-  lastName   String?
-  birthDate  DateTime?
-  phone      String?
-  image      String?
-  timezone   String      @default("Asia/Tehran")
-  locale     String      @default("fa")
-  calendar   CalendarType @default(JALALI)
-  plan       UserPlan    @default(FREE)
+  id            Int            @id @default(autoincrement())
+  username      String         @unique
+  email         String         @unique
+  password      String
+  firstName     String?
+  lastName      String?
+  birthDate     DateTime?
+  phone         String?
+  image         String?
+  timezone      String         @default("Asia/Tehran")
+  locale        String         @default("fa")
+  calendar      CalendarType   @default(JALALI)
+  plan          UserPlan       @default(FREE)
   // فاز ۴ — role از DB خوانده می‌شود (هرگز داخل JWT نمی‌رود؛ revocation فوری)
-  role       UserRole    @default(USER)
-  lastSeenAt DateTime? // فاز ۱ — آخرین فعالیت احرازهویت‌شده (throttle 30 دقیقه)
-  tasks      Task[]
-  dailyPlans DailyPlan[]
-  aiUsages AiUsage[]
+  role          UserRole       @default(USER)
+  lastSeenAt    DateTime? // فاز ۱ — آخرین فعالیت احرازهویت‌شده (throttle 30 دقیقه)
+  tasks         Task[]
+  dailyPlans    DailyPlan[]
+  aiUsages      AiUsage[]
   aiUsageEvents AiUsageEvent[]
   productEvents ProductEvent[] // فاز ۳ — رویدادهای تحلیلی محصول
+  paymentOrders PaymentOrder[] // فاز ۵ — تاریخچه‌ی تلاش‌های پرداخت
+  entitlement   Entitlement? // فاز ۵ — دوره‌ی دسترسی فعلی (یکتا per user)
 }
 
 model Task {
-  id                    Int          @id @default(autoincrement())
+  id                    Int           @id @default(autoincrement())
   title                 String
   category              String?
   priority              TaskPriority?
@@ -92,13 +114,13 @@ model Task {
   scheduledDate         DateTime // لحظه‌ی نیمه‌شب محلیِ روز برنامه‌ریزی (absolute instant)
   dayKey                String // کلید روز canonical "YYYY-MM-DD" — سمت سرور از user.timezone محاسبه می‌شود (§6.2.2.1)
   previousScheduledDate DateTime? // برای تشخیص rollover
-  status                TaskStatus @default(TODO)
+  status                TaskStatus    @default(TODO)
   completedAt           DateTime? // لحظه‌ی اتمام
   completedOn           String? // کلید جلالی روز اتمام → تاریخچه
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
   userId                Int
-  user                  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   events                TaskEvent[]
 
   @@index([userId, dayKey])
@@ -107,14 +129,14 @@ model Task {
 }
 
 model DailyPlan {
-  id               Int      @id @default(autoincrement())
-  dayKey           String // کلید روز جلالی
-  availableMinutes Int      @default(0) // ظرفیت روز اعلام‌شده توسط کاربر
-  userId           Int
-  createdAt        DateTime @default(now())
-  planVersion      Int      @default(0) // G-03: نسخهی برنامه — مبنای stale detection
+  id                Int      @id @default(autoincrement())
+  dayKey            String // کلید روز جلالی
+  availableMinutes  Int      @default(0) // ظرفیت روز اعلام‌شده توسط کاربر
+  userId            Int
+  createdAt         DateTime @default(now())
+  planVersion       Int      @default(0) // G-03: نسخهی برنامه — مبنای stale detection
   rebalancedVersion Int? // آخرین نسخهای که rebalance روی آن اجرا شده
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, dayKey])
 }
@@ -132,15 +154,15 @@ model TaskEvent {
 
 // فاز ۱ — ظرفیت ماهانه‌ی AI per user (source of truth quota)
 model AiUsage {
-  id            Int                @id @default(autoincrement())
+  id            Int               @id @default(autoincrement())
   userId        Int
-  periodType    AiUsagePeriodType  @default(MONTHLY)
+  periodType    AiUsagePeriodType @default(MONTHLY)
   periodStart   DateTime
-  reservedUnits Int                @default(0)
-  consumedUnits Int                @default(0)
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
-  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reservedUnits Int               @default(0)
+  consumedUnits Int               @default(0)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, periodType, periodStart])
   @@index([userId, periodStart])
@@ -182,7 +204,7 @@ model ProductEvent {
   properties Json?
   createdAt  DateTime @default(now())
 
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
   @@index([eventName, createdAt])
@@ -207,4 +229,55 @@ model AiUsageEvent {
 
   @@index([userId, createdAt])
   @@index([userId, status])
+}
+
+// فاز ۵ — سفارش پرداخت: source of truth «آیا پرداختی ساخته شد و چه شد» (سند §2/§3.4)
+// snapshot مقادیر در زمان checkout (amount/currency/entitlementDays) — تغییر config نباید
+// معنای سفارش ساخته‌شده را عوض کند. هیچ داده‌ی کارت/CVV/provider payload اینجا ذخیره نمی‌شود.
+model PaymentOrder {
+  id                     String             @id @default(cuid())
+  userId                 Int
+  provider               BillingProvider
+  merchantOrderId        String             @unique
+  checkoutIdempotencyKey String
+  amount                 Int
+  currency               String
+  status                 PaymentOrderStatus
+  providerAuthority      String?
+  providerReference      String?
+  entitlementDays        Int
+  requestId              String? // فقط correlation (سند §22) — idempotency جدا از requestId است
+  expiresAt              DateTime
+  paidAt                 DateTime?
+  failureCode            String?
+  entitlementId          String? // ارجاع به Entitlement پس از finalize (بدون relation — سند §3.4)
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, checkoutIdempotencyKey])
+  @@unique([provider, providerAuthority])
+  @@unique([provider, providerReference])
+  @@index([userId, createdAt])
+  @@index([status, expiresAt])
+}
+
+// فاز ۵ — Entitlement: source of truth «دوره‌ی دسترسی فعلی پرداخت‌شده» (سند §2/§3.5)
+// فقط یک ردیف per user؛ منبع effective plan است (User.plan آینه‌ی آن است).
+// عمداً بدون providerCustomerId/providerSubscriptionId/invoice/raw metadata/trial/cancelAtPeriodEnd.
+model Entitlement {
+  id                 String            @id @default(cuid())
+  userId             Int               @unique
+  provider           BillingProvider
+  status             EntitlementStatus
+  planCode           UserPlan
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, currentPeriodEnd])
 }

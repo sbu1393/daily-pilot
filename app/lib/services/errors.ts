@@ -220,3 +220,92 @@ export class AiUsageConflictError extends ServiceError {
         super(409, "AI_USAGE_CONFLICT", "وضعیت رویداد مصرف با درخواست سازگار نیست", undefined, "CONFLICT", "WARNING")
     }
 }
+
+// ---------- فاز ۵ — Billing / Entitlement ----------
+// فقط ۷ خطای موردنیاز فاز پنج (سند §20) — هیچ کد اضافه‌ای مجاز نیست:
+// PAYMENT_ALREADY_PROCESSED ممنوع است (callback تکراری موفق = no-op idempotent)
+// SUBSCRIPTION_UNAVAILABLE ممنوع است (MVP از Entitlement استفاده می‌کند، نه Subscription)
+// category/severity در فاز صفر تعریف شده‌اند و برای recordError و فیلتر لاگ‌هاست؛
+// retryability در این hierarchy تعریف نمی‌شود و فقط در سطح provider contract وجود دارد.
+// توجه: تصمیم persist در ErrorLog توسط persistencePolicy (فاز ۲) و **بر اساس code** گرفته
+// می‌شود؛ این ۷ کد جدید هنوز در هیچ‌یک از دو فهرست آن policy نیستند، پس فعلاً مسیر default
+// (persist = true) را می‌روند. تغییر آن policy در این گام انجام نشده است.
+
+/** 503 — outage/timeout گذرای provider (retryable در سطح provider contract) */
+export class PaymentProviderUnavailableError extends ServiceError {
+    constructor() {
+        super(503, "PAYMENT_PROVIDER_UNAVAILABLE", "سرویس پرداخت در دسترس نیست؛ بعداً تلاش کن", undefined, "EXTERNAL_SERVICE", "ERROR")
+    }
+}
+
+/** 402 — شکست قطعی تأیید پرداخت */
+export class PaymentVerificationFailedError extends ServiceError {
+    constructor() {
+        super(402, "PAYMENT_VERIFICATION_FAILED", "تأیید پرداخت انجام نشد", undefined, "EXTERNAL_SERVICE", "ERROR")
+    }
+}
+
+/** 409 — مبلغ تأییدشده‌ی provider با مبلغ ذخیره‌شده‌ی سفارش تفاوت دارد — high severity */
+export class PaymentInvalidAmountError extends ServiceError {
+    constructor() {
+        super(409, "PAYMENT_INVALID_AMOUNT", "مبلغ تأییدشده با مبلغ سفارش همخوان نیست", undefined, "CONFLICT", "CRITICAL")
+    }
+}
+
+/** 404 — مرجع پرداخت داخلی وجود ندارد (expected user error) */
+export class PaymentNotFoundError extends ServiceError {
+    constructor() {
+        super(404, "PAYMENT_NOT_FOUND", "سفارش پرداخت پیدا نشد")
+    }
+}
+
+/** 409 — همان کاربر/کلید idempotency با پارامترهای ناسازگار */
+export class PaymentIdempotencyConflictError extends ServiceError {
+    constructor() {
+        super(409, "PAYMENT_IDEMPOTENCY_CONFLICT", "این درخواست پرداخت با درخواست قبلی سازگار نیست", undefined, "CONFLICT", "INFO")
+    }
+}
+
+/** 500 — پیکربندی بیلینگ سرور نامعتبر/ناقص */
+export class PaymentConfigurationError extends ServiceError {
+    constructor() {
+        super(500, "PAYMENT_CONFIGURATION_ERROR", "پیکربندی پرداخت نامعتبر است؛ با پشتیبانی تماس بگیر", undefined, "INTERNAL", "CRITICAL")
+    }
+}
+
+/** 409 — نقض invariant وضعیت/concurrency دسترسی */
+export class EntitlementConflictError extends ServiceError {
+    constructor() {
+        super(409, "ENTITLEMENT_CONFLICT", "وضعیت دسترسی با درخواست سازگار نیست", undefined, "CONFLICT", "WARNING")
+    }
+}
+
+// ---------- فاز ۵ — گام ۱۰ (Checkout) ----------
+// سه کد موردنیاز گام ۱۰ — عمداً هیچ کد دیگری اضافه نشده و هیچ‌یک از کدهای بالا تغییر نکرده است.
+// این‌ها همه «شکست قطعی/غیرقابل‌حل در تعامل با provider» هستند (operational/external-service)
+// و **منابع انسانی ندارند**: هیچ‌کدام retry خودکار provider را مجاز نمی‌کند (سند §7: هیچ retry کور).
+
+/** 503 — provider درخواست checkout را قطعی رد کرد (پاسخ معتبر ولی code ناموفق) */
+export class PaymentProviderRejectedError extends ServiceError {
+    constructor() {
+        super(503, "PAYMENT_PROVIDER_REJECTED", "درخواست پرداخت توسط سرویس پرداخت پذیرفته نشد؛ بعداً تلاش کن", undefined, "EXTERNAL_SERVICE", "ERROR")
+    }
+}
+
+/** 503 — پاسخ provider malformed/غیرقابل‌استفاده بود (JSON نامعتبر یا ساختار ناشناخته) */
+export class PaymentProviderInvalidResponseError extends ServiceError {
+    constructor() {
+        super(503, "PAYMENT_PROVIDER_INVALID_RESPONSE", "پاسخ سرویس پرداخت قابل استفاده نبود؛ بعداً تلاش کن", undefined, "EXTERNAL_SERVICE", "ERROR")
+    }
+}
+
+/**
+ * 503 — وضعیت پرداخت پس از یک تعاملِ مبهم/موفق با provider قابل‌تعیین امن نیست، چون persistence
+ * داخلی ناقص ماند (createPayment موفق شد ولی authority ذخیره نشد، یا retry همان idempotency key
+ * سفارش PENDING بدون authority دید). سفارش PENDING می‌ماند و هیچ create دوباره‌ای انجام نمی‌شود.
+ */
+export class PaymentStateUnresolvedError extends ServiceError {
+    constructor() {
+        super(503, "PAYMENT_STATE_UNRESOLVED", "وضعیت پرداخت قابل تعیین نیست؛ برای پیگیری با پشتیبانی تماس بگیر", undefined, "EXTERNAL_SERVICE", "ERROR")
+    }
+}

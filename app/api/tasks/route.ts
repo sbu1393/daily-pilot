@@ -6,6 +6,9 @@ import { makeCreateTaskSchema } from "@/app/schema/taskSchema"
 import { buildAdvisor, type AdvisorResult } from "@/app/lib/planner/advisor"
 import { createObservabilityContext } from "@/src/lib/observability/context"
 import { recordError } from "@/src/lib/observability/recordError"
+import { getPrisma } from "@/app/lib/getPrisma"
+import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
+import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 import {
     errorResponse,
     okResponse,
@@ -33,6 +36,22 @@ export async function POST(req: NextRequest) {
 
         const { title, scheduledDate } = parsed.data
         const { task } = await createTask(user.id, user.timezone, { title, scheduledDate })
+
+        // فاز ۳ — گام ۷: تحلیل‌های موفقیت فقط بعد از verified success (ساخت تسک)،
+        // خارج از business transaction؛ fail-open — هرگز response را تغییر نمی‌دهند (§17).
+        try {
+            const prisma = getPrisma()
+            await touchAuthenticatedActivity(user.id, new Date(), prisma)
+            await recordProductEvent(
+                user.id,
+                "task.created",
+                // فقط allowlist گام ۳ — هرگز title/content (§8)
+                { taskId: task.id, category: task.category, status: task.status },
+                { requestId: context.requestId, endpoint: "/api/tasks", feature: "tasks" },
+            )
+        } catch {
+            // fail-open — analytics failure هرگز پاسخ را fail نمی‌کند
+        }
 
         // ADR-04: { ok, data } — aiSource حذف شد (همیشه null بود؛ A5/A6)
         return okResponse({ task }, { status: 201, requestId: context.requestId })

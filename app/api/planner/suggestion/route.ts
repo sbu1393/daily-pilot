@@ -8,6 +8,10 @@ import {
     toServiceErrorResponse,
     unauthorizedResponse,
 } from "@/app/lib/apiResponse"
+import { createObservabilityContext } from "@/src/lib/observability/context"
+import { getPrisma } from "@/app/lib/getPrisma"
+import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
+import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 
 // ADR-006 (Phase S2) — GET /api/planner/suggestion?date=YYYY-MM-DD
 // فقط خواندنی: هیچ mutation، هیچ persist، هیچ AI (موتور pure suggestDay).
@@ -29,6 +33,24 @@ export async function GET(req: NextRequest) {
         // A1 Phase 1 — پاسخ شامل basis (planVersion/rebalancedVersion/availableMinutes/taskCount)
         // و state ("fresh" | "stale") است؛ route عمداً thin می‌ماند و آن‌ها را عبور می‌دهد (ADR-02).
         const suggestion = await getDaySuggestion(user.id, dayKey)
+
+        // فاز ۳ — گام ۱۰: planner.suggestion_viewed فقط بعد از verified successful view؛
+        // touch + event خارج از business operation؛ fail-open (§17). properties خالی (allowlist گام ۳).
+        try {
+            const context = createObservabilityContext("/api/planner/suggestion", "planner")
+            context.userId = user.id
+            const prisma = getPrisma()
+            await touchAuthenticatedActivity(user.id, new Date(), prisma)
+            await recordProductEvent(
+                user.id,
+                "planner.suggestion_viewed",
+                // allowlist گام ۳ این event خالی است — هیچ suggestion/task content (§8)
+                undefined,
+                { requestId: context.requestId, endpoint: "/api/planner/suggestion", feature: "planner" },
+            )
+        } catch {
+            // fail-open — analytics failure هرگز پاسخ را fail نمی‌کند
+        }
 
         // ADR-04: { ok, data: suggestion }
         return okResponse(suggestion)

@@ -362,7 +362,83 @@ describe("updateTask (A1 — Content vs Planning-only)", () => {
         expect(result.task).toBe(task)
     })
 
-    it("throws TaskNotFoundError for another user's task", async () => {
+    /* فاز ۳ — گام ۸: قرارداد بازگشتی بسط‌یافته ({ task, changed, changedFields }). */
+
+    it("returns changed=true + changedFields=[title] for a title-only mutation", async () => {
+        const result = await updateTask(1, TIMEZONE, 5, { title: "عنوان جدید" })
+
+        expect(result.changed).toBe(true)
+        expect(result.changedFields).toEqual(["title"])
+    })
+
+    it("returns changed=true + changedFields=[category] for a category-only mutation", async () => {
+        const result = await updateTask(1, TIMEZONE, 5, { category: "Health" })
+
+        expect(result.changed).toBe(true)
+        expect(result.changedFields).toEqual(["category"])
+    })
+
+    it("returns changed=true + changedFields=[status] for a status-only mutation", async () => {
+        const result = await updateTask(1, TIMEZONE, 5, { status: "IN_PROGRESS" })
+
+        expect(result.changed).toBe(true)
+        expect(result.changedFields).toEqual(["status"])
+    })
+
+    it("returns changed=true + changedFields=[day] for a day-only mutation", async () => {
+        const next = shiftCanonicalKey(today, 1)
+        const result = await updateTask(1, TIMEZONE, 5, {
+            scheduledDate: canonicalKeyToLocalMidnight(next, TIMEZONE),
+        })
+
+        expect(result.changed).toBe(true)
+        expect(result.changedFields).toEqual(["day"])
+    })
+
+    it("returns changed=true with every actually-changed field name for a combined mutation", async () => {
+        const next = shiftCanonicalKey(today, 1)
+        const result = await updateTask(1, TIMEZONE, 5, {
+            title: "عنوان جدید",
+            status: "IN_PROGRESS",
+            scheduledDate: canonicalKeyToLocalMidnight(next, TIMEZONE),
+            category: "Health",
+        })
+
+        expect(result.changed).toBe(true)
+        expect(result.changedFields).toEqual(expect.arrayContaining(["title", "day", "status", "category"]))
+        expect(result.changedFields).toHaveLength(4)
+    })
+
+    it("returns changed=false + empty changedFields for a true no-op — semantic identical to old no-op", async () => {
+        const result = await updateTask(1, TIMEZONE, 5, { title: "قدیمی" })
+
+        expect(result.changed).toBe(false)
+        expect(result.changedFields).toEqual([])
+        expect(prismaMock.task.update).not.toHaveBeenCalled()
+        expect(prismaMock.taskEvent.create).not.toHaveBeenCalled()
+        expect(prismaMock.dailyPlan.updateMany).not.toHaveBeenCalled()
+    })
+
+    it("never reports a field as changed when its input value equals the current value", async () => {
+        const result = await updateTask(1, TIMEZONE, 5, {
+            title: "قدیمی", // unchanged
+            status: "TODO", // unchanged
+            category: "Work", // unchanged
+        })
+
+        expect(result.changed).toBe(false)
+        expect(result.changedFields).toEqual([])
+    })
+
+    it("trailing-whitespace title that trims to the same value is a no-op (unchanged semantics)", async () => {
+        const result = await updateTask(1, TIMEZONE, 5, { title: "  قدیمی  " })
+
+        expect(result.changed).toBe(false)
+        expect(result.changedFields).toEqual([])
+        expect(prismaMock.task.update).not.toHaveBeenCalled()
+    })
+
+    it("throws TaskNotFoundError before any changed contract is produced", async () => {
         prismaMock.task.findFirst.mockResolvedValue(null)
 
         await expect(updateTask(1, TIMEZONE, 999, { title: "عنوان جدید" })).rejects.toThrow(

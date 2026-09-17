@@ -9,8 +9,14 @@ import {
     unauthorizedResponse,
     validationErrorResponse,
 } from "@/app/lib/apiResponse"
+import { createObservabilityContext } from "@/src/lib/observability/context"
+import { getPrisma } from "@/app/lib/getPrisma"
+import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
+import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 
 // GET: خلاصه‌ی روز (بودجه / تخصیص / وقت آزاد / سیو شده) — ADR-04: { ok, data: summary }
+// فاز ۳ — گام ۱۰: planner.day_viewed فقط بعد از verified successful day view؛
+// touch + event خارج از business operation؛ fail-open (§17). properties خالی (allowlist گام ۳).
 export async function GET(req: NextRequest) {
     try {
         const user = await getCurrentUser()
@@ -23,6 +29,24 @@ export async function GET(req: NextRequest) {
         }
 
         const summary = await getDaySummary(user.id, dayKey)
+
+        // فاز ۳ — گام ۱۰: analytics فقط بعد از verified success — خارج از business operation.
+        try {
+            const context = createObservabilityContext("/api/planner/day", "planner")
+            context.userId = user.id
+            const prisma = getPrisma()
+            await touchAuthenticatedActivity(user.id, new Date(), prisma)
+            await recordProductEvent(
+                user.id,
+                "planner.day_viewed",
+                // allowlist گام ۳ این event خالی است — هیچ dayKey/تاریخ/timezone/content (§8)
+                undefined,
+                { requestId: context.requestId, endpoint: "/api/planner/day", feature: "planner" },
+            )
+        } catch {
+            // fail-open — analytics failure هرگز پاسخ را fail نمی‌کند
+        }
+
         return NextResponse.json({ ok: true, data: summary }, { status: 200 })
     } catch (error) {
         const mapped = toServiceErrorResponse(error)

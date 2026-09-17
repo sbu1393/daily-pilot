@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
     clientIp: vi.fn(),
     createSession: vi.fn(),
     authenticate: vi.fn(),
+    touchAuthenticatedActivity: vi.fn(),
+    recordProductEvent: vi.fn(),
+    getPrisma: vi.fn(),
 }))
 
 vi.mock("@/app/lib/rateLimit", () => ({
@@ -20,6 +23,13 @@ vi.mock("@/app/lib/rateLimit", () => ({
 }))
 vi.mock("@/app/lib/createSession", () => ({ createSession: mocks.createSession }))
 vi.mock("@/app/lib/services/auth.service", () => ({ authenticate: mocks.authenticate }))
+vi.mock("@/app/lib/getPrisma", () => ({ getPrisma: mocks.getPrisma }))
+vi.mock("@/app/lib/services/userActivity.service", () => ({
+    touchAuthenticatedActivity: mocks.touchAuthenticatedActivity,
+}))
+vi.mock("@/app/lib/services/productEvent.service", () => ({
+    recordProductEvent: mocks.recordProductEvent,
+}))
 
 import { POST } from "./route"
 import { InvalidCredentialsError } from "@/app/lib/services/errors"
@@ -38,6 +48,12 @@ describe("POST /api/auth/login", () => {
         vi.clearAllMocks()
         mocks.clientIp.mockReturnValue("1.2.3.4")
         mocks.isRateLimited.mockReturnValue(false)
+        mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
+        mocks.recordProductEvent.mockResolvedValue({
+            recorded: true,
+            eventName: "auth.login_succeeded",
+        })
+        mocks.getPrisma.mockReturnValue({})
         mocks.createSession.mockImplementation((_user: unknown, response: NextResponse) => {
             response.cookies.set("token", "mocked-jwt", { httpOnly: true, path: "/" })
             return response
@@ -105,6 +121,54 @@ describe("POST /api/auth/login", () => {
         const parsed = await res.json()
         expect(parsed.error.code).toBe("RATE_LIMITED")
         expect(mocks.authenticate).not.toHaveBeenCalled()
+    })
+
+    /* فاز ۳ — گام ۷: integration analysis (touch + auth.login_succeeded) */
+
+    it("touches activity and records auth.login_succeeded without properties after real authentication", async () => {
+        mocks.authenticate.mockResolvedValue(USER)
+
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(200)
+        expect(mocks.touchAuthenticatedActivity).toHaveBeenCalledTimes(1)
+        expect(mocks.touchAuthenticatedActivity).toHaveBeenCalledWith(
+            1,
+            expect.any(Date),
+            expect.anything(),
+        )
+        expect(mocks.recordProductEvent).toHaveBeenCalledTimes(1)
+        expect(mocks.recordProductEvent).toHaveBeenCalledWith(
+            1,
+            "auth.login_succeeded",
+            undefined,
+            expect.objectContaining({
+                requestId: expect.any(String),
+                endpoint: "/api/auth/login",
+                feature: "auth",
+            }),
+        )
+    })
+
+    it("emits no event and no touch when authentication fails (INVALID_CREDENTIALS)", async () => {
+        mocks.authenticate.mockRejectedValue(new InvalidCredentialsError())
+
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(401)
+        expect(mocks.recordProductEvent).not.toHaveBeenCalled()
+        expect(mocks.touchAuthenticatedActivity).not.toHaveBeenCalled()
+    })
+
+    it("keeps the 200 login response unchanged when analytics fails (fail-open)", async () => {
+        mocks.authenticate.mockResolvedValue(USER)
+        mocks.touchAuthenticatedActivity.mockRejectedValue(new Error("analytics db down"))
+
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(200)
+        expect(res.cookies.get("token")?.value).toBe("mocked-jwt")
+        expect(mocks.recordProductEvent).not.toHaveBeenCalled()
     })
 
     it("propagates ServiceError INVALID_CREDENTIALS as 401", async () => {

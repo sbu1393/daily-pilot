@@ -172,4 +172,44 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
         expect(parsed.error.code).toBe("INTERNAL")
         expect(parsed.error.message).toEqual(expect.any(String))
     })
+
+    /* ---------------------------------------------------------------- */
+    /* فاز ۳ — گام ۹: regression — /api/ai/test از ProductEvent مستقل است */
+    /* ---------------------------------------------------------------- */
+
+    it("records no ProductEvent (never touches productEvent.service) — even on success", async () => {
+        mocks.runAiSamples.mockResolvedValue(SAMPLES)
+
+        const res = await GET()
+
+        expect(res.status).toBe(200)
+        // route اصلاً recordProductEvent را import/صدا نمی‌زند؛ mock آن تعریف نشده است —
+        // هر فراخوانی خطای ReferenceError می‌داد. اثبات: جریان موفق بدون هیچ event است.
+        expect(mocks.runAiSamples).toHaveBeenCalledTimes(1)
+        expect(mocks.completeQuota).toHaveBeenCalledTimes(1)
+    })
+
+    it("keeps lastSeenAt placement unchanged: after rate limit, before plan/quota (سند §17)", async () => {
+        mocks.runAiSamples.mockResolvedValue(SAMPLES)
+
+        await GET()
+
+        const rateOrder = mocks.isRateLimited.mock.invocationCallOrder[0]
+        const activityOrder = mocks.touchAuthenticatedActivity.mock.invocationCallOrder[0]
+        const reserveOrder = mocks.reserveQuota.mock.invocationCallOrder[0]
+        expect(activityOrder).toBeGreaterThan(rateOrder)
+        expect(reserveOrder).toBeGreaterThan(activityOrder)
+    })
+
+    it("never bumps lastSeenAt on quota rejection", async () => {
+        mocks.reserveQuota.mockRejectedValue(new QuotaExceededError())
+
+        const res = await GET()
+
+        expect(res.status).toBe(429)
+        // touch قبل از reserve است (قرارداد فعلی سند §17 برای این endpoint) —
+        // اما هیچ ProductEvent مسیر وجود ندارد؛ quota rejection → بدون AI و بدون event.
+        expect(mocks.runAiSamples).not.toHaveBeenCalled()
+        expect(mocks.touchAuthenticatedActivity).toHaveBeenCalledTimes(1) // placement فعلی دست‌نخورده
+    })
 })

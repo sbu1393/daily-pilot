@@ -10,16 +10,26 @@ import { NextRequest } from "next/server"
 const mocks = vi.hoisted(() => ({
     getCurrentUser: vi.fn(),
     completeTask: vi.fn(),
+    touchAuthenticatedActivity: vi.fn(),
+    recordProductEvent: vi.fn(),
+    getPrisma: vi.fn(),
 }))
 
 vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: mocks.getCurrentUser }))
 vi.mock("@/app/lib/services/tasks.service", () => ({ completeTask: mocks.completeTask }))
+vi.mock("@/app/lib/getPrisma", () => ({ getPrisma: mocks.getPrisma }))
+vi.mock("@/app/lib/services/userActivity.service", () => ({
+    touchAuthenticatedActivity: mocks.touchAuthenticatedActivity,
+}))
+vi.mock("@/app/lib/services/productEvent.service", () => ({
+    recordProductEvent: mocks.recordProductEvent,
+}))
 
 import { PATCH } from "./route"
 import { TaskAlreadyDoneError, TaskNotFoundError } from "@/app/lib/services/errors"
 
 const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran" }
-const TASK = { id: 5, title: "گزارش", dayKey: "2026-01-01", status: "DONE", spentMinutes: 40 }
+const TASK = { id: 5, title: "گزارش", dayKey: "2026-01-01", category: "Work", status: "DONE", spentMinutes: 40 }
 const RESULT = { savedMinutes: 20, overspentMinutes: 0 }
 const SUMMARIES = { "2026-01-01": { availableMinutes: 120, spentMinutes: 40 } }
 
@@ -33,6 +43,9 @@ describe("PATCH /api/tasks/[id]/complete", () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mocks.getCurrentUser.mockResolvedValue(USER)
+        mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
+        mocks.recordProductEvent.mockResolvedValue({ recorded: true, eventName: "task.completed" })
+        mocks.getPrisma.mockReturnValue({})
     })
 
     it("returns 200 with { ok: true, data: { task, result, summaries } }", async () => {
@@ -137,5 +150,57 @@ describe("PATCH /api/tasks/[id]/complete", () => {
         const parsed = await res.json()
         expect(parsed.error.code).toBe("INTERNAL")
         expect(parsed.error.message).not.toContain("db down")
+    })
+
+    /* فاز ۳ — گام ۷: integration analysis (touch + task.completed) */
+
+    it("touches activity and records task.completed with safe allowlisted properties after first success", async () => {
+        mocks.completeTask.mockResolvedValue({ task: TASK, result: RESULT, summaries: SUMMARIES })
+
+        const res = await callPATCH({ spentMinutes: 40 })
+
+        expect(res.status).toBe(200)
+        expect(mocks.touchAuthenticatedActivity).toHaveBeenCalledTimes(1)
+        expect(mocks.recordProductEvent).toHaveBeenCalledTimes(1)
+        expect(mocks.recordProductEvent).toHaveBeenCalledWith(
+            1,
+            "task.completed",
+            { taskId: 5, category: "Work", status: "DONE" }, // فیکسچر گام ۸: category کامل شد
+            expect.objectContaining({ requestId: expect.any(String), feature: "tasks" }),
+        )
+        const args = JSON.stringify(mocks.recordProductEvent.mock.calls[0])
+        expect(args).not.toContain("گزارش") // title هرگز وارد event نمی‌شود
+    })
+
+    it("emits no duplicate task.completed when the task is already done (TASK_ALREADY_DONE)", async () => {
+        mocks.completeTask.mockRejectedValue(new TaskAlreadyDoneError())
+
+        const res = await callPATCH({ spentMinutes: 40 })
+
+        expect(res.status).toBe(400)
+        expect(mocks.recordProductEvent).not.toHaveBeenCalled()
+        expect(mocks.touchAuthenticatedActivity).not.toHaveBeenCalled()
+    })
+
+    it("emits no event and no touch when the task is not found", async () => {
+        mocks.completeTask.mockRejectedValue(new TaskNotFoundError())
+
+        const res = await callPATCH({ spentMinutes: 40 })
+
+        expect(res.status).toBe(404)
+        expect(mocks.recordProductEvent).not.toHaveBeenCalled()
+        expect(mocks.touchAuthenticatedActivity).not.toHaveBeenCalled()
+    })
+
+    it("keeps the 200 response unchanged when analytics fails (fail-open)", async () => {
+        mocks.completeTask.mockResolvedValue({ task: TASK, result: RESULT, summaries: SUMMARIES })
+        mocks.recordProductEvent.mockRejectedValue(new Error("analytics db down"))
+
+        const res = await callPATCH({ spentMinutes: 40 })
+
+        expect(res.status).toBe(200)
+        const parsed = await res.json()
+        expect(parsed.ok).toBe(true)
+        expect(parsed.data.task.id).toBe(5)
     })
 })

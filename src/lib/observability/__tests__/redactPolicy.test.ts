@@ -271,6 +271,20 @@ describe("shouldPersistError — Phase 2 policy (§19)", () => {
         // اینجا مستند می‌کنیم: کد نهایی infra پس از گام ۴ INTERNAL/CONFLICT-infra خواهد بود.
         expect(shouldPersistError("INTERNAL")).toBe(true)
     })
+    it("Phase 5 billing operational failures → true (provider/verify/amount/entitlement/config — §22)", () => {
+        expect(shouldPersistError("PAYMENT_PROVIDER_UNAVAILABLE")).toBe(true)
+        expect(shouldPersistError("PAYMENT_PROVIDER_REJECTED")).toBe(true)
+        expect(shouldPersistError("PAYMENT_PROVIDER_INVALID_RESPONSE")).toBe(true)
+        expect(shouldPersistError("PAYMENT_STATE_UNRESOLVED")).toBe(true)
+        expect(shouldPersistError("PAYMENT_VERIFICATION_FAILED")).toBe(true)
+        expect(shouldPersistError("PAYMENT_INVALID_AMOUNT")).toBe(true)
+        expect(shouldPersistError("ENTITLEMENT_CONFLICT")).toBe(true)
+        expect(shouldPersistError("PAYMENT_CONFIGURATION_ERROR")).toBe(true)
+    })
+    it("Phase 5 expected/replay billing codes → false (NOT_FOUND + normal user conflict)", () => {
+        expect(shouldPersistError("PAYMENT_NOT_FOUND")).toBe(false)
+        expect(shouldPersistError("PAYMENT_IDEMPOTENCY_CONFLICT")).toBe(false)
+    })
     it("unknown operational codes default to true (conservative visibility)", () => {
         expect(shouldPersistError("SOME_NEW_UNMAPPED_CODE")).toBe(true)
     })

@@ -6,7 +6,8 @@
 // Policy سند (§19) — persist=false:
 //   VALIDATION_ERROR، MISSING_DAY_KEY، SAME_PASSWORD،
 //   NOT_FOUND (expected)، TASK_NOT_FOUND، USER_NOT_FOUND، NO_ROLLOVER_CANDIDATES،
-//   QUOTA_EXCEEDED، IDEMPOTENCY_CONFLICT (repeated request قابل replay نیست)
+//   QUOTA_EXCEEDED، IDEMPOTENCY_CONFLICT (repeated request قابل replay نیست)،
+//   PAYMENT_NOT_FOUND، PAYMENT_IDEMPOTENCY_CONFLICT (فاز ۵ — گام ۱۴)
 //   AUTH subset (INVALID_CREDENTIALS/UNAUTHORIZED/WRONG_PASSWORD): «subset منتخب» سند —
 //   در فاز ۲ default سیاست: ignore (تا security-telemetry bounded آینده تصمیم بگیرد)
 //   CONFLICT/BUSINESS «selected operational cases»: در فاز ۲ default: ignore (حدس نزدیم)
@@ -19,6 +20,15 @@
 // نکته‌ی ambiguity صریح (گزارش‌شده در پایان گام):
 // - «selected operational cases» برای CONFLICT/BUSINESS/AUTH در سند باز گذاشته شده؛
 //   حدس نزدیم و همه را ignore کردیم. فعال‌سازی موارد خاص نیازمند تصمیم مهدی است.
+//
+// فاز ۵ — گام ۱۴: کدهای billing در همین policy دسته‌بندی شدند (سند فاز ۵ §۲۲ + سند فاز ۲ §۱۹):
+// - شکست‌های عملیاتی billing (provider unavailable/rejected/invalid-response، state unresolved،
+//   verification failure، amount mismatch، entitlement conflict، configuration failure) در
+//   هیچ‌یک از دو فهرست نیستند و طبق default این policy **persist** می‌شوند — دقیقاً همان چیزی که
+//   §۲۲ می‌خواهد («Record operational failures»).
+// - تنها دو کد «انتظاری/بی‌سر‌و‌صدا» به فهرست ignore اضافه شدند: `PAYMENT_NOT_FOUND`
+//   (معادل NOT_FOUND → ignore) و `PAYMENT_IDEMPOTENCY_CONFLICT` (معادل normal user conflict → ignore،
+//   مثل IDEMPOTENCY_CONFLICT فاز ۱).
 
 /** کدهایی که طبق §19 هرگز نباید در ErrorLog ذخیره شوند */
 const NON_PERSISTENT_CODES: ReadonlySet<string> = new Set([
@@ -48,6 +58,9 @@ const NON_PERSISTENT_CODES: ReadonlySet<string> = new Set([
     "TASK_ALREADY_DONE",
     "TASK_NOT_ANALYZEABLE",
     "OVERDUE_TASK",
+    // BILLING (فاز ۵ — گام ۱۴): انتظاری/تکراری و بدون ارزش عملیاتی در ErrorLog
+    "PAYMENT_NOT_FOUND",
+    "PAYMENT_IDEMPOTENCY_CONFLICT",
 ])
 
 /** کدهایی که طبق §19 همیشه باید ذخیره شوند */

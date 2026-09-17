@@ -9,6 +9,8 @@
 //     P2002 → CONFLICT / DATABASE ، P2025 → NOT_FOUND / DATABASE
 // - Quota: QUOTA_EXCEEDED → 429 ، QUOTA_UNAVAILABLE → 503 (از taxonomy §6 — کد/status خود ServiceError)
 // - Provider: AI_PROVIDER_UNAVAILABLE → 503
+// - Billing/Entitlement (فاز ۵ — گام ۱۴): کدهای §20 در CODE_TAXONOMY نگاشت شده‌اند تا category/severity
+//   اعلام‌شده‌ی خودشان حفظ شود (نه fallback INTERNAL/ERROR)
 // - Unknown: INTERNAL / 500 با پیام امن generic
 // - Serialization failure: رکورد حداقلی امن INTERNAL
 //
@@ -67,6 +69,20 @@ const CODE_TAXONOMY: Record<string, { category: string; severity: string }> = {
     // CONFLICT (phase 1)
     IDEMPOTENCY_CONFLICT: { category: "CONFLICT", severity: "INFO" }, // 409
     AI_USAGE_CONFLICT: { category: "CONFLICT", severity: "WARNING" }, // 409
+    // BILLING / ENTITLEMENT (Phase 5) — گام ۱۴ observability integration (سند فاز ۵ §۲۰/§۲۱/§۲۲)
+    // category/severity دقیقاً همان مقداری است که taxonomy بیلینگ (app/lib/services/errors.ts)
+    // اعلام می‌کند؛ پیش از این گام این کدها در فهرست نبودند و همه با fallback
+    // INTERNAL/ERROR نرمال می‌شدند (اطلاعات operational taxonomy از دست می‌رفت).
+    PAYMENT_PROVIDER_UNAVAILABLE: { category: "EXTERNAL_SERVICE", severity: "ERROR" }, // 503 — provider outage/timeout (persist)
+    PAYMENT_PROVIDER_REJECTED: { category: "EXTERNAL_SERVICE", severity: "ERROR" }, // 503 — provider rejected create (persist)
+    PAYMENT_PROVIDER_INVALID_RESPONSE: { category: "EXTERNAL_SERVICE", severity: "ERROR" }, // 503 — malformed provider response (persist)
+    PAYMENT_STATE_UNRESOLVED: { category: "EXTERNAL_SERVICE", severity: "ERROR" }, // 503 — unreconcilable payment state (persist)
+    PAYMENT_VERIFICATION_FAILED: { category: "EXTERNAL_SERVICE", severity: "ERROR" }, // 402 — definitive verification failure (persist)
+    PAYMENT_INVALID_AMOUNT: { category: "CONFLICT", severity: "CRITICAL" }, // 409 — high-severity operational event (persist)
+    PAYMENT_CONFIGURATION_ERROR: { category: "INTERNAL", severity: "CRITICAL" }, // 500 — invalid/missing server config (persist)
+    ENTITLEMENT_CONFLICT: { category: "CONFLICT", severity: "WARNING" }, // 409 — invariant/concurrency failure (persist)
+    PAYMENT_IDEMPOTENCY_CONFLICT: { category: "CONFLICT", severity: "INFO" }, // 409 — expected replay/compat conflict (ignore)
+    PAYMENT_NOT_FOUND: { category: "NOT_FOUND", severity: "INFO" }, // 404 — expected not-found (ignore)
 }
 
 /** پیام امن generic برای خطاهای ناشناخته — جزئیات خام هرگز به کلاینت/لاگ نمی‌رود (§10) */

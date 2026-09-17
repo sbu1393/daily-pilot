@@ -19,8 +19,8 @@
 //   config، userId از context احراز‌شده، merchantOrderId و expiresAt سمت سرور ساخته می‌شوند؛
 //   هیچ ورودی client در این سرویس مصرف نمی‌شود و هیچ business value‌ای حدس زده نمی‌شود.
 // - idempotency (سند §6): کلید `userId + checkoutIdempotencyKey` (unique در اسکیمای فاز ۵)؛
-//   پارامترهای immutable ناسازگار → PAYMENT_IDEMPOTENCY_CONFLICT؛ `requestId` هرگز idempotency
-//   نیست و فقط correlation است (سند §6/§22).
+//   replay فقط state-based تصمیم‌گیری می‌کند (terminal عیناً برمی‌گردد، PENDING منقضی lazy-expire
+//   می‌شود)؛ `requestId` هرگز idempotency نیست و فقط correlation است (سند §6/§22).
 // - finalization (سند §13/§14/§28): فقط سفارش PENDING نهایی می‌شود؛ سفارش PAID فقط state نهایی
 //   را برمی‌گرداند (duplicate callback = no-op) و هرگز دوباره entitlement نمی‌گیرد؛ سفارش‌های
 //   terminal دیگر (FAILED/EXPIRED/CANCELED) زنده نمی‌شوند؛ mismatch مبلغ → PAYMENT_INVALID_AMOUNT
@@ -34,16 +34,44 @@
 //   attachProviderAuthority    → persist کردن authority برگردانده‌شده‌ی provider روی سفارش PENDING
 //   + lazy expiration سفارش PENDING گذشته از expiresAt داخل idempotency lookup
 //
+// گام ۱۱ (callback orchestration) روی همین فایل اضافه کرد:
+//   resolveCallbackOrder       → resolve سفارش callback از `ref` (merchantOrderId) + Authority،
+//                                با الزام تطابق هر دو و PaymentNotFoundError در نبود/عدم تطابق
+//   resolveCallbackResultUrls  → مقصدهای ثابت ریدایرکت مرورگر (success/failure) از config سروری
+//
+// `finalizeVerifiedPayment` در گام ۱۱ دست‌نخورده ماند: callback فقط خواندن state/expiry و
+// حلقه‌ی resolve→verify→finalize را orchestrate می‌کند و مالکیت transaction همان‌جا دست‌نخورده است.
+//
+// گام ۱۲ (subscription read) روی همین فایل اضافه کرد:
+//   getSubscriptionView  → نمای خواندنی و امن وضعیت اشتراک/دسترسی برای route (سند §25/§16/§17):
+//                          lazy expiration + effective plan از `entitlement.service` (بدون منطق تکراری)
+//                          و بدون هیچ شناسه‌ی حساس (authority/reference/userId/Entitlement.id).
+//                          تنها mutation ممکن همان lazy expiration موجود است؛ هیچ تماس providerی نیست.
+//
+// گام ۱۵ (ProductEvent) روی همین فایل اضافه کرد:
+//   FinalizePaymentResult.entitlementAction → صرفاً این واقعیت را برمی‌گرداند که در همین
+//                          finalization شاخه‌ی `activate` یا `renew` اجرا شد (سند §۲۳).
+//                          هیچ منطق/مقداری اضافه نشد و ثبت رویداد این‌جا انجام نمی‌شود؛
+//                          emission کار route و **پس از commit** تراکنش است (فقط برای finalized=true).
+//
 // همچنان خارج از scope (طبق قرارداد قطعی): تماس provider (این فایل provider-neutral است و
 // هیچ adapter/URL/merchant را نمی‌شناسد)، ثبت FAILED/failureCode، routeها، ProductEvent،
 // quota/getCurrentUser و admin.
 
 import { randomUUID } from "node:crypto"
 
+import type { UserPlan } from "@prisma/client"
+
 import { getBillingConfig, type BillingProviderId } from "../billing/config"
 import type { VerifyPaymentResult } from "../billing/provider"
 import type { PrismaClientLike } from "./aiUsage.service"
-import { activate, renew, type EntitlementRecord } from "./entitlement.service"
+import {
+    activate,
+    lazyExpire,
+    renew,
+    type EntitlementRecord,
+    type EntitlementStatusValue,
+} from "./entitlement.service"
 import {
     PaymentConfigurationError,
     PaymentIdempotencyConflictError,
@@ -126,12 +154,24 @@ export interface FinalizePaymentInput {
     verification: VerifyPaymentResult
 }
 
+/**
+ * فاز ۵ — گام ۱۵ (سند §۲۳): کدام mutation روی entitlement در finalization انجام شد.
+ * `ACTIVATED` = اولین فعال‌سازی (دوره‌ی جدید) · `RENEWED` = امتداد دوره‌ی فعال موجود (§۱۶).
+ * فقط برای انتخاب نام ProductEvent **بعد از commit** استفاده می‌شود؛ هیچ semantics جدیدی نمی‌سازد.
+ */
+export type EntitlementAction = "ACTIVATED" | "RENEWED"
+
 export interface FinalizePaymentResult {
     order: PaymentOrderRecord
     /** false = این فراخوانی هیچ mutationی انجام نداد (duplicate/PAID = no-op، سند §14). */
     finalized: boolean
     /** entitlement نهایی کاربر (فقط read) — در مسیر no-op همان ردیف قبلی برگردانده می‌شود. */
     entitlement: EntitlementRecord | null
+    /**
+     * شاخه‌ی entitlement که در همین finalization اجرا شد؛ `null` وقتی finalized=false
+     * (no-op/replay) — پس caller هرگز از این فیلد رویداد تکراری نمی‌سازد (سند §۲۳).
+     */
+    entitlementAction: EntitlementAction | null
 }
 
 /**
@@ -236,6 +276,142 @@ export function resolveCheckoutSettings(): CheckoutSettings {
     }
 }
 
+/** گام ۱۱ — مقصدهای ثابت نتیجه‌ی callback که route به مرورگر ریدایرکت می‌کند (سند §11). */
+export interface CallbackResultUrls {
+    successUrl: string
+    failureUrl: string
+}
+
+/**
+ * تنظیمات نتیجه‌ی callback (گام ۱۱): مقصدهای ثابت موفق/ناموفق فقط از config سروری.
+ * این مقادیر هرگز از query param ساخته نمی‌شوند (بدون open redirect) و در نبود/نامعتبر بودن
+ * هر کدام، نقص پیکربندی سرور است → `PAYMENT_CONFIGURATION_ERROR` (بدون افشای مقدار/secret).
+ */
+export function resolveCallbackResultUrls(): CallbackResultUrls {
+    try {
+        const config = getBillingConfig()
+        return {
+            successUrl: config.resultUrls.success,
+            failureUrl: config.resultUrls.failure,
+        }
+    } catch {
+        throw new PaymentConfigurationError()
+    }
+}
+
+/** ورودی resolve سفارش callback — هر دو مقدار از هند‌آف مرورگر و کاملاً UNTRUSTED (سند §11/§33). */
+export interface CallbackOrderLookupInput {
+    /** ارجاع داخلی سفارش (`ref` در callback URL) — همان `merchantOrderId` سروری. */
+    ref: string
+    /** Authority گزارش‌شده توسط provider در callback. */
+    authority: string
+}
+
+/**
+ * resolveCallbackOrder — resolve ایمن سفارش پرداخت برای callback (گام ۱۱ / سند §11).
+ *
+ * قاعده‌ی LOCKED (A2): سفارش اول با `merchantOrderId` (= `ref`) پیدا می‌شود و سپس **هر دو** شرط
+ * باید برقرار باشند: `order.merchantOrderId === ref` و `order.providerAuthority === authority`.
+ * هر نبود/عدم تطابق → همان `PAYMENT_NOT_FOUND` موجود (404)؛ هیچ کد خطای جدیدی ساخته نمی‌شود و
+ * هیچ افشای وجود/عدم‌وجود سفارش دیگری رخ نمی‌دهد (بدون IDOR و بدون leak).
+ *
+ * این operation هیچ mutationی انجام نمی‌دهد و هیچ تصمیمی درباره‌ی state/expiry نمی‌گیرد؛
+ * آن‌ها کار route (gate) و `finalizeVerifiedPayment` (claim شرطی) است.
+ */
+export async function resolveCallbackOrder(
+    db: PrismaClientLike,
+    input: CallbackOrderLookupInput,
+): Promise<PaymentOrderRecord> {
+    const ref = typeof input.ref === "string" ? input.ref.trim() : ""
+    const authority = typeof input.authority === "string" ? input.authority.trim() : ""
+    if (!ref || !authority) throw new PaymentNotFoundError()
+
+    const order = await findOrderByMerchantOrderId(db, ref)
+
+    // A2 — تطابق دوگانه: `ref` همان سفارش باشد و Authority با amount/providerAuthority ذخیره‌شده بخواند.
+    if (!order || order.merchantOrderId !== ref || order.providerAuthority !== authority) {
+        throw new PaymentNotFoundError()
+    }
+
+    return order
+}
+
+/** گام ۱۲ — نمای امن دسترسی؛ فقط فیلدهای مجاز §25 (بدون id/userId/هر شناسه‌ی عملیاتی). */
+export interface SubscriptionEntitlementView {
+    status: EntitlementStatusValue
+    /** فقط نام provider — هرگز شناسه/authority/reference/سفارش (D4/§33). */
+    provider: BillingProviderId | null
+    currentPeriodStart: string | null
+    currentPeriodEnd: string | null
+}
+
+/** گام ۱۲ — پاسخ خواندنی `GET /api/billing/subscription` (شکل قطعی D1). */
+export interface SubscriptionView {
+    plan: UserPlan
+    entitlement: SubscriptionEntitlementView | null
+    renewal: SubscriptionRenewalView
+}
+
+export interface SubscriptionRenewalView {
+    /** همیشه true: تمدید در MVP فقط checkout دستی است (بدون recurring/auto-renewal — سند §30/§39). */
+    available: boolean
+    /**
+     * سند §16: تمدید تنها روی دوره‌ی فعالِ هنوز معتبر، دوره را امتداد می‌دهد؛ در غیر آن
+     * (EXPIRED یا بدون ردیف) یک دوره‌ی تازه ساخته می‌شود. صرفاً از state پس از lazy expiration مشتق می‌شود.
+     */
+    mode: "EXTENDS_CURRENT" | "NEW_PERIOD"
+}
+
+/** تاریخ → ISO یا null؛ بدون ساخت مقدار جعلی و بدون فرار از قرارداد string|null در D1. */
+function toIsoOrNull(value: Date | null | undefined): string | null {
+    return value instanceof Date && !Number.isNaN(value.getTime()) ? value.toISOString() : null
+}
+
+/**
+ * getSubscriptionView — خواندن وضعیت اشتراک/دسترسی کاربر (گام ۱۲ / سند §25).
+ *
+ * قواعد LOCKED:
+ * - **قبل از پاسخ، lazy expiration انجام می‌شود** و effective plan از همان لایه (§17/§27) می‌آید؛
+ *   هیچ منطق انقضا/تمدیدی این‌جا تکرار نمی‌شود و هیچ حالت جدیدی ساخته نمی‌شود.
+ * - تنها mutation ممکن، همان materialize شدن `ACTIVE→EXPIRED` + `User.plan=FREE` در
+ *   `lazyExpire` است که فقط وقتی `now >= currentPeriodEnd` رخ می‌دهد (سند §17).
+ * - خروجی فقط فیلدهای امن §25/D1 است: plan · status · provider (فقط نام) · دوره‌ی جاری ·
+ *   renewal؛ هیچ `Entitlement.id`/`userId` و هیچ شناسه‌ی provider/پرداخت افشا نمی‌شود (D4/§33).
+ * - هیچ تماس providerی، هیچ DB transaction و هیچ نوشتن دیگری وجود ندارد.
+ */
+export async function getSubscriptionView(
+    db: PrismaClientLike,
+    userId: number,
+    now?: Date,
+): Promise<SubscriptionView> {
+    const at = resolveNow(now)
+
+    // §17/§27 — lazy expiration + effective plan فقط از entitlement.service (بدون منطق تکراری)
+    const { effectivePlan, entitlement } = await lazyExpire(db, userId, at)
+
+    // D2 — mode فقط از state پس از lazy expiration مشتق می‌شود
+    const mode: SubscriptionRenewalView["mode"] =
+        entitlement !== null &&
+        entitlement.status === "ACTIVE" &&
+        at.getTime() < entitlement.currentPeriodEnd.getTime()
+            ? "EXTENDS_CURRENT"
+            : "NEW_PERIOD"
+
+    return {
+        plan: effectivePlan,
+        entitlement:
+            entitlement === null
+                ? null
+                : {
+                      status: entitlement.status,
+                      provider: entitlement.provider,
+                      currentPeriodStart: toIsoOrNull(entitlement.currentPeriodStart),
+                      currentPeriodEnd: toIsoOrNull(entitlement.currentPeriodEnd),
+                  },
+        renewal: { available: true, mode },
+    }
+}
+
 /**
  * عمر سفارش هم یک ورودی سروری است؛ مقدار نامعتبر/غایب یک نقص پیکربندی سرور است (سند §20:
  * PAYMENT_CONFIGURATION_ERROR برای «invalid/missing server billing configuration»).
@@ -247,20 +423,6 @@ function assertOrderTtl(orderTtlMs: number): number {
     return orderTtlMs
 }
 
-/**
- * پارامترهای immutable یک checkout (سند §6: «compare immutable checkout parameters»):
- * مبلغ، ارز، مدت entitlement و provider. این‌ها همان snapshot محصول سروری‌اند؛ planCode در MVP
- * یک محصول ثابت (`PRO`) است و ستونی برای snapshot آن در PaymentOrder وجود ندارد (سند §3.4).
- */
-function hasSameCheckoutParameters(order: PaymentOrderRecord, product: CheckoutProduct): boolean {
-    return (
-        order.provider === product.provider &&
-        order.amount === product.amount &&
-        order.currency === product.currency &&
-        order.entitlementDays === product.entitlementDays
-    )
-}
-
 async function findOrderByKey(
     db: PrismaClientLike,
     userId: number,
@@ -268,6 +430,18 @@ async function findOrderByKey(
 ): Promise<PaymentOrderRecord | null> {
     const row = await db.paymentOrder.findUnique({
         where: { userId_checkoutIdempotencyKey: { userId, checkoutIdempotencyKey } },
+        select: ORDER_SELECT,
+    })
+    return (row as PaymentOrderRecord | null) ?? null
+}
+
+/** گام ۱۱ — lookup سفارش با `ref` داخلی؛ `merchantOrderId` در اسکیمای فاز ۵ `@unique` است. */
+async function findOrderByMerchantOrderId(
+    db: PrismaClientLike,
+    merchantOrderId: string,
+): Promise<PaymentOrderRecord | null> {
+    const row = await db.paymentOrder.findUnique({
+        where: { merchantOrderId },
         select: ORDER_SELECT,
     })
     return (row as PaymentOrderRecord | null) ?? null
@@ -311,10 +485,13 @@ async function readEntitlement(
  *
  * 1. پارامترهای محصول فقط از config سروری خوانده می‌شوند (client هیچ‌کدام را نمی‌دهد — سند §5).
  * 2. lookup روی `userId + checkoutIdempotencyKey` (unique اسکیمای فاز ۵).
- * 3. موجود با پارامترهای سازگار → همان سفارش reuse می‌شود (هیچ سفارش دومی ساخته نمی‌شود)؛ اگر
- *    آن سفارش PENDING و گذشته از `expiresAt` باشد، ابتدا lazy expire می‌شود (سند §14/§15).
- * 4. موجود با پارامترهای ناسازگار → PAYMENT_IDEMPOTENCY_CONFLICT (سند §6/§20).
- * 5. در نبود رکورد → سفارش PENDING با merchantOrderId/expiresAt سروری ساخته می‌شود؛ race روی
+ * 3. موجود → همان سفارش reuse می‌شود (هیچ سفارش دومی با همان کلید ساخته نمی‌شود)؛ تصمیم‌گیری فقط
+ *    state-based است (قرارداد گام ۱۰ — B4/B5/B3): سفارش terminal عیناً و بدون هیچ mutation/revive/RESET
+ *    برگردانده می‌شود و سفارش PENDINGِ گذشته از `expiresAt` ابتدا lazy expire شرطی می‌شود (§14/§15).
+ *    مقایسه‌ی immutable parameters از مسیر replay حذف شد: همه‌ی پارامترها snapshot سروری‌اند و
+ *    client هیچ‌کدام را نمی‌دهد، پس در replay چیزی برای «ناسازگاری» وجود ندارد و هر مسیر انحرافی
+ *    فقط یک 409 غیرقابل‌حل برای کلاینت می‌ساخت.
+ * 4. در نبود رکورد → سفارش PENDING با merchantOrderId/expiresAt سروری ساخته می‌شود؛ race روی
  *    کلید یکتا با bounded retry/re-read (الگوی موجود repo) مدیریت می‌شود.
  *
  * طبق سند §7/§10 این operation **هیچ تماس provider‌ای** انجام نمی‌دهد: authority و redirect
@@ -332,10 +509,11 @@ export async function prepareCheckout(
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         const existing = await findOrderByKey(db, input.userId, input.checkoutIdempotencyKey)
         if (existing) {
-            if (!hasSameCheckoutParameters(existing, product)) {
-                throw new PaymentIdempotencyConflictError()
-            }
-            // گام ۱۰ — سفارش PENDINGی که از expiresAt گذشته، همین‌جا (به‌صورت شرطی) EXPIRED می‌شود
+            // گام ۱۰ — سفارش موجود فقط بر اساس state تصمیم‌گیری می‌شود (قرارداد B4/B5/B3):
+            // - سفارش terminal (PAID/FAILED/CANCELED/EXPIRED) عیناً و بدون هیچ mutation، revive یا
+            //   RESET برگردانده می‌شود؛ خرید جدید نیازمند کلید idempotency تازه است.
+            // - سفارش PENDINGی که از expiresAt گذشته، همین‌جا (به‌صورت شرطی و race-safe) EXPIRED
+            //   می‌شود و state نهایی برگردانده می‌شود.
             const settled = await settleExpiredPendingOrder(db, existing, at)
             return { order: settled, reused: true }
         }
@@ -498,6 +676,7 @@ export async function finalizeVerifiedPayment(
                 order,
                 finalized: false,
                 entitlement: await readEntitlement(tx, order.userId),
+                entitlementAction: null,
             }
         }
 
@@ -537,13 +716,14 @@ export async function finalizeVerifiedPayment(
                     order: current,
                     finalized: false,
                     entitlement: await readEntitlement(tx, current.userId),
+                    entitlementAction: null,
                 }
             }
             throw new PaymentVerificationFailedError()
         }
 
         // entitlement داخل همان تراکنش — منطق entitlement دوباره پیاده نشده (سند §27)
-        const entitlement = await applyEntitlement(tx, order, at)
+        const { entitlement, action } = await applyEntitlement(tx, order, at)
 
         // link نهایی و خواندن state نهایی سفارش در همین تراکنش (سند §28 مرحله ۶)
         const finalizedOrder = (await tx.paymentOrder.update({
@@ -552,7 +732,7 @@ export async function finalizeVerifiedPayment(
             select: ORDER_SELECT,
         })) as PaymentOrderRecord
 
-        return { order: finalizedOrder, finalized: true, entitlement }
+        return { order: finalizedOrder, finalized: true, entitlement, entitlementAction: action }
     })) as FinalizePaymentResult
 }
 
@@ -565,7 +745,7 @@ async function applyEntitlement(
     tx: PrismaClientLike,
     order: PaymentOrderRecord,
     at: Date,
-): Promise<EntitlementRecord> {
+): Promise<{ entitlement: EntitlementRecord; action: EntitlementAction }> {
     const mutation = {
         userId: order.userId,
         provider: order.provider,
@@ -581,5 +761,8 @@ async function applyEntitlement(
     // EntitlementConflictError (در صورت نقض invariant) تراکنش را rollback می‌کند (سند §29)
     // هر خطای entitlement (مثل EntitlementConflictError) دست‌نخورده بالا می‌رود تا کل تراکنش
     // rollback شود: سفارش PAID نمی‌شود و سرویس موفقیت جعلی برنمی‌گرداند (سند §28/§29).
-    return isActiveExtension ? renew(tx, mutation, at) : activate(tx, mutation, at)
+    const entitlement = isActiveExtension ? await renew(tx, mutation, at) : await activate(tx, mutation, at)
+
+    // گام ۱۵: فقط گزارش کدام شاخه اجرا شد (بدون هیچ منطق جدید) — مصرف آن ProductEvent پس از commit است
+    return { entitlement, action: isActiveExtension ? "RENEWED" : "ACTIVATED" }
 }

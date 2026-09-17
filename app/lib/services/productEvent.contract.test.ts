@@ -1,6 +1,6 @@
 // فاز ۳ — گام ۳: تست‌های قرارداد ProductEvent (Taxonomy + Validation pure)
-// پوشش: هر ۱۱ رویداد معتبر، event ناشناخته، property ناشناخته، سقف‌های قرارداد،
-// deterministic output، عدم throw، عدم عبور داده حساس.
+// پوشش: هر رویداد معتبر (۱۱ فاز ۳ + ۲ billing فاز ۵ گام ۱۵)، event ناشناخته،
+// property ناشناخته، سقف‌های قرارداد، deterministic output، عدم throw، عدم عبور داده حساس.
 
 import { describe, expect, it } from "vitest"
 
@@ -13,11 +13,11 @@ import {
 } from "./productEvent.contract"
 
 // ---------------------------------------------------------------------------
-// 1) Taxonomy — دقیقاً ۱۱ رویداد
+// 1) Taxonomy — ۱۳ رویداد (۱۱ فاز ۳ + ۲ billing فاز ۵)
 // ---------------------------------------------------------------------------
 
 describe("taxonomy", () => {
-    it("defines exactly the 11 blueprint events", () => {
+    it("defines exactly the blueprint events (11 + 2 billing)", () => {
         expect([...PRODUCT_EVENT_NAMES]).toEqual([
             "auth.login_succeeded",
             "task.created",
@@ -30,10 +30,12 @@ describe("taxonomy", () => {
             "planner.suggestion_viewed",
             "planner.history_viewed",
             "profile.updated",
+            "billing.entitlement_activated",
+            "billing.entitlement_renewed",
         ])
     })
 
-    it("validates all 11 valid events with their allowlists", () => {
+    it("validates all 13 valid events with their allowlists", () => {
         const cases: Array<[string, Record<string, unknown>]> = [
             ["auth.login_succeeded", {}],
             ["task.created", { taskId: "t1", category: "work", status: "todo" }],
@@ -46,6 +48,11 @@ describe("taxonomy", () => {
             ["planner.suggestion_viewed", {}],
             ["planner.history_viewed", {}],
             ["profile.updated", { changedFields: ["name"] }],
+            ["billing.entitlement_activated", { provider: "ZARINPAL", entitlementDays: 30 }],
+            [
+                "billing.entitlement_renewed",
+                { provider: "ZARINPAL", entitlementDays: 30, renewalType: "EXTENDS_CURRENT" },
+            ],
         ]
         for (const [name, props] of cases) {
             const result = validateProductEvent(name, props)
@@ -77,6 +84,73 @@ describe("taxonomy", () => {
             expect(result.valid).toBe(false)
             if (!result.valid) expect(result.reason).toBe("unknown_event")
         }
+    })
+})
+
+// ---------------------------------------------------------------------------
+// 1b) فاز ۵ — گام ۱۵: allowlist رویدادهای billing (سند §۲۳)
+// ---------------------------------------------------------------------------
+
+describe("billing events allowlist (§23)", () => {
+    it("allows only provider + duration for first activation", () => {
+        expect(getAllowedProperties("billing.entitlement_activated")).toEqual([
+            "provider",
+            "entitlementDays",
+        ])
+        expect(
+            validateProductEvent("billing.entitlement_activated", {
+                provider: "ZARINPAL",
+                entitlementDays: 30,
+            }).valid,
+        ).toBe(true)
+    })
+
+    it("allows the renewal type only on the renewal event", () => {
+        expect(getAllowedProperties("billing.entitlement_renewed")).toEqual([
+            "provider",
+            "entitlementDays",
+            "renewalType",
+        ])
+        expect(
+            validateProductEvent("billing.entitlement_renewed", {
+                provider: "ZARINPAL",
+                entitlementDays: 30,
+                renewalType: "EXTENDS_CURRENT",
+            }).valid,
+        ).toBe(true)
+        // renewalType روی رویداد فعال‌سازی مجاز نیست (allowlist هر رویداد مستقل است)
+        expect(
+            validateProductEvent("billing.entitlement_activated", {
+                provider: "ZARINPAL",
+                entitlementDays: 30,
+                renewalType: "EXTENDS_CURRENT",
+            }).valid,
+        ).toBe(false)
+    })
+
+    it("rejects payment identifiers and provider secrets (§23 never-include list)", () => {
+        const forbidden: Array<Record<string, unknown>> = [
+            { authority: "A-123" },
+            { providerAuthority: "A-123" },
+            { providerReference: "R-1" },
+            { merchantOrderId: "mo-1" },
+            { merchantId: "merchant-secret" },
+            { amount: 100000 },
+            { cardNumber: "603799" },
+            { rawResponse: { ok: true } },
+            { error: "provider timeout" },
+        ]
+        for (const props of forbidden) {
+            for (const event of ["billing.entitlement_activated", "billing.entitlement_renewed"] as const) {
+                const result = validateProductEvent(event, props)
+                expect(result.valid, `${event} must reject ${Object.keys(props)[0]}`).toBe(false)
+            }
+        }
+    })
+
+    it("does not add any other billing event name to the taxonomy", () => {
+        const billing = PRODUCT_EVENT_NAMES.filter((name) => name.startsWith("billing."))
+        expect([...billing]).toEqual(["billing.entitlement_activated", "billing.entitlement_renewed"])
     })
 })
 

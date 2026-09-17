@@ -8,7 +8,8 @@
 // - سازگار با redaction/whitelist فاز ۰/۲: خروجی فقط شامل مقادیر safe و bounded است.
 
 // ============================================================================
-// Taxonomy — دقیقاً ۱۱ رویداد (§7). هر نام خارج از این لیست reject می‌شود.
+// Taxonomy — ۱۳ رویداد مجاز: ۱۱ رویداد فاز ۳ (§7) + ۲ رویداد billing فاز ۵ (§23).
+// هر نام خارج از این لیست reject می‌شود؛ هیچ رویداد دیگری مجاز نیست.
 // ============================================================================
 
 export const PRODUCT_EVENT_NAMES = [
@@ -23,6 +24,9 @@ export const PRODUCT_EVENT_NAMES = [
     "planner.suggestion_viewed",
     "planner.history_viewed",
     "profile.updated",
+    // فاز ۵ — گام ۱۵ (سند §۲۳): فقط همین دو رویداد billing مجاز است
+    "billing.entitlement_activated",
+    "billing.entitlement_renewed",
 ] as const
 
 export type ProductEventName = (typeof PRODUCT_EVENT_NAMES)[number]
@@ -66,6 +70,18 @@ const PLANNER_HISTORY_VIEWED = [] as const
  */
 const PROFILE_UPDATED = ["changedFields"] as const
 
+/**
+ * billing.entitlement_activated — اولین فعال‌سازی (سند فاز ۵ §۲۳):
+ * فقط provider + مدت خریداری‌شده. هرگز Authority/شناسه‌ی پرداخت/provider payload/خطای خام/کارت.
+ */
+const BILLING_ENTITLEMENT_ACTIVATED = ["provider", "entitlementDays"] as const
+
+/**
+ * billing.entitlement_renewed — تمدید دوره‌ی فعال (سند فاز ۵ §۲۳): provider + مدت + نوع تمدید.
+ * `renewalType` همان واژگان entitlement است (§۱۶): تمدید فقط امتداد دوره‌ی فعال است.
+ */
+const BILLING_ENTITLEMENT_RENEWED = ["provider", "entitlementDays", "renewalType"] as const
+
 /** نگاشت event → allowlist (readonly tuple از نام‌های مجاز). */
 const ALLOWLISTS: Readonly<Record<ProductEventName, readonly string[]>> = {
     "auth.login_succeeded": AUTH_LOGIN_SUCCEEDED,
@@ -79,6 +95,8 @@ const ALLOWLISTS: Readonly<Record<ProductEventName, readonly string[]>> = {
     "planner.suggestion_viewed": PLANNER_SUGGESTION_VIEWED,
     "planner.history_viewed": PLANNER_HISTORY_VIEWED,
     "profile.updated": PROFILE_UPDATED,
+    "billing.entitlement_activated": BILLING_ENTITLEMENT_ACTIVATED,
+    "billing.entitlement_renewed": BILLING_ENTITLEMENT_RENEWED,
 }
 
 /** دسترسی فقط‌خواندنی به allowlist یک event (برای تست/مستندسازی). */

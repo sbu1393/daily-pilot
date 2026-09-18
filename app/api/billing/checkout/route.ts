@@ -18,8 +18,10 @@
 //   هیچ مسیر open-redirect و هیچ ورودی client در آن وجود ندارد.
 // - log/return نمی‌شود (سند §33): merchant secret، raw provider request/response، raw error provider،
 //   card data، Authorization/cookie/JWT و بدنه‌ی خام درخواست.
-// - rate limit: Blueprint هیچ maxAttempts/window مشخصی برای checkout تعیین نکرده و limiter موجود عدد
-//   می‌خواهد؛ پس در این گام enforce نمی‌شود (correctness = idempotency + unique constraint — سند §25).
+// - rate limit (سخت‌سازی امنیتی): شروع پرداخت یک عملیات حساس/پرهزینه است (هر درخواست تازه یک
+//   فراخوانی provider + یک سفارش DB می‌سازد). از همان limiter درون‌حافظه‌ی موجود استفاده می‌شود
+//   (بدون dependency جدید) با کلید user-scoped — پس پشت پراکسی/NAT رفتار درست است. محدودیت فقط
+//   نرخ را می‌بندد و هیچ semantics دیگری (idempotency/state) را تغییر نمی‌دهد.
 // - خارج از scope این گام: callback/finalization (گام ۱۱)، subscription، ProductEvent (گام ۱۵)،
 //   quota، getCurrentUser، admin و هر تغییری در schema/migration.
 
@@ -31,6 +33,7 @@ import { PaymentProviderError } from "@/app/lib/billing/provider"
 import { buildRedirectUrl, zarinpalProvider } from "@/app/lib/billing/zarinpal.adapter"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
 import { getPrisma } from "@/app/lib/getPrisma"
+import { isRateLimited } from "@/app/lib/rateLimit"
 import {
     errorResponse,
     okResponse,
@@ -137,7 +140,20 @@ export async function POST(req: NextRequest) {
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 
-        // ۲) اعتبارسنجی Idempotency-Key (سند §6 مرحله ۲): required/non-empty پس از trim.
+        // ۲) rate limit — حداکثر ۱۰ شروع پرداخت در ۱۵ دقیقه برای هر کاربر احراز‌شده.
+        //    پیش از هر کار/کوئری/فراخوانی provider بررسی می‌شود تا ارسال انبوه سفارش و
+        //    hammering درگاه پرداخت بسته باشد. کلید شامل userId است، پس قابل دور زدن با IP نیست.
+        if (isRateLimited(`checkout:user:${user.id}`, 10, 15 * 60 * 1000)) {
+            return errorResponse(
+                429,
+                "RATE_LIMITED",
+                "تعداد درخواست‌های پرداخت زیاد شده؛ کمی بعد دوباره تلاش کن",
+                undefined,
+                context.requestId,
+            )
+        }
+
+        // ۳) اعتبارسنجی Idempotency-Key (سند §6 مرحله ۲): required/non-empty پس از trim.
         // Blueprint هیچ max length تعیین نکرده، پس هیچ عدد دلخواهی اضافه نشده است.
         const rawKey = req.headers.get("idempotency-key")
         const idempotencyKey = typeof rawKey === "string" ? rawKey.trim() : ""
@@ -149,12 +165,12 @@ export async function POST(req: NextRequest) {
             )
         }
 
-        // ۳) config سروری (سند §10) — خطای config به PAYMENT_CONFIGURATION_ERROR نگاشت شده است
+        // ۴) config سروری (سند §10) — خطای config به PAYMENT_CONFIGURATION_ERROR نگاشت شده است
         const settings = resolveCheckoutSettings()
         const provider = resolveCheckoutProvider(settings.provider)
         const prisma = getPrisma()
 
-        // ۴) idempotency lookup/create + lazy expiration سفارش PENDING (سند §6/§14/§15)
+        // ۵) idempotency lookup/create + lazy expiration سفارش PENDING (سند §6/§14/§15)
         const { order, reused } = await prepareCheckout(prisma, {
             userId: user.id,
             checkoutIdempotencyKey: idempotencyKey,
@@ -163,14 +179,14 @@ export async function POST(req: NextRequest) {
             requestId: context.requestId,
         })
 
-        // ۵) سفارش terminal (PAID/FAILED/CANCELED/EXPIRED) → نتیجه‌ی idempotent بدون هیچ mutation،
+        // ۶) سفارش terminal (PAID/FAILED/CANCELED/EXPIRED) → نتیجه‌ی idempotent بدون هیچ mutation،
         //    هیچ provider call و هیچ redirectی. هیچ revive و هیچ کد «already processed» وجود ندارد
         //    و خرید جدید نیازمند کلید idempotency تازه است (سند §14/§15).
         if (order.status !== "PENDING") {
             return checkoutResponse(order, null, context.requestId)
         }
 
-        // ۶) سفارش PENDING با authority → هیچ create دوباره‌ای؛ redirect از همان authority ذخیره‌شده
+        // ۷) سفارش PENDING با authority → هیچ create دوباره‌ای؛ redirect از همان authority ذخیره‌شده
         if (order.providerAuthority !== null) {
             return checkoutResponse(
                 order,
@@ -179,16 +195,16 @@ export async function POST(req: NextRequest) {
             )
         }
 
-        // ۷) سفارش PENDING بدون authority که «reuse» شده است یعنی یک تلاش قبلی، createPayment را
+        // ۸) سفارش PENDING بدون authority که «reuse» شده است یعنی یک تلاش قبلی، createPayment را
         //    موفق خوانده ولی authority را persist نکرده است. این‌جا هیچ create دوباره‌ای انجام نمی‌شود
         //    (خطر پرداخت تکراری نزد provider) و هیچ مقدار جعلی ساخته نمی‌شود → وضعیت قابل‌تعیین نیست.
         if (reused) throw new PaymentStateUnresolvedError()
 
-        // ۸) سفارش تازه‌ی PENDING → createPayment **بیرون از هر DB transaction** (سند §7/§10)
+        // ۹) سفارش تازه‌ی PENDING → createPayment **بیرون از هر DB transaction** (سند §7/§10)
         const callbackUrl = buildOrderCallbackUrl(settings.callbackUrl, order.merchantOrderId)
         const created = await requestProviderPayment(provider, order, settings, callbackUrl)
 
-        // ۹) persist کردن authority روی همان سفارش (شرطی و بدون overwrite). شکست این مرحله →
+        // ۱۰) persist کردن authority روی همان سفارش (شرطی و بدون overwrite). شکست این مرحله →
         //    سفارش PENDING می‌ماند و PAYMENT_STATE_UNRESOLVED برمی‌گردد (هیچ create دوباره‌ای).
         const attached = await attachProviderAuthority(prisma, {
             userId: user.id,
@@ -196,7 +212,7 @@ export async function POST(req: NextRequest) {
             authority: created.authority,
         })
 
-        // ۱۰) redirect صرفاً از authority ذخیره‌شده ساخته می‌شود؛ payload خام provider به client نمی‌رود
+        // ۱۱) redirect صرفاً از authority ذخیره‌شده ساخته می‌شود؛ payload خام provider به client نمی‌رود
         if (attached.providerAuthority === null) throw new PaymentStateUnresolvedError()
         return checkoutResponse(
             attached,

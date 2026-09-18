@@ -15,11 +15,17 @@ import type { NormalizedErrorRecord } from "./normalizeError"
 // ---------- Sensitive key families (سند §11) ----------
 
 const SENSITIVE_KEY_PATTERN =
-    /(password|passwd|pwd|passhash|passwordhash|password_hash|hash|token|access[_-]?token|refresh[_-]?token|jwt|cookie|authorization|api[_-]?key|apikey|secret|private[_-]?key|connection[_-]?string|database[_-]?url|prompt|system[_-]?prompt|user[_-]?prompt|request[_-]?body|raw[_-]?request|body|response|raw[_-]?response|card|card[_-]?number|card[_-]?holder|cvc|cvv|pan|payment|billing|invoice|ssn|email|phone|address|firstname|first[_-]?name|lastname|last[_-]?name|username)/i
+    /(password|passwd|pwd|passhash|passwordhash|password_hash|hash|token|access[_-]?token|refresh[_-]?token|jwt|cookie|authorization|api[_-]?key|apikey|secret|private[_-]?key|connection[_-]?string|database[_-]?url|prompt|system[_-]?prompt|user[_-]?prompt|request[_-]?body|raw[_-]?request|body|response|raw[_-]?response|card|card[_-]?number|card[_-]?holder|cvc|cvv|pan|payment|billing|invoice|ssn|email|phone|address|firstname|first[_-]?name|lastname|last[_-]?name|username|authority|merchant[_-]?id|ref[_-]?id|reference|card[_-]?pan|card[_-]?hash)/i
 
-/** الگوهای inline «کلید=مقدار» / «کلید: مقدار» داخل متن‌ها */
+/**
+ * الگوهای inline «کلید=مقدار» / «کلید: مقدار» داخل متن‌ها.
+ *
+ * افزوده‌ی امنیتی (authority/merchant_id/ref_id/reference/card_pan/card_hash):
+ * توکن‌های پرداخت زرین‌پال (Authority و ref_id و merchant_id) و داده‌ی کارت هرگز نباید
+ * به‌صورت خام در message/stack/console ظاهر شوند — حتی اگر یک خطای آینده آن‌ها را در متن بگذارد.
+ */
 const INLINE_SECRET_PATTERN =
-    /(password|passwd|pwd|passhash|passwordhash|token|access[_-]?token|refresh[_-]?token|jwt|cookie|authorization|api[_-]?key|apikey|secret|private[_-]?key|connection[_-]?string|database[_-]?url|cvc|cvv)\s*[=:]\s*("[^"]*"|'[^']*'|[^\s'",;&}]+)/gi
+    /(password|passwd|pwd|passhash|passwordhash|token|access[_-]?token|refresh[_-]?token|jwt|cookie|authorization|api[_-]?key|apikey|secret|private[_-]?key|connection[_-]?string|database[_-]?url|cvc|cvv|authority|merchant[_-]?id|ref[_-]?id|reference|card[_-]?pan|card[_-]?hash)\s*[=:]\s*("[^"]*"|'[^']*'|[^\s'",;&}]+)/gi
 
 // ---------- Limits (قرارداد Phase 2) ----------
 

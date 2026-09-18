@@ -104,17 +104,23 @@ function safeExtractStack(error: unknown): string | undefined {
 }
 
 /**
- * پراپرتی‌های primitive خودِ خطای Prisma (به‌جز code/message/stack) به‌عنوان متادیتای
- * تشخیصی حفظ می‌شود تا لایه‌ی redaction (گام ۳) بتواند مقادیر حساس را redact کند.
- * فقط primitive (string/number/boolean) — آبجکت/آرایه (مثل meta) وارد خروجی نمی‌شود؛
- * قرارداد §10: محتوا عمداً و بدون سقف به رکورد تزریق نمی‌شود (bounded: حداکثر ۱۰ پراپرتی).
+ * کلیدهای metadata **مجاز** برای خطاهای Prisma (allowlist-first — سند §13 / A6).
+ *
+ * قرارداد: metadata فقط از کلیدهای صریحاً تأییدشده ساخته می‌شود؛ هیچ پراپرتی دلبخواهی از
+ * آبجکت خطا کپی نمی‌شود (نه به‌عنوان «redact بعدی»، بلکه اصلاً وارد رکورد نمی‌شود).
+ * همه‌ی این کلیدها diagnostic/internal هستند و مقدارشان هم فقط primitive پذیرفته می‌شود.
  */
-function prismaExtraMetadata(error: object): Record<string, unknown> {
+const PRISMA_METADATA_ALLOWLIST = ["clientVersion", "batchRequestIdx"] as const
+
+/**
+ * فقط کلیدهای allowlistشده‌ی خطاهای Prisma را با مقدار primitive برمی‌گرداند.
+ * سقف ۱۰ پراپرتی حفظ شده است (عملاً کوچک‌تر از allowlist) و آبجکت/آرایه هرگز وارد نمی‌شود.
+ */
+function prismaAllowlistedMetadata(error: object): Record<string, unknown> {
     const out: Record<string, unknown> = {}
     try {
         const raw = error as Record<string, unknown>
-        for (const key of Object.keys(raw)) {
-            if (key === "code" || key === "message" || key === "stack") continue
+        for (const key of PRISMA_METADATA_ALLOWLIST) {
             if (Object.keys(out).length >= 10) break
             const val = raw[key]
             if (typeof val === "string" || typeof val === "number" || typeof val === "boolean") {
@@ -177,7 +183,7 @@ export function normalizeError(
                     severity: "WARNING",
                     safeMessage: "این مقدار قبلاً ثبت شده است",
                     stack: safeExtractStack(error),
-                    metadata: { ...prismaExtraMetadata(error), prismaCode: "P2002" },
+                    metadata: { ...prismaAllowlistedMetadata(error), prismaCode: "P2002" },
                 }
             }
             if (isPrismaRecordNotFound(error)) {
@@ -188,7 +194,7 @@ export function normalizeError(
                     severity: "INFO",
                     safeMessage: "رکورد موردنظر پیدا نشد",
                     stack: safeExtractStack(error),
-                    metadata: { ...prismaExtraMetadata(error), prismaCode: "P2025" },
+                    metadata: { ...prismaAllowlistedMetadata(error), prismaCode: "P2025" },
                 }
             }
         }

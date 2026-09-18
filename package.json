@@ -10,7 +10,8 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "analyze:daykey": "node --env-file=.env --experimental-strip-types --disable-warning=ExperimentalWarning scripts/analyze-daykey-migration.ts"
+    "analyze:daykey": "node --env-file=.env --experimental-strip-types --disable-warning=ExperimentalWarning scripts/analyze-daykey-migration.ts",
+    "bootstrap:admin": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/bootstrap-admin.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

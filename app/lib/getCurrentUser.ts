@@ -96,7 +96,7 @@ export async function getCurrentUser() {
     } catch (error) {
         // فاز صفر §26 — لاگ خام حذف شد. در این نقطه identity قطعی نیست (ممکن است پیش از
         // احراز هویت کامل اجرا شود) → context فقط requestId/endpoint دارد و هیچ userId ندارد.
-        recordError(error, createObservabilityContext("getCurrentUser"))
+        await recordError(error, createObservabilityContext("getCurrentUser"))
 
         throw error
     }

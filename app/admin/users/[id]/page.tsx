@@ -15,7 +15,7 @@
 import Link from "next/link"
 import { useParams } from "next/navigation"
 import { useCallback, useMemo } from "react"
-import { Activity, ArrowRight, Bot, ShieldAlert } from "lucide-react"
+import { Activity, ArrowRight, Bot, CreditCard, ShieldAlert } from "lucide-react"
 import {
     fetchAdminUserActivity,
     fetchAdminUserAiUsage,
@@ -28,9 +28,11 @@ import {
     buildAiUsagePageVM,
     buildPerUserQueryString,
     buildUserDetailVM,
+    entitlementStatusLabel,
     faDigits,
     formatTimestamp,
     formatUtilization,
+    paymentStatusLabel,
     planLabel,
     resolveListStatus,
     roleLabel,
@@ -137,6 +139,8 @@ export default function AdminUserDetailPage() {
 
     const activityVM = buildActivityPageVM(activity.data, activity.loading && activity.data === null, activity.error === null ? null : (activity.error?.message ?? null))
     const aiVM = buildAiUsagePageVM(aiUsage.data, aiUsage.loading && aiUsage.data === null, aiUsage.error === null ? null : (aiUsage.error?.message ?? null))
+    // فاز ۵ §۲۴ — بخش مستقل و read-only؛ null یعنی widget در دسترس نیست (جعل داده ممنوع)
+    const billing = vm.billingSummary
 
     return (
         <div className={styles.page}>
@@ -220,6 +224,56 @@ export default function AdminUserDetailPage() {
                         />
                     </div>
                     <p className={styles.statHint}>مصرف: {formatUtilization(vm.aiQuotaSummary.utilization)}</p>
+                </section>
+            )}
+
+            {/* اشتراک و پرداخت — read-only (فاز ۵ §۲۴/§۳۰) */}
+            {billing !== null && (
+                <section aria-labelledby="admin-ubilling-heading" className={styles.section}>
+                    <h2 id="admin-ubilling-heading" className={styles.sectionTitle}>
+                        <CreditCard size={16} aria-hidden="true" /> اشتراک و پرداخت
+                    </h2>
+                    <dl className={styles.defList}>
+                        <dt>طرح</dt>
+                        <dd>{planLabel(billing.plan)}</dd>
+                        {billing.entitlement === null ? (
+                            <>
+                                <dt>وضعیت اشتراک</dt>
+                                <dd className={styles.emptyCell}>اشتراکی برای این کاربر ثبت نشده است.</dd>
+                            </>
+                        ) : (
+                            <>
+                                <dt>وضعیت اشتراک</dt>
+                                <dd>
+                                    <span className={styles.chip}>
+                                        {entitlementStatusLabel(billing.entitlement.status)}
+                                    </span>
+                                    <span className={styles.identityMeta}> — {billing.entitlement.provider}</span>
+                                </dd>
+                                <dt>شروع دوره</dt>
+                                <dd>{formatTimestamp(billing.entitlement.currentPeriodStart)}</dd>
+                                <dt>پایان دوره</dt>
+                                <dd>{formatTimestamp(billing.entitlement.currentPeriodEnd)}</dd>
+                            </>
+                        )}
+                        <dt>آخرین پرداخت</dt>
+                        <dd>
+                            {billing.latestPayment === null
+                                ? "سفارش پرداختی ثبت نشده است."
+                                : `${paymentStatusLabel(billing.latestPayment.status)} — ${faDigits(billing.latestPayment.amount)} ${billing.latestPayment.currency} — ${formatTimestamp(billing.latestPayment.createdAt)}`}
+                        </dd>
+                        {billing.latestPayment !== null && billing.latestPayment.providerReferenceMasked !== null && (
+                            <>
+                                <dt>شناسه‌ی درگاه (ماسک‌شده)</dt>
+                                <dd dir="ltr" className={styles.mono}>
+                                    {billing.latestPayment.providerReferenceMasked}
+                                </dd>
+                            </>
+                        )}
+                    </dl>
+                    <p className={styles.statHint}>
+                        فقط خواندن — هیچ شناسه‌ی خام درگاه، هیچ مقدار پرداختی و هیچ تغییر طرحی در این پنل وجود ندارد.
+                    </p>
                 </section>
             )}
 

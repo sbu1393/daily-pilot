@@ -12,8 +12,10 @@ import type { Prisma } from "@prisma/client"
 
 import { getPrisma } from "@/app/lib/getPrisma"
 
+import { resolveEnvironment } from "./environment"
 import type { NormalizedErrorRecord } from "./normalizeError"
 import type { ObservabilityContext } from "./types"
+import { severityToConsoleLevel } from "./severityLevel"
 
 /** سقف طول رشته‌ها قبل از درج — دفاع دوم در عمق DB (لایه اول redactor است). */
 export const PERSIST_LIMITS = {
@@ -37,6 +39,8 @@ interface ErrorLogRow {
     message: string
     stack: string | null
     metadata?: Prisma.InputJsonValue
+    /** سند §8 — از deployment/config خوانده می‌شود (هرگز hard-code). null = config ست نشده. */
+    environment: string | null
 }
 
 /** ساخت سطر ErrorLog از رکورد redacted + context؛ خالص و بدون I/O. */
@@ -56,6 +60,7 @@ export function toErrorLogRow(
         message: (record.safeMessage ?? "").slice(0, PERSIST_LIMITS.message),
         stack: record.stack ? record.stack.slice(0, PERSIST_LIMITS.stack) : null,
         metadata: (record.metadata ?? undefined) as Prisma.InputJsonValue | undefined,
+        environment: resolveEnvironment(),
     }
 }
 
@@ -68,6 +73,7 @@ export function structuredConsoleFallback(
     try {
         console.error(
             JSON.stringify({
+                level: severityToConsoleLevel(record.severity),
                 channel: "persistError.fallback",
                 timestamp: new Date().toISOString(),
                 reason,
@@ -97,6 +103,30 @@ function makeDefaultCreate(): CreateFn {
 }
 
 /**
+ * گارد محیط تست: در unit tests هیچ I/O واقعی DB اجرا نمی‌شود.
+ *
+ * چرا لازم است: مسیر پاسخ‌دهی routes تست‌شده نباید به یک PostgreSQL واقعی وابسته شود و
+ * نباید connection pool باز کند. تست‌های unit با `deps.create` سناریو را کامل کنترل می‌کنند.
+ *
+ * پیش‌فرض در محیط test خاموش است؛ تست‌های integration با PostgreSQL واقعی
+ * (`*.db.test.ts`) آن را صریحاً روشن می‌کنند.
+ */
+let realPersistenceEnabled = !(process.env.VITEST || process.env.NODE_ENV === "test")
+
+/**
+ * روشن/خاموش کردن I/O واقعی DB — فقط برای تست‌های integration با PostgreSQL واقعی.
+ * مصرف: فایل‌های `*.db.test.ts` این را در `beforeAll` روشن و در `afterAll` خاموش می‌کنند.
+ */
+export function setRealPersistenceEnabled(enabled: boolean): void {
+    realPersistenceEnabled = enabled
+}
+
+/** وضعیت فعلی گارد — برای تست/تشخیص. */
+export function isRealPersistenceEnabled(): boolean {
+    return realPersistenceEnabled
+}
+
+/**
  * persistError — درج fail-open رکورد خطا در ErrorLog.
  *
  * - بدون transaction، بدون retry؛ یک insert تکی.
@@ -110,9 +140,9 @@ export async function persistError(
     deps?: { create?: CreateFn },
     options?: { skipTimeoutGuard?: boolean; timeoutMs?: number },
 ): Promise<void> {
-    // گارد محیط تست: بدون create تزریق‌شده، هیچ I/O واقعی دیتابیس اجرا نمی‌شود
-    // (VITEST/NODE_ENV=test توسط vitest ست می‌شود؛ تست‌ها با deps.create سناریو را کنترل می‌کنند).
-    if (!deps?.create && (process.env.VITEST || process.env.NODE_ENV === "test")) return
+    // گارد محیط تست: بدون create تزریق‌شده و بدون فعال‌سازی صریح، هیچ I/O واقعی دیتابیس اجرا نمی‌شود
+    // (تست‌های unit با deps.create سناریو را کنترل می‌کنند؛ تست‌های *.db.test.ts گارد را روشن می‌کنند).
+    if (!deps?.create && !realPersistenceEnabled) return
 
     const create = deps?.create ?? makeDefaultCreate()
     const row = toErrorLogRow(record, context)

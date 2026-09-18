@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
 
         return okMessageResponse("رمز عبور با موفقیت تغییر یافت ✅", 200, context.requestId)
     } catch (error) {
-        recordError(error, context)
+        await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
         return errorResponse(500, "INTERNAL", "خطای سرور", undefined, context.requestId)

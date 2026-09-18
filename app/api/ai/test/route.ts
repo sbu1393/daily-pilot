@@ -5,7 +5,6 @@ import { runAiSamples } from "@/app/lib/services/analysis.service"
 import { createObservabilityContext } from "@/src/lib/observability/context"
 import { recordError } from "@/src/lib/observability/recordError"
 import { resolvePlanPolicy, getMonthlyPeriod } from "@/app/lib/services/planPolicy.service"
-import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
 import { reserveQuota, completeQuota, releaseQuota } from "@/app/lib/services/aiQuota.service"
 import { markReleaseFailed } from "@/app/lib/services/aiUsage.service"
 import { QuotaUnavailableError } from "@/app/lib/services/errors"
@@ -53,8 +52,9 @@ export async function GET() {
 
         const prisma = getPrisma()
 
-        // فاز ۱ — ثبت فعالیت (بعد از rate limit، قبل از plan/quota — سند §17)
-        await touchAuthenticatedActivity(user.id, new Date(), prisma)
+        // فاز ۳ §۶/§۲۵ — این endpoint فقط debug است و **نباید** activity تولید کند:
+        // هیچ `touchAuthenticatedActivity` (lastSeenAt) و هیچ ProductEvent این‌جا ثبت نمی‌شود.
+        // (Phase 1 §17 برای مسیرهای meaningful است؛ این مسیر صراحتاً Exclude شده است.)
 
         // فاز ۱ — plan policy + period محلی کاربر (سند §۶) + reserve 3 units all-or-nothing (سند §16)
         const policy = resolvePlanPolicy({ plan: user.plan })
@@ -71,7 +71,7 @@ export async function GET() {
                 periodStart,
             })
         } catch (error) {
-            if (error instanceof QuotaUnavailableError) recordError(error, context)
+            if (error instanceof QuotaUnavailableError) await recordError(error, context)
             throw error
         }
 
@@ -88,7 +88,7 @@ export async function GET() {
                 // failureCode=RELEASE_FAILED برای reconciliation ثبت می‌شود (best-effort، بدون throw) و
                 // observability دقیقاً یک‌بار ثبت می‌کند؛ provider دوباره صدا زده نمی‌شود.
                 await markReleaseFailed(prisma, context.requestId)
-                recordError(new QuotaUnavailableError(), context)
+                await recordError(new QuotaUnavailableError(), context)
                 throw new QuotaUnavailableError()
             }
             throw error
@@ -98,7 +98,7 @@ export async function GET() {
         try {
             await completeQuota(prisma, context.requestId, undefined, { periodStart })
         } catch (error) {
-            if (error instanceof QuotaUnavailableError) recordError(error, context)
+            if (error instanceof QuotaUnavailableError) await recordError(error, context)
             throw error
         }
 
@@ -107,7 +107,7 @@ export async function GET() {
     } catch (error) {
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
-        recordError(error, context)
+        await recordError(error, context)
         return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)
     }
 }

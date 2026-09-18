@@ -90,7 +90,7 @@ export async function PATCH(
         } catch (error) {
             // فقط QUOTA_UNAVAILABLE (infrastructure) و دقیقاً یک‌بار — سپس همان error دوباره throw می‌شود
             // تا response/envelope فعلی دست‌نخورده بماند (toServiceErrorResponse تغییر نمی‌کند).
-            if (error instanceof QuotaUnavailableError) recordError(error, context)
+            if (error instanceof QuotaUnavailableError) await recordError(error, context)
             throw error
         }
 
@@ -118,14 +118,14 @@ export async function PATCH(
                 // provider دوباره صدا زده نمی‌شود، و failureCode=RELEASE_FAILED برای reconciliation
                 // ثبت می‌شود (best-effort، هرگز throw نمی‌کند) + ثبت در observability (§21).
                 await markReleaseFailed(prisma, context.requestId)
-                recordError(new QuotaUnavailableError(), context)
+                await recordError(new QuotaUnavailableError(), context)
                 throw new QuotaUnavailableError()
             }
 
             if (providerFailure) {
                 // سند §12 مرحله ۶ / §21: شکست نهایی provider از pipeline observability عبور می‌کند.
                 // outer catch برای ServiceErrorها خودش recordError نمی‌کند → دقیقاً یک رکورد (§18 فاز ۲).
-                recordError(providerFailure, context)
+                await recordError(providerFailure, context)
             }
             throw error
         }
@@ -135,7 +135,7 @@ export async function PATCH(
         try {
             await completeQuota(prisma, context.requestId, undefined, { periodStart })
         } catch (error) {
-            if (error instanceof QuotaUnavailableError) recordError(error, context)
+            if (error instanceof QuotaUnavailableError) await recordError(error, context)
             throw error
         }
 
@@ -165,7 +165,7 @@ export async function PATCH(
     } catch (error) {
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
-        recordError(error, context)
+        await recordError(error, context)
         return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)
     }
 }

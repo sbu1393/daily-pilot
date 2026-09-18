@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
 
         return okResponse(markers, { requestId: context.requestId })
     } catch (error) {
-        recordError(error, context)
+        await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
         return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)

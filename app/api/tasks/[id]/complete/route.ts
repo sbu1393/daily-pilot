@@ -66,7 +66,7 @@ export async function PATCH(
         // ADR-04: { ok, data: { task, result, summaries } }
         return okResponse({ task, result, summaries }, { requestId: context.requestId })
     } catch (error) {
-        recordError(error, context)
+        await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
         return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)

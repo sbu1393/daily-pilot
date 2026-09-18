@@ -158,6 +158,51 @@ describe("normalizeError — Prisma mapping (duck-typed, §9.11 boundary)", () =
         expect(out.metadata).toEqual({ prismaCode: "P2025" })
     })
 
+    // A6 — allowlist-first metadata: هیچ پراپرتی دلبخواهی از آبجکت خطا کپی نمی‌شود
+    it("allowlist-first: only approved keys enter metadata (arbitrary primitives excluded)", () => {
+        const out = normalizeError({
+            code: "P2002",
+            message: "Unique constraint failed",
+            clientVersion: "5.22.0",
+            batchRequestIdx: 2,
+            secret: "should-never-appear",
+            connectionString: "postgres://u:p@h/db",
+            prompt: "internal system prompt",
+        })
+
+        expect(out.metadata).toEqual({
+            clientVersion: "5.22.0",
+            batchRequestIdx: 2,
+            prismaCode: "P2002",
+        })
+        // سقف مرز normalization (≤10 پراپرتی) — خود allowlist به‌مراتب کوچک‌تر است
+        expect(Object.keys(out.metadata!).length).toBeLessThanOrEqual(10)
+    })
+
+    it("allowlist-first: non-approved properties are absent, not merely redacted afterwards", () => {
+        const out = normalizeError({
+            code: "P2025",
+            message: "Record not found",
+            secret: "s3cr3t",
+            userId: 42,
+        })
+
+        expect(out.metadata).not.toHaveProperty("secret")
+        expect(out.metadata).not.toHaveProperty("userId")
+        expect(JSON.stringify(out.metadata)).not.toContain("s3cr3t")
+    })
+
+    it("allowlist-first: object/array values are never copied into metadata", () => {
+        const out = normalizeError({
+            code: "P2002",
+            message: "Unique constraint failed",
+            clientVersion: { nested: "value" },
+            batchRequestIdx: [1, 2, 3],
+        })
+
+        expect(out.metadata).toEqual({ prismaCode: "P2002" })
+    })
+
     it("does not import @prisma/client (boundary — duck-typing only)", async () => {
         const src = await import("node:fs").then((fs) =>
             fs.promises.readFile("src/lib/observability/normalizeError.ts", "utf-8"),

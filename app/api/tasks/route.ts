@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
         // ADR-04: { ok, data } — aiSource حذف شد (همیشه null بود؛ A5/A6)
         return okResponse({ task }, { status: 201, requestId: context.requestId })
     } catch (error) {
-        recordError(error, context)
+        await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
         return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)
@@ -96,14 +96,14 @@ export async function GET(req: NextRequest) {
                 availableMinutes: summary.openBudgetMinutes,
             })
         } catch (error) {
-            recordError(error, context, { category: "INTERNAL", severity: "WARNING" })
+            await recordError(error, context, { category: "INTERNAL", severity: "WARNING" })
             advisor = null
         }
 
         // ADR-04: { ok, data: { tasks, summary, advisor } } — tasks با ترتیب اصلی سرویس
         return okResponse({ tasks, summary, advisor }, { requestId: context.requestId })
     } catch (error) {
-        recordError(error, context)
+        await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
         return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)

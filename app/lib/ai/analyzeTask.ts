@@ -1,4 +1,5 @@
 import { AiProviderUnavailableError } from "@/app/lib/services/errors"
+import { recordError } from "@/src/lib/observability/recordError"
 
 import { aiAnalysisSchema, type AiAnalysis } from "./aiSchema"
 import { mockAnalyze } from "./mock"
@@ -136,6 +137,15 @@ export async function analyzeTask(text: string): Promise<AiResult> {
     // production — سند §۱۲: شکست نهایی provider هرگز mock/success نیست
     if (!allowMockFallback) throw new AiProviderUnavailableError()
 
-    console.warn("⚠️ AI call failed after retries, falling back to mock:", (lastError as Error)?.message ?? lastError)
+    // فاز ۲ — سند §17: لاگ خام console در این محل حذف شد و شکست از همان boundary
+    // observability عبور می‌کند (normalize → redact → policy → persist → external seam).
+    // رفتار non-production/mock دقیقاً مثل قبل است (بدون throw، همان mock) — فقط کانال
+    // لاگ امن شد؛ متن خام پیام provider از طریق redaction همان boundary می‌گذرد.
+    // recordError خودش fail-open است، پس این مسیر هرگز پاسخ را نمی‌شکند.
+    await recordError(lastError ?? new Error("AI provider unavailable after retries"), {
+        requestId: "unknown",
+        endpoint: "analyzeTask",
+        feature: "ai",
+    })
     return { source: "mock", analysis: mockAnalyze(text), attempts: MAX_ATTEMPTS }
 }

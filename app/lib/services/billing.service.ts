@@ -687,7 +687,15 @@ export async function finalizeVerifiedPayment(
 
         // exact amount verification (سند §13): `null` یعنی provider مبلغ قابل استناد نداد و
         // mismatch نیست؛ در آن حالت mبلغ ذخیره‌شده جعل نمی‌شود (قرارداد گام ۵/۶).
-        if (input.verification.amount !== null && input.verification.amount !== order.amount) {
+        // exact amount verification (سند §13 + Release Blocker 2):
+        // null یعنی provider مبلغ قابل استناد برنگردانده → باید reject شود
+        // (پرداخت بدون تأیید مبلغ ریسک مالی دارد).
+        // mismatch → reject.
+        // match → ادامه.
+        if (
+            input.verification.amount === null ||
+            input.verification.amount !== order.amount
+        ) {
             throw new PaymentInvalidAmountError()
         }
 

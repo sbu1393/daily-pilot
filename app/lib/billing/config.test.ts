@@ -200,3 +200,76 @@ describe("resolveBillingConfig — invalid values (fail-fast)", () => {
         expect(resolveBillingConfig(env).zarinpal.timeoutMs).toBe(12_000)
     })
 })
+
+// ── RB6: HTTPS enforcement in production mode ────────────────────────
+
+describe("resolveBillingConfig — RB6: production HTTPS enforcement", () => {
+    it("rejects http:// for BILLING_ZARINPAL_BASE_URL in production mode", () => {
+        expect(() =>
+            resolveBillingConfig(
+                validEnv({
+                    [BILLING_ENV.mode]: "production",
+                    [BILLING_ENV.baseUrl]: "http://api.zarinpal.com/pg",
+                }),
+            ),
+        ).toThrow(/must use HTTPS in production mode/)
+    })
+
+    it("rejects http:// for BILLING_ZARINPAL_CALLBACK_URL in production mode", () => {
+        expect(() =>
+            resolveBillingConfig(
+                validEnv({
+                    [BILLING_ENV.mode]: "production",
+                    [BILLING_ENV.callbackUrl]: "http://app.example.com/callback",
+                }),
+            ),
+        ).toThrow(/must use HTTPS in production mode/)
+    })
+
+    it("rejects http:// for BILLING_RESULT_URL_SUCCESS in production mode", () => {
+        expect(() =>
+            resolveBillingConfig(
+                validEnv({
+                    [BILLING_ENV.mode]: "production",
+                    [BILLING_ENV.resultUrlSuccess]: "http://app.example.com/success",
+                }),
+            ),
+        ).toThrow(/must use HTTPS in production mode/)
+    })
+
+    it("rejects http:// for BILLING_RESULT_URL_FAILURE in production mode", () => {
+        expect(() =>
+            resolveBillingConfig(
+                validEnv({
+                    [BILLING_ENV.mode]: "production",
+                    [BILLING_ENV.resultUrlFailure]: "http://app.example.com/failure",
+                }),
+            ),
+        ).toThrow(/must use HTTPS in production mode/)
+    })
+
+    it("accepts http:// for BILLING_ZARINPAL_BASE_URL in sandbox mode (development flexibility)", () => {
+        expect(() =>
+            resolveBillingConfig(
+                validEnv({
+                    [BILLING_ENV.mode]: "sandbox",
+                    [BILLING_ENV.baseUrl]: "http://sandbox.zarinpal.com/pg",
+                }),
+            ),
+        ).not.toThrow()
+    })
+
+    it("accepts https:// for all URLs in production mode", () => {
+        expect(() =>
+            resolveBillingConfig(
+                validEnv({
+                    [BILLING_ENV.mode]: "production",
+                    [BILLING_ENV.baseUrl]: "https://api.zarinpal.com/pg",
+                    [BILLING_ENV.callbackUrl]: "https://app.example.com/callback",
+                    [BILLING_ENV.resultUrlSuccess]: "https://app.example.com/success",
+                    [BILLING_ENV.resultUrlFailure]: "https://app.example.com/failure",
+                }),
+            ),
+        ).not.toThrow()
+    })
+})

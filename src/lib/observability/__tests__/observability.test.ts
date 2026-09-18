@@ -171,6 +171,31 @@ describe("recordError — redaction", () => {
         expect(details.nested).toEqual({ secret: "[REDACTED]", visible: "v" })
     })
 
+    it("redacts payment tokens (authority/merchant_id/ref_id) in details and message", () => {
+        const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+        const AUTHORITY = "A00000000000000000000000000000123456"
+
+        recordError(
+            new ServiceError(500, "PAYMENT_STATE_UNRESOLVED", "state unresolved", {
+                authority: AUTHORITY,
+                merchantId: "merchant-1",
+                refId: "987",
+            }),
+            makeContext(),
+        )
+
+        const parsed = lastLog(spy)
+        const details = parsed.details as Record<string, unknown>
+        expect(details.authority).toBe("[REDACTED]")
+        expect(details.merchantId).toBe("[REDACTED]")
+        expect(details.refId).toBe("[REDACTED]")
+        expect(JSON.stringify(parsed)).not.toContain(AUTHORITY)
+
+        recordError(new Error(`verify failed authority=${AUTHORITY}`), makeContext())
+        const second = lastLog(spy)
+        expect(String(second.message)).not.toContain(AUTHORITY)
+    })
+
     it("redacts inline secrets inside the message text", () => {
         const spy = vi.spyOn(console, "error").mockImplementation(() => {})
 

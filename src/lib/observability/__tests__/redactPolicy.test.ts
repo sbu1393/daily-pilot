@@ -44,6 +44,17 @@ describe("redactError — sensitive key families (§11)", () => {
         { cvv: "456" },
         { payment: { payload: "x" } },
         { billing: { iban: "DE..." } },
+        // توکن‌های پرداخت provider (زرین‌پال) و داده‌ی کارت — هرگز خام نمی‌مانند
+        { authority: "A00000000000000000000000000000123456" },
+        { providerAuthority: "A00000000000000000000000000000123456" },
+        { merchantId: "merchant-123" },
+        { merchant_id: "merchant-123" },
+        { refId: "987654321" },
+        { ref_id: "987654321" },
+        { reference: "987654321" },
+        { cardPan: "6104337812345678" },
+        { card_pan: "6104337812345678" },
+        { cardHash: "abc123hash" },
     ]
 
     it.each(SECRET_FAMILIES.map((obj) => [Object.keys(obj)[0], obj] as const))(
@@ -88,6 +99,20 @@ describe("redactError — sensitive key families (§11)", () => {
         const out = redactError(record({ safeMessage: 'login failed with password=hunter2 and token="abc"' }))
         expect(out.safeMessage).not.toContain("hunter2")
         expect(out.safeMessage).not.toContain("abc")
+        expect(out.safeMessage).toContain("[REDACTED]")
+    })
+
+    it("masks inline payment tokens (authority/ref_id/merchant_id) inside message and stack", () => {
+        const AUTHORITY = "A00000000000000000000000000000999999"
+        const out = redactError(
+            record({
+                safeMessage: `verify failed authority=${AUTHORITY} merchant_id: merchant-777`,
+                stack: `Error: verify failed\n    at verify (authority=${AUTHORITY})`,
+            }),
+        )
+        expect(out.safeMessage).not.toContain(AUTHORITY)
+        expect(out.safeMessage).not.toContain("merchant-777")
+        expect(out.stack).not.toContain(AUTHORITY)
         expect(out.safeMessage).toContain("[REDACTED]")
     })
 

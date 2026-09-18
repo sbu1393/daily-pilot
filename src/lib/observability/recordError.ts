@@ -33,10 +33,13 @@ export interface RecordErrorMeta {
 
 // ---------- Redaction (فیلتر اطلاعات حساس قبل از چاپ) ----------
 
+// افزوده‌ی امنیتی: توکن‌های پرداخت (authority/merchant_id/ref_id/reference) و داده‌ی کارت
+// (card_pan/card_hash) در هر دو الگو پوشش داده می‌شوند تا مسیر console هم مثل مسیر
+// persistence برای دارایی‌های حساس پرداخت fail-safe باشد.
 const SENSITIVE_KEY_PATTERN =
-    /(password|passwd|pwd|passhash|passwordhash|password[_-]?hash|token|secret|credential|authorization|cookie|api[_-]?key|jwt|connection[_-]?string|database[_-]?url|private[_-]?key|card[_-]?number|cvc|cvv)/i
+    /(password|passwd|pwd|passhash|passwordhash|password[_-]?hash|token|secret|credential|authorization|cookie|api[_-]?key|jwt|connection[_-]?string|database[_-]?url|private[_-]?key|card[_-]?number|cvc|cvv|authority|merchant[_-]?id|ref[_-]?id|reference|card[_-]?pan|card[_-]?hash)/i
 const INLINE_SECRET_PATTERN =
-    /(password|passwd|pwd|passhash|passwordhash|password[_-]?hash|token|secret|credential|authorization|cookie|api[_-]?key|jwt|connection[_-]?string|database[_-]?url|private[_-]?key|card[_-]?number|cvc|cvv)\s*[=:]\s*("[^"]*"|'[^']*'|[^\s'",;&}]+)/gi
+    /(password|passwd|pwd|passhash|passwordhash|password[_-]?hash|token|secret|credential|authorization|cookie|api[_-]?key|jwt|connection[_-]?string|database[_-]?url|private[_-]?key|card[_-]?number|cvc|cvv|authority|merchant[_-]?id|ref[_-]?id|reference|card[_-]?pan|card[_-]?hash)\s*[=:]\s*("[^"]*"|'[^']*'|[^\s'",;&}]+)/gi
 const MAX_REDACT_DEPTH = 4
 const REDACTED = "[REDACTED]"
 

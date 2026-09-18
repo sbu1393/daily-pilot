@@ -17,10 +17,12 @@ const mocks = vi.hoisted(() => ({
     resolveCheckoutSettings: vi.fn(),
     createPayment: vi.fn(),
     buildRedirectUrl: vi.fn(),
+    isRateLimited: vi.fn(),
 }))
 
 vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: mocks.getCurrentUser }))
 vi.mock("@/app/lib/getPrisma", () => ({ getPrisma: mocks.getPrisma }))
+vi.mock("@/app/lib/rateLimit", () => ({ isRateLimited: mocks.isRateLimited }))
 vi.mock("@/src/lib/observability/recordError", () => ({ recordError: mocks.recordError }))
 vi.mock("@/app/lib/services/billing.service", () => ({
     prepareCheckout: mocks.prepareCheckout,
@@ -89,6 +91,7 @@ describe("POST /api/billing/checkout (§35 Checkout route tests)", () => {
         vi.clearAllMocks()
         mocks.getCurrentUser.mockResolvedValue(USER)
         mocks.getPrisma.mockReturnValue({})
+        mocks.isRateLimited.mockReturnValue(false)
         mocks.resolveCheckoutSettings.mockReturnValue(SETTINGS)
         mocks.buildRedirectUrl.mockImplementation(
             (authority: string) => `https://pay.example.com/start?Authority=${encodeURIComponent(authority)}`,
@@ -107,6 +110,36 @@ describe("POST /api/billing/checkout (§35 Checkout route tests)", () => {
         })
         expect(mocks.prepareCheckout).not.toHaveBeenCalled()
         expect(mocks.createPayment).not.toHaveBeenCalled()
+    })
+
+    it("rate limit exceeded → 429 RATE_LIMITED before any order/provider work", async () => {
+        mocks.isRateLimited.mockReturnValue(true)
+
+        const res = await post("key-1")
+
+        expect(res.status).toBe(429)
+        const body = await res.json()
+        expect(body.ok).toBe(false)
+        expect(body.error.code).toBe("RATE_LIMITED")
+        // کلید user-scoped است (نه IP) تا با شنود/تعویض IP دور نخورد
+        expect(mocks.isRateLimited).toHaveBeenCalledWith(
+            `checkout:user:${USER.id}`,
+            expect.any(Number),
+            expect.any(Number),
+        )
+        // هیچ سفارش/فراخوانی provider پیش از گارد رخ نمی‌دهد
+        expect(mocks.prepareCheckout).not.toHaveBeenCalled()
+        expect(mocks.createPayment).not.toHaveBeenCalled()
+    })
+
+    it("rate limit is only applied to authenticated callers (401 wins, limiter untouched)", async () => {
+        mocks.getCurrentUser.mockResolvedValue(null)
+        mocks.isRateLimited.mockReturnValue(true)
+
+        const res = await post("key-1")
+
+        expect(res.status).toBe(401)
+        expect(mocks.isRateLimited).not.toHaveBeenCalled()
     })
 
     it("missing Idempotency-Key → 400 validation error; blank-after-trim counts as missing", async () => {

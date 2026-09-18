@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
 
         return okResponse(updated, { message: "عکس پروفایل به‌روزرسانی شد ✅", requestId: context.requestId })
     } catch (error) {
-        recordError(error, context)
+        await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
         return errorResponse(500, "INTERNAL", "خطای سرور", undefined, context.requestId)
@@ -70,7 +70,7 @@ export async function DELETE() {
 
         return okMessageResponse("عکس پروفایل حذف شد", 200, context.requestId)
     } catch (error) {
-        recordError(error, context)
+        await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
         return errorResponse(500, "INTERNAL", "خطای سرور", undefined, context.requestId)

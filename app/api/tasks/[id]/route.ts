@@ -41,7 +41,7 @@ export async function GET(
 
         return okResponse(task, { requestId: context.requestId })
     } catch (error) {
-        recordError(error, context)
+        await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
         return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)
@@ -83,7 +83,7 @@ export async function DELETE(
 
         return okResponse({ id: deletedId, summary }, { message: "تسک حذف شد", requestId: context.requestId })
     } catch (error) {
-        recordError(error, context)
+        await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
         return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)
@@ -138,7 +138,7 @@ export async function PATCH(
 
         return okResponse(task, { message: "تسک به‌روزرسانی شد", requestId: context.requestId })
     } catch (error) {
-        recordError(error, context)
+        await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
         return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)

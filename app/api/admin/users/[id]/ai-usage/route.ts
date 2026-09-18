@@ -62,9 +62,10 @@ export async function GET(
             { requestId: context.requestId },
         )
     } catch (error) {
+        // فاز ۲ §17 — الگوی outer boundary: recordError(i) قبل از mapping، سپس پاسخ map‌شده.
+        await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
-        recordError(error, context)
         return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)
     }
 }

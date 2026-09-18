@@ -24,7 +24,7 @@ export async function GET() {
         context.userId = user.id
         return okResponse(user, { requestId: context.requestId })
     } catch (error) {
-        recordError(error, context)
+        await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
         return errorResponse(500, "INTERNAL", "خطای سرور", undefined, context.requestId)
@@ -88,7 +88,7 @@ export async function PATCH(req: NextRequest) {
 
         return okResponse(updated, { message: "اطلاعات حساب با موفقیت ذخیره شد", requestId: context.requestId })
     } catch (error) {
-        recordError(error, context)
+        await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
         return errorResponse(500, "INTERNAL", "خطای سرور", undefined, context.requestId)

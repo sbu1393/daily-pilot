@@ -211,11 +211,17 @@ describe("recordProductEvent", () => {
 
     // ------------------------------------------------------------------
     // 4) recordError روی شکست — بدون recursion
+    //
+    // ACCEPTED DEVIATION (فاز ۲ — F9): این فراخوانی داخل helper **همگام**
+    // (`reportPersistenceFailure`) است و عمداً await نمی‌شود؛ مسیر fail-open آنالیتیکس فاز ۳
+    // است و تصمیم پذیرش آن جداگانه اخذ می‌شود. هیچ recursion ای یا persistence دوباره‌ای رخ
+    // نمی‌دهد (این تست همان را اثبات می‌کند) و قرارداد سرویس دست‌نخورده باقی مانده است.
     // ------------------------------------------------------------------
 
     it("invokes recordError on persistence failure without recursion", async () => {
         const recordErrorMod = await import("@/src/lib/observability/recordError")
-        const spy = vi.spyOn(recordErrorMod, "recordError").mockImplementation(() => {})
+        // recordError فاز ۲ async است (A3: persistence پیش از resolve) → mock باید Promise برگرداند
+        const spy = vi.spyOn(recordErrorMod, "recordError").mockImplementation(async () => {})
         try {
             const create = vi.fn().mockRejectedValue(new Error("DB down"))
             const result = await recordProductEvent(
@@ -242,7 +248,8 @@ describe("recordProductEvent", () => {
 
     it("reports a fixed error factor without caller properties (no raw property logging)", async () => {
         const recordErrorMod = await import("@/src/lib/observability/recordError")
-        const spy = vi.spyOn(recordErrorMod, "recordError").mockImplementation(() => {})
+        // recordError فاز ۲ async است (A3: persistence پیش از resolve) → mock باید Promise برگرداند
+        const spy = vi.spyOn(recordErrorMod, "recordError").mockImplementation(async () => {})
         try {
             const create = vi.fn().mockRejectedValue(new Error("DB down"))
             await recordProductEvent(

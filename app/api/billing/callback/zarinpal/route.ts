@@ -95,8 +95,12 @@ function isPastDue(order: PaymentOrderRecord, now: Date): boolean {
  * (Authority/merchant/ref/پارامتر خام) وارد رکورد نمی‌شود، و شکست telemetry به‌خاطر fail-open بودن
  * `recordError` هرگز پاسخ (ریدایرکت) را نمی‌شکند.
  */
-function observeDuplicateCallback(context: ObservabilityContext): void {
-    recordError(new IdempotencyConflictError(), context, { category: "CONFLICT", severity: "INFO" })
+async function observeDuplicateCallback(context: ObservabilityContext): Promise<void> {
+    // فاز ۲ §14/A3 — این مشاهده هم از همان مرز observability و با `await` عبور می‌کند تا در مسیر
+    // پاسخ هیچ fire-and-forget ای نماند. کد `IDEMPOTENCY_CONFLICT` طبق policy فاز ۲ (§19)
+    // persist نمی‌شود (severity=INFO، فقط console) → عملاً هیچ I/O ای رخ نمی‌دهد و ریدایرکت
+    // هرگز روی DB بلاک نمی‌شود.
+    await recordError(new IdempotencyConflictError(), context, { category: "CONFLICT", severity: "INFO" })
 }
 
 // GET /api/billing/callback/zarinpal — بازگشت مرورگر کاربر از درگاه (سند §11)
@@ -110,7 +114,7 @@ export async function GET(req: NextRequest) {
     try {
         resultUrls = resolveCallbackResultUrls()
     } catch (error) {
-        recordError(error, context)
+        await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
         return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)
@@ -138,7 +142,7 @@ export async function GET(req: NextRequest) {
         // ۵) state gate (A5) — سفارش terminal هرگز provider را صدا نمی‌زند و هیچ‌وقت زنده نمی‌شود
         if (order.status === "PAID") {
             // duplicate callback = موفق idempotent (بدون provider/بدون mutation) + مشاهده‌ی کم‌نویز
-            observeDuplicateCallback(context)
+            await observeDuplicateCallback(context)
             return success()
         }
         if (order.status !== "PENDING") return failure() // FAILED / EXPIRED / CANCELED
@@ -163,7 +167,7 @@ export async function GET(req: NextRequest) {
                 amount: order.amount,
             })
         } catch (error) {
-            recordError(error, context)
+            await recordError(error, context)
             return failure()
         }
 
@@ -171,7 +175,7 @@ export async function GET(req: NextRequest) {
         const current = await resolveCallbackOrder(prisma, { ref, authority })
         if (current.status === "PAID") {
             // هم‌زمان توسط callback دیگری نهایی شده → همان موفقیت idempotent + مشاهده‌ی کم‌نویز
-            observeDuplicateCallback(context)
+            await observeDuplicateCallback(context)
             return success()
         }
         if (current.status !== "PENDING" || isPastDue(current, new Date())) return failure()
@@ -216,7 +220,7 @@ export async function GET(req: NextRequest) {
     } catch (error) {
         // PAYMENT_NOT_FOUND (ref ناموجود یا عدم تطابق Authority) رفتار عادی و بدون لاگ است؛
         // سایر شکست‌های عملیاتی (مبلغ نامعتبر، entitlement conflict، خطای غیرمنتظره) ثبت می‌شوند.
-        if (!(error instanceof PaymentNotFoundError)) recordError(error, context)
+        if (!(error instanceof PaymentNotFoundError)) await recordError(error, context)
         return failure()
     }
 }

@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
 
         return createSession(user, response)
     } catch (error) {
-        recordError(error, context)
+        await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
         return errorResponse(500, "INTERNAL", "خطای سرور", undefined, context.requestId)

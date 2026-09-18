@@ -218,12 +218,19 @@ describe("redactError — end-to-end with normalizeError", () => {
         expect(safe.safeMessage).toContain("[REDACTED]")
     })
 
-    it("metadata of a normalized prisma error keeps prismaCode but redacts extra secrets", () => {
-        const rec = normalizeError({ code: "P2002", connectionString: "postgres://u:p@h/db" })
+    it("metadata of a normalized prisma error keeps prismaCode and never carries arbitrary properties (A6)", () => {
+        const rec = normalizeError({
+            code: "P2002",
+            connectionString: "postgres://u:p@h/db",
+            clientVersion: "5.22.0",
+        })
         const safe = redactError(rec)
         const m = safe.metadata as any
         expect(m.prismaCode).toBe("P2002")
-        expect(m.connectionString).toBe("[REDACTED]")
+        expect(m.clientVersion).toBe("5.22.0")
+        // allowlist-first: پراپرتی دلبخواهی حتی به لایه‌ی redaction هم نمی‌رسد
+        expect(m).not.toHaveProperty("connectionString")
+        expect(JSON.stringify(m)).not.toContain("postgres://u:p@h/db")
     })
 })
 

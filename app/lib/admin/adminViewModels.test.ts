@@ -245,11 +245,13 @@ describe("user detail viewmodel (§15)", () => {
                 utilization: 0.1,
             },
             recentErrors: [],
+            billingSummary: null,
         }
         const vm = buildUserDetailVM(detail)
         expect(vm.user?.emailMasked).toBe("ga***@example.com")
         expect(vm.activitySummary?.totalEvents).toBe(3)
         expect(vm.aiQuotaSummary?.utilization).toBeCloseTo(0.1)
+        expect(vm.billingSummary).toBeNull()
     })
 
     it("treats null summaries as normal absence and null detail as not-found view", () => {
@@ -266,11 +268,13 @@ describe("user detail viewmodel (§15)", () => {
             activitySummary: null,
             aiQuotaSummary: null,
             recentErrors: [],
+            billingSummary: null,
         }
         const vm = buildUserDetailVM(detail)
         expect(vm.activitySummary).toBeNull()
         expect(vm.aiQuotaSummary).toBeNull()
         expect(vm.recentErrors).toEqual([])
+        expect(vm.billingSummary).toBeNull()
 
         const none = buildUserDetailVM(null)
         expect(none.user).toBeNull()

@@ -68,7 +68,6 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
         vi.unstubAllEnvs()
         mocks.getCurrentUser.mockResolvedValue(USER)
         mocks.isRateLimited.mockReturnValue(false)
-        mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
         mocks.reserveQuota.mockResolvedValue(undefined)
         mocks.completeQuota.mockResolvedValue(true)
         mocks.releaseQuota.mockResolvedValue(true)
@@ -270,16 +269,19 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
         expect(mocks.completeQuota).toHaveBeenCalledTimes(1)
     })
 
-    it("keeps lastSeenAt placement unchanged: after rate limit, before plan/quota (سند §17)", async () => {
+    it("does NOT touch user activity (lastSeenAt) — debug route is excluded (§6/§25 فاز ۳)", async () => {
         mocks.runAiSamples.mockResolvedValue(SAMPLES)
 
-        await GET()
+        const res = await GET()
 
+        expect(res.status).toBe(200)
+        // فاز ۳ §۶/§۲۵: `/api/ai/test` در فهرست Exclude است و نباید activity تولید کند
+        // → هیچ نوشتنی روی `User.lastSeenAt` رخ نمی‌دهد (نه در موفقیت، نه قبل از quota).
+        expect(mocks.touchAuthenticatedActivity).not.toHaveBeenCalled()
+        // ترتیب business actionهای واقعی: rate limit قبل از reserve
         const rateOrder = mocks.isRateLimited.mock.invocationCallOrder[0]
-        const activityOrder = mocks.touchAuthenticatedActivity.mock.invocationCallOrder[0]
         const reserveOrder = mocks.reserveQuota.mock.invocationCallOrder[0]
-        expect(activityOrder).toBeGreaterThan(rateOrder)
-        expect(reserveOrder).toBeGreaterThan(activityOrder)
+        expect(reserveOrder).toBeGreaterThan(rateOrder)
     })
 
     it("never bumps lastSeenAt on quota rejection", async () => {
@@ -288,9 +290,9 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
         const res = await GET()
 
         expect(res.status).toBe(429)
-        // touch قبل از reserve است (قرارداد فعلی سند §17 برای این endpoint) —
-        // اما هیچ ProductEvent مسیر وجود ندارد؛ quota rejection → بدون AI و بدون event.
+        // فاز ۳ §۶/§۲۵: این مسیر نه ProductEvent دارد و نه lastSeenAt — quota rejection
+        // → بدون AI، بدون event و بدون هیچ نوشتن activity.
         expect(mocks.runAiSamples).not.toHaveBeenCalled()
-        expect(mocks.touchAuthenticatedActivity).toHaveBeenCalledTimes(1) // placement فعلی دست‌نخورده
+        expect(mocks.touchAuthenticatedActivity).not.toHaveBeenCalled()
     })
 })

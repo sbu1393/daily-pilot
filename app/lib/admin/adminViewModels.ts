@@ -9,6 +9,7 @@
 
 import type {
     AdminActivityPage,
+    AdminBillingSummary,
     AdminErrorLogsPage,
     AdminErrorLogView,
     AdminOverview,
@@ -259,15 +260,23 @@ export type UserDetailVM = {
     activitySummary: AdminUserDetail["activitySummary"]
     aiQuotaSummary: AdminUserDetail["aiQuotaSummary"]
     recentErrors: AdminErrorLogView[]
+    /** فاز ۵ §۲۴ — read-only؛ null یعنی widget بیلیینگ unavailable است. */
+    billingSummary: AdminBillingSummary | null
 }
 
 /**
- * بخش‌های مستقل detail (§15): activitySummary/aiQuotaSummary می‌توانند null باشند
+ * بخش‌های مستقل detail (§15): activitySummary/aiQuotaSummary/billingSummary می‌توانند null باشند
  * (حالت عادی — widget فقط مخفی می‌شود)؛ recentErrors خالی یعنی خطایی در پنجره نبوده.
  */
 export function buildUserDetailVM(detail: AdminUserDetail | null): UserDetailVM {
     if (detail === null || detail.user === null || typeof detail.user !== "object") {
-        return { user: null, activitySummary: null, aiQuotaSummary: null, recentErrors: [] }
+        return {
+            user: null,
+            activitySummary: null,
+            aiQuotaSummary: null,
+            recentErrors: [],
+            billingSummary: null,
+        }
     }
     return {
         user: detail.user,
@@ -280,7 +289,20 @@ export function buildUserDetailVM(detail: AdminUserDetail | null): UserDetailVM 
                 ? detail.aiQuotaSummary
                 : null,
         recentErrors: Array.isArray(detail.recentErrors) ? detail.recentErrors : [],
+        billingSummary: isBillingSummary(detail.billingSummary) ? detail.billingSummary : null,
     }
+}
+
+/** گارد شکل widget بیلیینگ — رکورد نامعتبر/ناقص → null (بدون render داده‌ی ناقص). */
+function isBillingSummary(value: unknown): value is AdminBillingSummary {
+    if (value === null || typeof value !== "object") return false
+    const v = value as Record<string, unknown>
+    return (
+        typeof v.plan === "string" &&
+        (v.entitlement === null || typeof v.entitlement === "object") &&
+        (v.latestPayment === null || typeof v.latestPayment === "object") &&
+        Array.isArray(v.errorLogs)
+    )
 }
 
 // ---------- Per-user sub-lists viewmodels ----------
@@ -342,6 +364,39 @@ export function planLabel(plan: string): string {
 
 export function roleLabel(role: string): string {
     return role === "ADMIN" ? "مدیر" : "کاربر"
+}
+
+/**
+ * برچسب وضعیت entitlement — فقط نمایش؛ مقدار ناشناخته **بدون اختراع** همان کد خام را نشان می‌دهد.
+ * (فاز ۵ §۳۰/§۲۴: state ذخیره‌شده‌ی سرور، بدون هیچ derive/effective-plan در UI.)
+ */
+export function entitlementStatusLabel(status: string): string {
+    switch (status) {
+        case "ACTIVE":
+            return "فعال"
+        case "EXPIRED":
+            return "منقضی"
+        default:
+            return status
+    }
+}
+
+/** برچسب وضعیت سفارش پرداخت — فقط نمایش؛ مقدار ناشناخته همان کد خام می‌ماند. */
+export function paymentStatusLabel(status: string): string {
+    switch (status) {
+        case "PENDING":
+            return "در انتظار پرداخت"
+        case "PAID":
+            return "پرداخت‌شده"
+        case "FAILED":
+            return "ناموفق"
+        case "EXPIRED":
+            return "منقضی"
+        case "CANCELED":
+            return "لغو‌شده"
+        default:
+            return status
+    }
 }
 
 export function severityTone(severity: string): "critical" | "error" | "warning" | "info" | "neutral" {

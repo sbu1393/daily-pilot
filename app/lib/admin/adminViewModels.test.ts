@@ -9,9 +9,11 @@ import {
     buildUserDetailVM,
     buildUsersPageVM,
     buildUsersQueryString,
+    countBySeverity,
     faDigits,
     formatTimestamp,
     formatUtilization,
+    maskIdTail,
     planLabel,
     resolveAccessStatus,
     resolveListStatus,
@@ -186,39 +188,195 @@ describe("errors page viewmodel", () => {
 })
 
 describe("overview viewmodel — widgetهای مستقل (§12)", () => {
-    it("keeps all four widgets when present and derives no new metrics", () => {
+    it("keeps every available widget when present and derives no new metrics", () => {
         const overview: AdminOverview = {
-            users: { dau: 3, wau: 9, mau: 20 },
+            users: { total: 120, dau: 3, wau: 9, mau: 20 },
             activity: { totalInWindow: 12, byEventName: [{ eventName: "auth.login_succeeded", count: 7 }], byFeature: [], windowHours: 24 },
             aiQuota: { periodStart: "2026-09-01T00:00:00.000Z", reservedUnits: 30, consumedUnits: 12 },
-            errors: { totalInWindow: 4, bySeverity: [{ severity: "ERROR", count: 4 }], topErrors: [], windowHours: 24 },
+            aiUsage: { windowHours: 24, totalRequests: 40, requestsInWindow: 6, byStatus: [{ status: "CONSUMED", count: 5 }] },
+            errors: { totalInWindow: 4, totalAllTime: 90, bySeverity: [{ severity: "ERROR", count: 4 }], topErrors: [], windowHours: 24 },
+            billing: {
+                activeSubscriptions: 7,
+                paidInWindow: 3,
+                windowDays: 7,
+                recentPayments: [
+                    {
+                        id: "pay_01HZZZZZABCD",
+                        userId: 7,
+                        status: "PAID",
+                        amount: 199000,
+                        currency: "IRR",
+                        entitlementDays: 30,
+                        createdAt: "2026-09-17T08:00:00.000Z",
+                        paidAt: "2026-09-17T08:02:00.000Z",
+                    },
+                ],
+            },
+            recentErrors: [
+                {
+                    id: "e1",
+                    requestId: "req-1",
+                    userId: 5,
+                    endpoint: "/api/tasks",
+                    feature: "tasks",
+                    errorCode: "VALIDATION_ERROR",
+                    statusCode: 400,
+                    category: "VALIDATION",
+                    severity: "WARNING",
+                    message: "ورودی نامعتبر",
+                    metadata: { password: "secret" },
+                    environment: "prod",
+                    createdAt: "2026-09-17T08:00:00.000Z",
+                },
+            ],
         }
         const vm = buildOverviewVM(overview)
-        expect(vm.users).toEqual({ dau: 3, wau: 9, mau: 20 })
+        expect(vm.users).toEqual({ total: 120, dau: 3, wau: 9, mau: 20 })
         expect(vm.activity?.totalInWindow).toBe(12)
         expect(vm.aiQuota?.consumedUnits).toBe(12)
+        expect(vm.aiUsage?.totalRequests).toBe(40)
         expect(vm.errors?.bySeverity[0]?.severity).toBe("ERROR")
+        expect(vm.errors?.totalAllTime).toBe(90)
+        expect(vm.billing?.activeSubscriptions).toBe(7)
+        expect(vm.billing?.recentPayments).toHaveLength(1)
+        expect(vm.recentErrors).toHaveLength(1)
+        expect(vm.recentErrors[0]?.endpoint).toBe("/api/tasks")
     })
 
     it("hides only the unavailable widget (aiQuota null) — no fabricated data", () => {
         const overview = {
-            users: { dau: 0, wau: 0, mau: 0 },
+            users: { total: 5, dau: 0, wau: 0, mau: 0 },
             activity: { totalInWindow: 0, byEventName: [], byFeature: [], windowHours: 24 },
             aiQuota: null,
-            errors: { totalInWindow: 0, bySeverity: [], topErrors: [], windowHours: 24 },
+            aiUsage: null,
+            errors: { totalInWindow: 0, totalAllTime: null, bySeverity: [], topErrors: [], windowHours: 24 },
+            billing: null,
+            recentErrors: [],
         } as unknown as AdminOverview
         const vm = buildOverviewVM(overview)
         expect(vm.aiQuota).toBeNull()
+        expect(vm.aiUsage).toBeNull()
+        expect(vm.billing).toBeNull()
         expect(vm.activity).not.toBeNull()
         expect(vm.errors).not.toBeNull()
     })
 
     it("returns an all-null-safe viewmodel for null input", () => {
         const vm = buildOverviewVM(null)
-        expect(vm.users).toEqual({ dau: 0, wau: 0, mau: 0 })
+        expect(vm.users).toEqual({ total: null, dau: 0, wau: 0, mau: 0 })
         expect(vm.activity).toBeNull()
         expect(vm.aiQuota).toBeNull()
+        expect(vm.aiUsage).toBeNull()
         expect(vm.errors).toBeNull()
+        expect(vm.billing).toBeNull()
+        expect(vm.recentErrors).toEqual([])
+    })
+
+    it("rejects malformed widgets instead of rendering partial data", () => {
+        const overview = {
+            users: { total: "120", dau: 1, wau: 1, mau: 1 },
+            activity: { totalInWindow: 1, byEventName: [] },
+            aiQuota: { reservedUnits: "30", consumedUnits: 1 },
+            aiUsage: { totalRequests: 1, requestsInWindow: 1 },
+            errors: { totalInWindow: 1, bySeverity: [] },
+            billing: { activeSubscriptions: 1 },
+            recentErrors: "not-an-array",
+        } as unknown as AdminOverview
+        const vm = buildOverviewVM(overview)
+        expect(vm.users.total).toBeNull() // رشته ≠ عدد ⇒ unavailable، نه کست
+        expect(vm.aiQuota).toBeNull()
+        expect(vm.aiUsage).toBeNull()
+        expect(vm.billing).toBeNull()
+        expect(vm.recentErrors).toEqual([])
+        expect(vm.errors).not.toBeNull()
+    })
+
+    it("recent-error feed projects an allowlist and caps rows", () => {
+        const row = (i: number) => ({
+            id: `e${i}`,
+            requestId: `req-${i}`,
+            userId: i,
+            endpoint: "/api/tasks",
+            feature: "tasks",
+            errorCode: "INTERNAL",
+            statusCode: 500,
+            category: "INTERNAL",
+            severity: "ERROR",
+            message: `خطای ${i}`,
+            metadata: { token: "secret" },
+            stack: "at foo",
+            environment: "prod",
+            createdAt: "2026-09-17T08:00:00.000Z",
+        })
+        const overview = {
+            users: { total: 0, dau: 0, wau: 0, mau: 0 },
+            activity: null,
+            aiQuota: null,
+            aiUsage: null,
+            errors: null,
+            billing: null,
+            recentErrors: [row(1), "bad", null, row(2), row(3), row(4), row(5), row(6), row(7), row(8), row(9), row(10), row(11)],
+        } as unknown as AdminOverview
+        const vm = buildOverviewVM(overview)
+        expect(vm.recentErrors).toHaveLength(10) // سقف نمایش
+        expect(vm.recentErrors.map((e) => e.id)).toEqual([
+            "e1",
+            "e2",
+            "e3",
+            "e4",
+            "e5",
+            "e6",
+            "e7",
+            "e8",
+            "e9",
+            "e10",
+        ])
+        // metadata/stack هرگز در فید UI نیستند
+        expect(vm.recentErrors[0]).not.toHaveProperty("metadata")
+        expect(vm.recentErrors[0]).not.toHaveProperty("stack")
+    })
+
+    it("drops a recent-error row that is missing required safe fields", () => {
+        const overview = {
+            users: { total: 0, dau: 0, wau: 0, mau: 0 },
+            activity: null,
+            aiQuota: null,
+            aiUsage: null,
+            errors: null,
+            billing: null,
+            recentErrors: [{ id: "e1", errorCode: "INTERNAL", severity: "ERROR" }],
+        } as unknown as AdminOverview
+        expect(buildOverviewVM(overview).recentErrors).toEqual([])
+    })
+})
+
+describe("KPI helpers (فقط aggregate مستقیم سرور)", () => {
+    it("counts severity rows without inventing values", () => {
+        const counts = countBySeverity([
+            { severity: "CRITICAL", count: 2 },
+            { severity: "ERROR", count: 3 },
+            { severity: "WARNING", count: 1 },
+            { severity: "INFO", count: 4 },
+            { severity: "SOMETHING_ELSE", count: 5 },
+        ])
+        expect(counts).toEqual({ CRITICAL: 2, ERROR: 3, WARNING: 1, INFO: 4, OTHER: 5 })
+    })
+
+    it("aggregates duplicate severity rows and ignores invalid counts", () => {
+        const counts = countBySeverity([
+            { severity: "ERROR", count: 2 },
+            { severity: "ERROR", count: 5 },
+            { severity: "WARNING", count: Number.NaN },
+        ])
+        expect(counts.ERROR).toBe(7)
+        expect(counts.WARNING).toBe(0)
+        expect(countBySeverity([])).toEqual({ CRITICAL: 0, ERROR: 0, WARNING: 0, INFO: 0, OTHER: 0 })
+    })
+
+    it("masks internal identifiers to the last four characters", () => {
+        expect(maskIdTail("pay_01HZZZZZABCD")).toBe("••••ABCD")
+        expect(maskIdTail("abcd")).toBe("••••")
+        expect(maskIdTail("  ")).toBe("—")
     })
 })
 

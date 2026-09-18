@@ -30,8 +30,12 @@ export interface AdminUsersPage {
     hasMore: boolean
 }
 
-/** Widget کاربران فعال — fail-open: صفرها یعنی داده در دسترس نیست. */
+/**
+ * KPI کاربران — `total` کل کاربران ثبت‌شده است؛ `null` یعنی همان read ناموفق بوده
+ * (fail-open؛ هیچ عدد جعلی جای null نمی‌گذارد).
+ */
 export interface AdminActiveUsersWidget {
+    total: number | null
     dau: number
     wau: number
     mau: number
@@ -53,16 +57,53 @@ export interface AdminAiQuotaWidget {
 
 export interface AdminErrorStatsWidget {
     totalInWindow: number
+    /** کل رکوردهای ErrorLog (بدون پنجره) — null = read ناموفق. */
+    totalAllTime: number | null
     bySeverity: { severity: string; count: number }[]
     topErrors: { errorCode: string; count: number }[]
     windowHours: number
 }
 
+/**
+ * خلاصه‌ی درخواست‌های AI — شمارش رکوردهای AiUsageEvent (هر logical AI operation = یک رکورد).
+ * واحدهای سهمیه در widget `aiQuota` گزارش می‌شوند؛ هیچ توکن/محتوایی خوانده نمی‌شود.
+ */
+export interface AdminAiUsageSummaryWidget {
+    windowHours: number
+    totalRequests: number
+    requestsInWindow: number
+    byStatus: { status: string; count: number }[]
+}
+
+/** پرداخت اخیر داشبورد — allowlist؛ هیچ authority/reference/payload provider اینجا نیست. */
+export interface AdminDashboardPaymentView {
+    id: string
+    userId: number
+    status: string
+    amount: number
+    currency: string
+    entitlementDays: number
+    createdAt: string
+    paidAt: string | null
+}
+
+/** KPI بیلیینگ — فقط state ذخیره‌شده (بدون lazy expiration / effective-plan resolve). */
+export interface AdminBillingWidget {
+    activeSubscriptions: number
+    paidInWindow: number
+    windowDays: number
+    recentPayments: AdminDashboardPaymentView[]
+}
+
+/** خروجی نمای کلی — هر widget مستقل است؛ شکست یکی بقیه را از کار نمی‌اندازد. */
 export interface AdminOverview {
     users: AdminActiveUsersWidget
     activity: AdminActivityWidget
     aiQuota: AdminAiQuotaWidget | null
+    aiUsage: AdminAiUsageSummaryWidget | null
     errors: AdminErrorStatsWidget
+    billing: AdminBillingWidget | null
+    recentErrors: AdminErrorLogView[]
 }
 
 export interface AdminAiQuotaSummary {

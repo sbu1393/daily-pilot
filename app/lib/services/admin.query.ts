@@ -20,10 +20,15 @@
 import { getPrisma } from "@/app/lib/getPrisma"
 import { UserNotFoundError } from "./errors"
 import { getMonthlyPeriod, resolvePlanPolicy } from "./planPolicy.service"
-import { listErrorLogs, getErrorStats } from "@/src/lib/observability/errorReporting"
+import {
+    listErrorLogs,
+    getErrorStats,
+    type GetErrorStatsResult,
+} from "@/src/lib/observability/errorReporting"
 import {
     listProductEvents,
     getEventUsageStats,
+    type GetEventUsageStatsResult,
     type ProductEventQueryOptions,
     type ProductEventView,
 } from "./productEvent.query"
@@ -358,6 +363,95 @@ export interface AdminAiQuotaWidget {
     consumedUnits: number
 }
 
+/** KPI کاربران — `total` = کل کاربران ثبت‌شده؛ null یعنی همان read ناموفق بوده (بدون عدد جعلی). */
+export interface AdminUsersWidget {
+    total: number | null
+    dau: number
+    wau: number
+    mau: number
+}
+
+/**
+ * آمار خطا برای داشبورد = همان primitive فاز ۲ (§۲۷) + شمارش کل رکوردها به‌عنوان KPI جدا.
+ * `bySeverity`/`topErrors` پنجره‌ای می‌مانند (windowHours)؛ `totalAllTime` بدون پنجره است.
+ */
+export interface AdminErrorStatsWidget extends GetErrorStatsResult {
+    /** تعداد کل رکوردهای ErrorLog — null = read ناموفق (widget مستقل، fail-open) */
+    totalAllTime: number | null
+}
+
+/**
+ * خلاصه‌ی درخواست‌های AI — شمارش رکوردهای AiUsageEvent (هر logical AI operation = یک رکورد).
+ * واحدهای سهمیه در widget `aiQuota` گزارش می‌شوند؛ اینجا هیچ توکن/محتوایی خوانده نمی‌شود
+ * (prompt/response عمداً persist نمی‌شوند).
+ */
+export interface AdminAiUsageSummaryWidget {
+    windowHours: number
+    /** کل درخواست‌های منطقی ثبت‌شده (بدون پنجره) */
+    totalRequests: number
+    /** همان شمارش در پنجره‌ی windowHours اخیر */
+    requestsInWindow: number
+    /** توزیع بر اساس وضعیت رزرو (RESERVED/CONSUMED/RELEASED) */
+    byStatus: { status: string; count: number }[]
+}
+
+/** پرداخت اخیر داشبورد — allowlist صریح؛ هیچ authority/reference/payload provider اینجا نیست. */
+export interface AdminDashboardPaymentView {
+    id: string
+    userId: number
+    status: string
+    amount: number
+    currency: string
+    entitlementDays: number
+    createdAt: string
+    paidAt: string | null
+}
+
+/** KPI بیلیینگ — فقط state ذخیره‌شده (بدون lazy expiration، بدون effective-plan resolve). */
+export interface AdminBillingWidget {
+    /** ردیف‌های ACTIVE که currentPeriodEnd آن‌ها در آینده است */
+    activeSubscriptions: number
+    /** سفارش‌های PAID در پنجره‌ی اخیر (روی paidAt) */
+    paidInWindow: number
+    windowDays: number
+    recentPayments: AdminDashboardPaymentView[]
+}
+
+/** خروجی نهایی نمای کلی — هر widget مستقل است (§۱۲: شکست یکی بقیه را از کار نمی‌اندازد). */
+export interface AdminOverview {
+    users: AdminUsersWidget
+    activity: GetEventUsageStatsResult
+    aiQuota: AdminAiQuotaWidget | null
+    aiUsage: AdminAiUsageSummaryWidget | null
+    errors: AdminErrorStatsWidget
+    billing: AdminBillingWidget | null
+    recentErrors: AdminErrorLogView[]
+}
+
+/** کلاینت‌های تزریق‌پذیر widgetهای جدید داشبورد (هم‌الگوی prismaClient/prisma موجود). */
+export interface AdminOverviewTotalUsersClient {
+    user: { count: (args: unknown) => Promise<number> }
+}
+
+export interface AdminOverviewAiUsageClient {
+    aiUsageEvent: {
+        count: (args: unknown) => Promise<number>
+        groupBy: (args: unknown) => Promise<unknown[]>
+    }
+}
+
+export interface AdminOverviewBillingClient {
+    entitlement: { count: (args: unknown) => Promise<number> }
+    paymentOrder: {
+        count: (args: unknown) => Promise<number>
+        findMany: (args: unknown) => Promise<unknown[]>
+    }
+}
+
+export interface AdminOverviewErrorClient {
+    errorLog: { count: (args: unknown) => Promise<number> }
+}
+
 export interface AdminOverviewOptions {
     /** تزریق client شمارش active users (الگوی getActiveUserStats) */
     prismaClient?: Parameters<typeof getActiveUserStats>[1]
@@ -365,19 +459,87 @@ export interface AdminOverviewOptions {
     prisma?: {
         aiUsage: { aggregate: (args: unknown) => Promise<unknown> }
     }
+    /** تزریق client شمارش کل کاربران (KPI total) */
+    totalUsersClient?: AdminOverviewTotalUsersClient
+    /** تزریق client آمار AiUsageEvent (widget aiUsage) */
+    aiUsageClient?: AdminOverviewAiUsageClient
+    /** تزریق client آمار بیلیینگ (widget billing) */
+    billingClient?: AdminOverviewBillingClient
+    /** تزریق client شمارش کل ErrorLog (KPI totalAllTime) */
+    errorClient?: AdminOverviewErrorClient
+    /** تزریق client فید خطاهای اخیر (هم‌قرارداد getAdminErrorLogs) */
+    recentErrorsClient?: NonNullable<AdminErrorLogsOptions["prisma"]>
     now?: Date
 }
 
+// ---------- Dashboard widget bounds/helpers (bounded؛ بدون اسکن تمام‌جدول) ----------
+
+/** پنجره‌ی KPIهای داشبورد (فعال/خطا/درخواست AI) — ۲۴ ساعت. */
+const ADMIN_OVERVIEW_WINDOW_HOURS = 24
+/** حداکثر ردیف فید خطاهای اخیر داشبورد. */
+export const ADMIN_OVERVIEW_RECENT_ERRORS = 8
+/** حداکثر ردیف پرداخت‌های اخیر داشبورد. */
+export const ADMIN_OVERVIEW_RECENT_PAYMENTS = 5
+/** پنجره‌ی «فعالیت پرداخت اخیر» روی PaymentOrder.paidAt. */
+export const ADMIN_BILLING_ACTIVITY_WINDOW_DAYS = 7
+
+/** نتیجه‌ی groupBy وضعیت AiUsageEvent → shape امن و مرتب (نزولی). */
+function toStatusCounts(rows: unknown[]): { status: string; count: number }[] {
+    return rows
+        .filter((row): row is Record<string, unknown> => row !== null && typeof row === "object")
+        .map((row) => {
+            const r = row as { status?: unknown; _count?: { _all?: unknown } }
+            return {
+                status: typeof r.status === "string" ? r.status : "UNKNOWN",
+                count: typeof r._count?._all === "number" ? r._count._all : 0,
+            }
+        })
+        .sort((a, b) => b.count - a.count)
+}
+
+/** projection پرداخت داشبورد — allowlist صریح؛ ردیف ناقص → null (بدون نمایش داده‌ی ناقص). */
+function toAdminDashboardPaymentView(row: unknown): AdminDashboardPaymentView | null {
+    try {
+        const r = row as Record<string, unknown>
+        if (typeof r.id !== "string" || typeof r.status !== "string") return null
+        if (typeof r.userId !== "number" || typeof r.amount !== "number") return null
+        if (typeof r.currency !== "string" || typeof r.entitlementDays !== "number") return null
+        if (!(r.createdAt instanceof Date)) return null
+        return {
+            id: r.id,
+            userId: r.userId,
+            status: r.status,
+            amount: r.amount,
+            currency: r.currency,
+            entitlementDays: r.entitlementDays,
+            createdAt: r.createdAt.toISOString(),
+            paidAt: r.paidAt instanceof Date ? r.paidAt.toISOString() : null,
+        }
+    } catch {
+        return null
+    }
+}
+
+/** فقط عدد متناهی را قبول می‌کند؛ هر چیز دیگر null (هیچ عدد جعلی ساخته نمی‌شود). */
+function safeCount(value: unknown): number | null {
+    return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
 /**
- * getAdminOverview — چهار widget مستقل داشبورد (§12):
- *   users    → getActiveUserStats (فاز ۳؛ User.lastSeenAt؛ fail-open zeros)
- *   activity → getEventUsageStats (فاز ۳؛ ProductEvent؛ fail-open)
- *   aiQuota  → aggregateAiUsage دوره‌ی جاری (خواندنی جدید؛ شکست → null = unavailable)
- *   errors   → getErrorStats (فاز ۲؛ fail-open)
- * شکست یک widget فقط همان widget را تحت تأثیر می‌گذارد؛ هیچ AdminStats/cache جدید.
+ * getAdminOverview — widgetهای مستقل داشبورد عملیاتی (§12):
+ *   users       → getActiveUserStats (فاز ۳؛ fail-open zeros) + total (کل ثبت‌نام‌شده‌ها؛ null = unavailable)
+ *   activity    → getEventUsageStats (فاز ۳؛ ProductEvent؛ fail-open)
+ *   aiQuota     → aggregate دوره‌ی جاری سهمیه (شکست → null)
+ *   aiUsage     → شمارش AiUsageEvent + توزیع status (شکست → null)
+ *   errors      → getErrorStats (فاز ۲؛ fail-open) + totalAllTime (null = unavailable)
+ *   billing     → شمارش entitlement فعال + سفارش‌های PAID اخیر + ۵ پرداخت آخر (شکست → null)
+ *   recentErrors→ getAdminErrorLogs با projection فاز ۴ (bounded؛ شکست → [])
+ * همه‌ی خواندنی‌ها bounded (count/aggregate/groupBy/take) و فقط read هستند؛
+ * شکست هر widget فقط همان widget را unavailable می‌کند و هیچ AdminStats/cache جدیدی ساخته نمی‌شود.
  */
-export async function getAdminOverview(options: AdminOverviewOptions = {}) {
+export async function getAdminOverview(options: AdminOverviewOptions = {}): Promise<AdminOverview> {
     const now = isValidDate(options.now) ? options.now : new Date()
+    const windowSince = new Date(now.getTime() - ADMIN_OVERVIEW_WINDOW_HOURS * 60 * 60 * 1000)
 
     // widget 1 — users (قرارداد fail-open فاز ۳ حفظ می‌شود)
     const prismaClient =
@@ -390,12 +552,27 @@ export async function getAdminOverview(options: AdminOverviewOptions = {}) {
                           getPrismaLate().user.count(args),
                   },
               } as Parameters<typeof getActiveUserStats>[1]))
-    const users = prismaClient
+    const activeUsers = prismaClient
         ? await getActiveUserStats(now, prismaClient)
         : { dau: 0, wau: 0, mau: 0 }
 
+    let totalUsers: number | null = null
+    try {
+        const totalClient =
+            options.totalUsersClient ?? (process.env.VITEST ? undefined : makeDefaultAdminClient())
+        if (totalClient) totalUsers = safeCount(await totalClient.user.count({}))
+    } catch {
+        totalUsers = null // فقط همین KPI unavailable می‌شود (§12)
+    }
+    const users: AdminUsersWidget = {
+        total: totalUsers,
+        dau: activeUsers.dau,
+        wau: activeUsers.wau,
+        mau: activeUsers.mau,
+    }
+
     // widget 2 — activity (fail-open فاز ۳)
-    const activity = await getEventUsageStats({ windowHours: 24 }, { now })
+    const activity = await getEventUsageStats({ windowHours: ADMIN_OVERVIEW_WINDOW_HOURS }, { now })
 
     // widget 3 — aiQuota (aggregate دوره‌ی جاری؛ فقط read؛ شکست → null)
     let aiQuota: AdminAiQuotaWidget | null = null
@@ -420,10 +597,110 @@ export async function getAdminOverview(options: AdminOverviewOptions = {}) {
         aiQuota = null // widget فقط خودش unavailable می‌شود (§12)
     }
 
-    // widget 4 — errors (fail-open فاز ۲)
-    const errors = await getErrorStats({ windowHours: 24 }, { now })
+    // widget 4 — aiUsage (شمارش درخواست‌های منطقی + توزیع status؛ شکست → null)
+    let aiUsage: AdminAiUsageSummaryWidget | null = null
+    try {
+        const usageClient =
+            options.aiUsageClient ?? (process.env.VITEST ? undefined : makeDefaultAdminClient())
+        if (usageClient) {
+            const totalRequests = await usageClient.aiUsageEvent.count({})
+            const requestsInWindow = await usageClient.aiUsageEvent.count({
+                where: { createdAt: { gte: windowSince, lte: now } },
+            })
+            const statusRows = await usageClient.aiUsageEvent.groupBy({
+                by: ["status"],
+                _count: { _all: true },
+            })
+            aiUsage = {
+                windowHours: ADMIN_OVERVIEW_WINDOW_HOURS,
+                totalRequests: safeCount(totalRequests) ?? 0,
+                requestsInWindow: safeCount(requestsInWindow) ?? 0,
+                byStatus: toStatusCounts(statusRows),
+            }
+        }
+    } catch {
+        aiUsage = null
+    }
 
-    return { users, activity, aiQuota, errors }
+    // widget 5 — errors (fail-open فاز ۲) + شمارش کل (fail-open ⇒ null)
+    const errorStats = await getErrorStats({ windowHours: ADMIN_OVERVIEW_WINDOW_HOURS }, { now })
+    let totalErrors: number | null = null
+    try {
+        const errorClient =
+            options.errorClient ?? (process.env.VITEST ? undefined : makeDefaultAdminClient())
+        if (errorClient) totalErrors = safeCount(await errorClient.errorLog.count({}))
+    } catch {
+        totalErrors = null
+    }
+    const errors: AdminErrorStatsWidget = { ...errorStats, totalAllTime: totalErrors }
+
+    // widget 6 — billing (فقط state ذخیره‌شده؛ بدون lazy expiration/effective-plan؛ شکست → null)
+    let billing: AdminBillingWidget | null = null
+    try {
+        const billingClient =
+            options.billingClient ?? (process.env.VITEST ? undefined : makeDefaultAdminClient())
+        if (billingClient) {
+            const activeSubscriptions = await billingClient.entitlement.count({
+                where: { status: "ACTIVE", currentPeriodEnd: { gt: now } },
+            })
+            const paidInWindow = await billingClient.paymentOrder.count({
+                where: {
+                    status: "PAID",
+                    paidAt: {
+                        gte: new Date(
+                            now.getTime() - ADMIN_BILLING_ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+                        ),
+                        lte: now,
+                    },
+                },
+            })
+            const rows = await billingClient.paymentOrder.findMany({
+                orderBy: { createdAt: "desc" },
+                take: ADMIN_OVERVIEW_RECENT_PAYMENTS,
+                select: {
+                    id: true,
+                    userId: true,
+                    status: true,
+                    amount: true,
+                    currency: true,
+                    entitlementDays: true,
+                    createdAt: true,
+                    paidAt: true,
+                },
+            })
+            const recentPayments: AdminDashboardPaymentView[] = []
+            for (const row of rows) {
+                const view = toAdminDashboardPaymentView(row)
+                if (view !== null) recentPayments.push(view)
+            }
+            billing = {
+                activeSubscriptions: safeCount(activeSubscriptions) ?? 0,
+                paidInWindow: safeCount(paidInWindow) ?? 0,
+                windowDays: ADMIN_BILLING_ACTIVITY_WINDOW_DAYS,
+                recentPayments,
+            }
+        }
+    } catch {
+        billing = null
+    }
+
+    // widget 7 — recentErrors (projection فاز ۴ روی ErrorLog؛ bounded + fail-open ⇒ [])
+    let recentErrors: AdminErrorLogView[] = []
+    try {
+        const recentClient =
+            options.recentErrorsClient ?? (process.env.VITEST ? undefined : makeDefaultAdminClient())
+        if (recentClient) {
+            const listed = await getAdminErrorLogs(
+                { page: 1, pageSize: ADMIN_OVERVIEW_RECENT_ERRORS },
+                { prisma: recentClient, now },
+            )
+            recentErrors = listed.logs
+        }
+    } catch {
+        recentErrors = []
+    }
+
+    return { users, activity, aiQuota, aiUsage, errors, billing, recentErrors }
 }
 
 // =====================================================================
@@ -1304,9 +1581,15 @@ function makeDefaultAdminClient() {
         // فاز ۵ — گام ۱۶: فقط خواندن برای نمای بیلیینگ (read-only)
         entitlement: {
             findUnique: (args: unknown) => real.entitlement.findUnique(args as never),
+            // KPI داشبورد: شمارش اشتراک‌های فعال (فقط count؛ هیچ ردیفی بارگذاری نمی‌شود)
+            count: (args: unknown) => real.entitlement.count(args as never) as Promise<number>,
         },
         paymentOrder: {
             findFirst: (args: unknown) => real.paymentOrder.findFirst(args as never),
+            // KPI داشبورد: فعالیت پرداخت اخیر + حداکثر ۵ سفارش آخر (take در caller)
+            count: (args: unknown) => real.paymentOrder.count(args as never) as Promise<number>,
+            findMany: (args: unknown) =>
+                real.paymentOrder.findMany(args as never) as Promise<unknown[]>,
         },
         aiUsage: {
             findUnique: (args: unknown) => real.aiUsage.findUnique(args as never),
@@ -1314,7 +1597,9 @@ function makeDefaultAdminClient() {
         },
         aiUsageEvent: {
             findMany: (args: unknown) => real.aiUsageEvent.findMany(args as never),
-            count: (args: unknown) => real.aiUsageEvent.count(args as never),
+            count: (args: unknown) => real.aiUsageEvent.count(args as never) as Promise<number>,
+            // KPI داشبورد: توزیع وضعیت رزرو (فقط groupBy؛ هیچ ردیف جزئیاتی خوانده نمی‌شود)
+            groupBy: (args: unknown) => real.aiUsageEvent.groupBy(args as never) as Promise<unknown[]>,
         },
         errorLog: {
             findMany: (args: unknown) => real.errorLog.findMany(args as never),

@@ -17,6 +17,7 @@ import {
     getAdminOverview,
     getUserDetail,
     maskProviderReference,
+    ADMIN_OVERVIEW_RECENT_ERRORS,
     ADMIN_QUERY_MAX_PAGE_SIZE,
 } from "./admin.query"
 import { UserNotFoundError } from "./errors"
@@ -204,7 +205,8 @@ describe("getAdminOverview — independent widgets (§12)", () => {
             prismaClient: { user: { count } },
         })
 
-        expect(result.users).toEqual({ dau: 4, wau: 4, mau: 4 })
+        // `total` فقط با کلاینت شمارش کل می‌آید؛ بدون آن `null` می‌ماند (هیچ عدد جعلی)
+        expect(result.users).toEqual({ total: null, dau: 4, wau: 4, mau: 4 })
         // window boundaries از now تزریق‌شده مشتق می‌شوند (dau = 24h)
         expect(count.mock.calls[0][0].where.lastSeenAt.gte.toISOString()).toBe(
             "2026-09-16T10:00:00.000Z",
@@ -219,7 +221,7 @@ describe("getAdminOverview — independent widgets (§12)", () => {
             prismaClient: { user: { count } },
         })
 
-        expect(result.users).toEqual({ dau: 0, wau: 0, mau: 0 })
+        expect(result.users).toEqual({ total: null, dau: 0, wau: 0, mau: 0 })
     })
 
     it("aiQuota widget aggregates the current period — read-only aggregate only", async () => {
@@ -252,7 +254,7 @@ describe("getAdminOverview — independent widgets (§12)", () => {
         })
 
         expect(result.aiQuota).toBeNull()
-        expect(result.users).toEqual({ dau: 2, wau: 2, mau: 2 })
+        expect(result.users).toEqual({ total: null, dau: 2, wau: 2, mau: 2 })
         expect(result.errors.totalInWindow).toBe(0)
     })
 
@@ -264,6 +266,210 @@ describe("getAdminOverview — independent widgets (§12)", () => {
 
         expect(result.activity.windowHours).toBe(24)
         expect(result.errors.totalInWindow).toBe(0)
+    })
+
+    it("total-users KPI counts all users and is independent from the active-users widget", async () => {
+        const totalCount = vi.fn().mockResolvedValue(137)
+
+        const result = await getAdminOverview({
+            now: NOW,
+            prismaClient: { user: { count: vi.fn().mockResolvedValue(4) } },
+            totalUsersClient: { user: { count: totalCount } },
+        })
+
+        expect(result.users.total).toBe(137)
+        expect(result.users.dau).toBe(4)
+        expect(totalCount.mock.calls[0][0]).toEqual({})
+    })
+
+    it("total-users KPI fails open to null (widget isolation) — never a fabricated zero", async () => {
+        const result = await getAdminOverview({
+            now: NOW,
+            prismaClient: { user: { count: vi.fn().mockResolvedValue(1) } },
+            totalUsersClient: { user: { count: vi.fn().mockRejectedValue(new Error("db down")) } },
+        })
+
+        expect(result.users.total).toBeNull()
+        expect(result.users.dau).toBe(1)
+    })
+
+    it("aiUsage widget counts logical requests (total + window) and groups statuses descending", async () => {
+        const count = vi
+            .fn()
+            .mockResolvedValueOnce(40)
+            .mockResolvedValueOnce(6)
+        const groupBy = vi.fn().mockResolvedValue([
+            { status: "RESERVED", _count: { _all: 2 } },
+            { status: "CONSUMED", _count: { _all: 5 } },
+        ])
+
+        const result = await getAdminOverview({
+            now: NOW,
+            prismaClient: { user: { count: vi.fn().mockResolvedValue(0) } },
+            aiUsageClient: { aiUsageEvent: { count, groupBy } },
+        })
+
+        expect(result.aiUsage).toEqual({
+            windowHours: 24,
+            totalRequests: 40,
+            requestsInWindow: 6,
+            byStatus: [
+                { status: "CONSUMED", count: 5 },
+                { status: "RESERVED", count: 2 },
+            ],
+        })
+        // پنجره‌ی ۲۴ ساعته از now تزریق‌شده مشتق می‌شود
+        const windowArgs = count.mock.calls[1][0] as { where: { createdAt: { gte: Date } } }
+        expect(windowArgs.where.createdAt.gte.toISOString()).toBe("2026-09-16T10:00:00.000Z")
+    })
+
+    it("aiUsage widget failure leaves only that widget unavailable (§12)", async () => {
+        const result = await getAdminOverview({
+            now: NOW,
+            prismaClient: { user: { count: vi.fn().mockResolvedValue(0) } },
+            aiUsageClient: {
+                aiUsageEvent: {
+                    count: vi.fn().mockRejectedValue(new Error("db down")),
+                    groupBy: vi.fn().mockResolvedValue([]),
+                },
+            },
+        })
+
+        expect(result.aiUsage).toBeNull()
+        expect(result.users.dau).toBe(0)
+    })
+
+    it("billing widget reads stored state only: active + paid-in-window counts and bounded recent payments", async () => {
+        const entitlementCount = vi.fn().mockResolvedValue(7)
+        const paymentCount = vi.fn().mockResolvedValue(3)
+        const findMany = vi.fn().mockResolvedValue([
+            {
+                id: "pay_1",
+                userId: 7,
+                status: "PAID",
+                amount: 199000,
+                currency: "IRR",
+                entitlementDays: 30,
+                createdAt: new Date("2026-09-17T08:00:00.000Z"),
+                paidAt: new Date("2026-09-17T08:02:00.000Z"),
+                authority: "A000000000000000000000000000000000",
+            },
+            { id: "missing-fields" },
+        ])
+
+        const result = await getAdminOverview({
+            now: NOW,
+            prismaClient: { user: { count: vi.fn().mockResolvedValue(0) } },
+            billingClient: {
+                entitlement: { count: entitlementCount },
+                paymentOrder: { count: paymentCount, findMany },
+            },
+        })
+
+        expect(result.billing).toEqual({
+            activeSubscriptions: 7,
+            paidInWindow: 3,
+            windowDays: 7,
+            recentPayments: [
+                {
+                    id: "pay_1",
+                    userId: 7,
+                    status: "PAID",
+                    amount: 199000,
+                    currency: "IRR",
+                    entitlementDays: 30,
+                    createdAt: "2026-09-17T08:00:00.000Z",
+                    paidAt: "2026-09-17T08:02:00.000Z",
+                },
+            ],
+        })
+        // ردیف ناقص حذف می‌شود و authority خام هرگز در DTO نمی‌آید
+        expect(JSON.stringify(result.billing)).not.toContain("authority")
+        expect(JSON.stringify(result.billing)).not.toContain("A000000000000000000000000000000000")
+        const findArgs = findMany.mock.calls[0][0] as { take: number; orderBy: unknown }
+        expect(findArgs.take).toBe(5)
+        expect(findArgs.orderBy).toEqual({ createdAt: "desc" })
+        const activeArgs = entitlementCount.mock.calls[0][0] as { where: Record<string, unknown> }
+        expect(activeArgs.where.status).toBe("ACTIVE")
+    })
+
+    it("billing widget failure leaves only that widget unavailable (§12)", async () => {
+        const result = await getAdminOverview({
+            now: NOW,
+            prismaClient: { user: { count: vi.fn().mockResolvedValue(0) } },
+            billingClient: {
+                entitlement: { count: vi.fn().mockRejectedValue(new Error("db down")) },
+                paymentOrder: { count: vi.fn(), findMany: vi.fn() },
+            },
+        })
+
+        expect(result.billing).toBeNull()
+        expect(result.users.dau).toBe(0)
+    })
+
+    it("recentErrors feed is bounded, stack-free and degrades to an empty list on failure", async () => {
+        const findMany = vi.fn().mockResolvedValue([
+            {
+                id: "e1",
+                requestId: "req-1",
+                userId: 5,
+                endpoint: "/api/tasks",
+                feature: "tasks",
+                errorCode: "VALIDATION_ERROR",
+                statusCode: 400,
+                category: "VALIDATION",
+                severity: "WARNING",
+                message: "ورودی نامعتبر",
+                stack: "at foo",
+                metadata: { redacted: "[REDACTED]" },
+                environment: "prod",
+                createdAt: new Date("2026-09-17T08:00:00.000Z"),
+            },
+            { id: "malformed" },
+        ])
+
+        const result = await getAdminOverview({
+            now: NOW,
+            prismaClient: { user: { count: vi.fn().mockResolvedValue(0) } },
+            recentErrorsClient: {
+                errorLog: { findMany, count: vi.fn().mockResolvedValue(2) },
+            },
+        })
+
+        expect(result.recentErrors).toHaveLength(1)
+        expect(result.recentErrors[0]?.errorCode).toBe("VALIDATION_ERROR")
+        expect(JSON.stringify(result.recentErrors)).not.toContain("at foo")
+        const args = findMany.mock.calls[0][0] as { take: number }
+        expect(args.take).toBe(ADMIN_OVERVIEW_RECENT_ERRORS)
+
+        const degraded = await getAdminOverview({
+            now: NOW,
+            prismaClient: { user: { count: vi.fn().mockResolvedValue(0) } },
+            recentErrorsClient: {
+                errorLog: {
+                    findMany: vi.fn().mockRejectedValue(new Error("db down")),
+                    count: vi.fn(),
+                },
+            },
+        })
+        expect(degraded.recentErrors).toEqual([])
+    })
+
+    it("totalErrors KPI counts all ErrorLog rows and fails open to null", async () => {
+        const ok = await getAdminOverview({
+            now: NOW,
+            prismaClient: { user: { count: vi.fn().mockResolvedValue(0) } },
+            errorClient: { errorLog: { count: vi.fn().mockResolvedValue(90) } },
+        })
+        expect(ok.errors.totalAllTime).toBe(90)
+
+        const degraded = await getAdminOverview({
+            now: NOW,
+            prismaClient: { user: { count: vi.fn().mockResolvedValue(0) } },
+            errorClient: { errorLog: { count: vi.fn().mockRejectedValue(new Error("db down")) } },
+        })
+        expect(degraded.errors.totalAllTime).toBeNull()
+        expect(degraded.errors.totalInWindow).toBe(0)
     })
 })
 

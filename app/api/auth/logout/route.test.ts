@@ -7,6 +7,15 @@ import { describe, expect, it } from "vitest"
 
 import { POST } from "./route"
 
+describe("POST /api/auth/logout — X-Request-ID (فاز صفر §7)", () => {
+    it("success response carries a server-generated X-Request-ID", async () => {
+        const res = await POST()
+
+        expect(res.status).toBe(200)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+})
+
 describe("POST /api/auth/logout", () => {
     it("returns 200 with { ok: true, message } and clears the token cookie", async () => {
         const res = await POST()

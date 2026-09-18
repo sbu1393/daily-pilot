@@ -24,6 +24,40 @@ vi.mock("@/app/lib/services/productEvent.service", () => ({
 }))
 
 import { GET, PATCH } from "./route"
+
+describe("/api/auth/profile — X-Request-ID (فاز صفر §7)", () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.getCurrentUser.mockResolvedValue(USER)
+        mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
+        mocks.recordProductEvent.mockResolvedValue({ recorded: true, eventName: "profile.updated" })
+        mocks.getPrisma.mockReturnValue({})
+    })
+
+    it("GET 200 success carries X-Request-ID", async () => {
+        const res = await GET()
+
+        expect(res.status).toBe(200)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+
+    it("GET 401 response carries X-Request-ID", async () => {
+        mocks.getCurrentUser.mockResolvedValue(null)
+
+        const res = await GET()
+
+        expect(res.status).toBe(401)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+
+    it("PATCH response always carries X-Request-ID", async () => {
+        mocks.updateProfile.mockResolvedValue({ id: 1, username: "test" })
+
+        const res = await callPATCH({ firstName: "A" })
+
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+})
 import { UserNotFoundError, UsernameTakenError } from "@/app/lib/services/errors"
 
 const USER = {

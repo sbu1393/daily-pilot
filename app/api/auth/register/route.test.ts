@@ -21,6 +21,33 @@ vi.mock("@/app/lib/createSession", () => ({ createSession: mocks.createSession }
 vi.mock("@/app/lib/services/auth.service", () => ({ registerUser: mocks.registerUser }))
 
 import { POST } from "./route"
+
+describe("POST /api/auth/register — X-Request-ID (فاز صفر §7/§25)", () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.clientIp.mockReturnValue("1.2.3.4")
+        mocks.isRateLimited.mockReturnValue(false)
+        mocks.createSession.mockImplementation((_user: unknown, response: unknown) => response)
+    })
+
+    it("201 success (with session) carries X-Request-ID", async () => {
+        mocks.registerUser.mockResolvedValue(USER)
+
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(201)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+
+    it("409 domain error carries X-Request-ID", async () => {
+        mocks.registerUser.mockRejectedValue(new EmailTakenError())
+
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(409)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+})
 import { EmailTakenError } from "@/app/lib/services/errors"
 
 const USER = { id: 1, username: "testuser", email: "test@example.com" }

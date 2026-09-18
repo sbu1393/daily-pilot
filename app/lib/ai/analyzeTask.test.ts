@@ -18,6 +18,8 @@ vi.hoisted(() => {
 const fetchMock = vi.hoisted(() => vi.fn())
 vi.stubGlobal("fetch", fetchMock)
 
+import { AiProviderUnavailableError } from "@/app/lib/services/errors"
+
 import { analyzeTask } from "./analyzeTask"
 import { aiAnalysisSchema } from "./aiSchema"
 import { mockAnalyze } from "./mock"
@@ -117,5 +119,56 @@ describe("analyzeTask (§7.8 — Failure & Degradation)", () => {
 
         expect(fetchMock).toHaveBeenCalledTimes(2)
         expect(result.source).toBe("mock")
+    })
+})
+
+/* ------------------------------------------------------------------ */
+/* فاز ۱ — سند §۲/§۱۲: در production هیچ mock‌ای به‌عنوان success       */
+/* برنمی‌گردد؛ شکست نهایی provider خطای قابل مدیریت (۵۰۳) می‌دهد.       */
+/* ------------------------------------------------------------------ */
+
+describe("analyzeTask — production never returns a mock result (فاز ۱ §۲/§۱۲)", () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+    })
+    afterEach(() => {
+        vi.unstubAllEnvs()
+        delete process.env.AIXAI_API_KEY
+    })
+
+    it("throws AiProviderUnavailableError when the provider is not configured (no mock, no fetch)", async () => {
+        delete process.env.AIXAI_API_KEY
+        vi.stubEnv("NODE_ENV", "production")
+
+        const error: any = await analyzeTask("گزارش فروش").catch((e) => e)
+
+        expect(error).toBeInstanceOf(AiProviderUnavailableError)
+        expect(error.code).toBe("AI_PROVIDER_UNAVAILABLE")
+        expect(error.status).toBe(503)
+        expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it("throws AiProviderUnavailableError instead of mock after exhausting retries", async () => {
+        vi.stubEnv("NODE_ENV", "production")
+        vi.stubEnv("AIXAI_API_KEY", "prod-key")
+        fetchMock.mockResolvedValue(httpStatus(503))
+
+        const error: any = await analyzeTask("گزارش فروش").catch((e) => e)
+
+        expect(error).toBeInstanceOf(AiProviderUnavailableError)
+        expect(error.code).toBe("AI_PROVIDER_UNAVAILABLE")
+        expect(error).not.toHaveProperty("source")
+        expect(fetchMock).toHaveBeenCalledTimes(2) // AI_MAX_ATTEMPTS=2
+    })
+
+    it("throws AiProviderUnavailableError on a non-retryable provider rejection too", async () => {
+        vi.stubEnv("NODE_ENV", "production")
+        vi.stubEnv("AIXAI_API_KEY", "prod-key")
+        fetchMock.mockResolvedValue(httpStatus(400))
+
+        const error: any = await analyzeTask("گزارش فروش").catch((e) => e)
+
+        expect(error).toBeInstanceOf(AiProviderUnavailableError)
+        expect(fetchMock).toHaveBeenCalledTimes(1)
     })
 })

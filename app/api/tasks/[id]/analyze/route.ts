@@ -10,7 +10,8 @@ import { resolvePlanPolicy, getMonthlyPeriod } from "@/app/lib/services/planPoli
 import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
 import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 import { reserveQuota, completeQuota, releaseQuota } from "@/app/lib/services/aiQuota.service"
-import { QuotaUnavailableError } from "@/app/lib/services/errors"
+import { markReleaseFailed } from "@/app/lib/services/aiUsage.service"
+import { AiProviderUnavailableError, QuotaUnavailableError } from "@/app/lib/services/errors"
 import {
     errorResponse,
     okResponse,
@@ -71,31 +72,72 @@ export async function PATCH(
         // فاز ۱ — plan policy (سند §5): سقف ماهانه فقط از سرویس؛ هرگز hard-code (§26)
         const policy = resolvePlanPolicy({ plan: user.plan })
 
-        // فاز ۱ — quota reserve (سند §8): اتمیک، idempotent بر اساس requestId، fail-closed
-        await reserveQuota(prisma, {
-            userId: user.id,
-            requestId: context.requestId,
-            allowedUnits: policy.allowedUnits,
-            units: 1, // هر logical AI operation = 1 unit (سند §2)
-            feature: "analyze",
-            periodStart: getMonthlyPeriod(new Date()).periodStart,
-        })
+        // فاز ۱ — period ماهانهٔ محلیِ کاربر (سند §۶): همان periodStart در reserve و complete/release
+        const periodStart = getMonthlyPeriod(new Date(), user.timezone).periodStart
+
+        // فاز ۱ — quota reserve (سند §8): اتمیک، idempotent بر اساس requestId، fail-closed.
+        // P1-5 (سند §19/§20/§21/§32): شکست زیرساخت quota باید در observability ثبت شود؛
+        // QUOTA_EXCEEDED/IDEMPOTENCY_CONFLICT خطای expected‌اند و هرگز record نمی‌شوند.
+        try {
+            await reserveQuota(prisma, {
+                userId: user.id,
+                requestId: context.requestId,
+                allowedUnits: policy.allowedUnits,
+                units: 1, // هر logical AI operation = 1 unit (سند §2)
+                feature: "analyze",
+                periodStart,
+            })
+        } catch (error) {
+            // فقط QUOTA_UNAVAILABLE (infrastructure) و دقیقاً یک‌بار — سپس همان error دوباره throw می‌شود
+            // تا response/envelope فعلی دست‌نخورده بماند (toServiceErrorResponse تغییر نمی‌کند).
+            if (error instanceof QuotaUnavailableError) recordError(error, context)
+            throw error
+        }
 
         let result: { task: unknown; aiSource: string }
         try {
             // AI call — خارج از transaction کووتا (سند §10)
             result = await reanalyzeTask(user.id, user.timezone, taskId, textOverride)
         } catch (error) {
-            // شکست نهایی provider → release → خطای اصلی به مپینگ استاندارد (سند §12)
-            await releaseQuota(prisma, context.requestId).catch(() => {
-                // سند §13: release failure → fail-closed QUOTA_UNAVAILABLE
+            // سند §12/§13: هر شکست AI رزرو را آزاد می‌کند.
+            // فاز ۱ — شکست نهایی provider یک رویداد عملیاتی است و باید failureCode بگیرد؛
+            // خطاهای دیگر (مثل TASK_NOT_FOUND) مثل قبل و بدون failureCode آزاد می‌شوند.
+            const providerFailure = error instanceof AiProviderUnavailableError ? error : null
+            try {
+                if (providerFailure) {
+                    // failureCode = همان کد taxonomy که به کلاینت برمی‌گردد (سند §۱۲/§۲۰)
+                    await releaseQuota(prisma, context.requestId, undefined, {
+                        failureCode: providerFailure.code,
+                        periodStart,
+                    })
+                } else {
+                    await releaseQuota(prisma, context.requestId, undefined, { periodStart })
+                }
+            } catch {
+                // سند §13: release failure → رزرو باقی می‌ماند، event در RESERVED می‌ماند،
+                // provider دوباره صدا زده نمی‌شود، و failureCode=RELEASE_FAILED برای reconciliation
+                // ثبت می‌شود (best-effort، هرگز throw نمی‌کند) + ثبت در observability (§21).
+                await markReleaseFailed(prisma, context.requestId)
+                recordError(new QuotaUnavailableError(), context)
                 throw new QuotaUnavailableError()
-            })
+            }
+
+            if (providerFailure) {
+                // سند §12 مرحله ۶ / §21: شکست نهایی provider از pipeline observability عبور می‌کند.
+                // outer catch برای ServiceErrorها خودش recordError نمی‌کند → دقیقاً یک رکورد (§18 فاز ۲).
+                recordError(providerFailure, context)
+            }
             throw error
         }
 
-        // موفقیت → complete (سند §11)
-        await completeQuota(prisma, context.requestId)
+        // موفقیت → complete (سند §11) — روی همان periodStart رزرو
+        // P1-5 (سند §21/§32): شکست complete یک infrastructure failure است → ثبت دقیقاً یک‌بار.
+        try {
+            await completeQuota(prisma, context.requestId, undefined, { periodStart })
+        } catch (error) {
+            if (error instanceof QuotaUnavailableError) recordError(error, context)
+            throw error
+        }
 
         // فاز ۳ — گام ۹: verified production success فقط اینجا است (بعد از complete موفق).
         // Mock هرگز production success نیست: بدون touch و بدون event (§8).

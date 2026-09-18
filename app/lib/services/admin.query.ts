@@ -651,7 +651,9 @@ export async function getUserDetail(
     try {
         const plan = (typeof row?.plan === "string" ? row.plan : "FREE") as AdminPlan
         const policy = resolvePlanPolicy({ plan })
-        const periodStart = getMonthlyPeriod(now).periodStart
+        // فاز ۱ — period در timezone همان کاربر (نه UTC)؛ tz از همان read ردیف کاربر
+        const timezone = row && typeof row.timezone === "string" ? row.timezone : undefined
+        const periodStart = getMonthlyPeriod(now, timezone).periodStart
         const quotaRow = (await client.aiUsage.findUnique({
             where: { userId_periodType_periodStart: { userId, periodType: "MONTHLY", periodStart } },
             select: { reservedUnits: true, consumedUnits: true },
@@ -759,13 +761,15 @@ export async function getUserAiUsage(
 
     const userRow = (await client.user.findUnique({
         where: { id: userId },
-        select: { plan: true },
-    })) as { plan?: unknown } | null
+        select: { plan: true, timezone: true },
+    })) as { plan?: unknown; timezone?: unknown } | null
     if (userRow === null || typeof userRow.plan !== "string") throw new UserNotFoundError()
     const plan = userRow.plan as AdminPlan
 
     const policy = resolvePlanPolicy({ plan })
-    const periodStart = getMonthlyPeriod(now).periodStart
+    // فاز ۱ — period در timezone همان کاربر (نه UTC)
+    const timezone = typeof userRow.timezone === "string" ? userRow.timezone : undefined
+    const periodStart = getMonthlyPeriod(now, timezone).periodStart
 
     const quotaRow = (await client.aiUsage.findUnique({
         where: { userId_periodType_periodStart: { userId, periodType: "MONTHLY", periodStart } },

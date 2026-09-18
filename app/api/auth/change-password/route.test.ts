@@ -14,6 +14,31 @@ vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: mocks.getCurrentUse
 vi.mock("@/app/lib/services/auth.service", () => ({ changePassword: mocks.changePassword }))
 
 import { POST } from "./route"
+
+describe("POST /api/auth/change-password — X-Request-ID (فاز صفر §7)", () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.getCurrentUser.mockResolvedValue(USER)
+    })
+
+    it("200 success carries X-Request-ID", async () => {
+        mocks.changePassword.mockResolvedValue(undefined)
+
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(200)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+
+    it("401 response carries X-Request-ID", async () => {
+        mocks.getCurrentUser.mockResolvedValue(null)
+
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(401)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+})
 import { SamePasswordError, UserNotFoundError, WrongPasswordError } from "@/app/lib/services/errors"
 
 const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran" }

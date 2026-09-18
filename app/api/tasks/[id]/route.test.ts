@@ -35,6 +35,34 @@ vi.mock("@/app/lib/services/productEvent.service", () => ({
 import { DELETE, GET, PATCH } from "./route"
 import { TaskNotFoundError } from "@/app/lib/services/errors"
 
+describe("/api/tasks/[id] — X-Request-ID (فاز صفر §7)", () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.getCurrentUser.mockResolvedValue(USER)
+        mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
+        mocks.recordProductEvent.mockResolvedValue({ recorded: true, eventName: "task.updated" })
+        mocks.getPrisma.mockReturnValue({})
+    })
+
+    it("GET 200 response carries X-Request-ID", async () => {
+        mocks.getTask.mockResolvedValue({ id: 5 })
+
+        const res = await callGET("5")
+
+        expect(res.status).toBe(200)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+
+    it("GET 404 response carries X-Request-ID", async () => {
+        mocks.getTask.mockRejectedValue(new TaskNotFoundError())
+
+        const res = await callGET("5")
+
+        expect(res.status).toBe(404)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+})
+
 const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran" }
 const TASK = { id: 5, title: "گزارش", dayKey: "2026-01-01", category: "Work" }
 const SUMMARY = { dayKey: "2026-01-01", availableMinutes: 120, spentMinutes: 40 }

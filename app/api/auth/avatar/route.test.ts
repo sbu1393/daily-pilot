@@ -20,6 +20,40 @@ vi.mock("@/app/lib/services/auth.service", () => ({
 
 import { DELETE, POST } from "./route"
 
+describe("/api/auth/avatar — X-Request-ID (فاز صفر §7)", () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.getCurrentUser.mockResolvedValue(USER)
+    })
+
+    it("POST success carries X-Request-ID", async () => {
+        mocks.setAvatar.mockResolvedValue({ id: 1 })
+
+        const res = await callPOST({ image: VALID_IMAGE })
+
+        expect(res.status).toBe(200)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+
+    it("DELETE success carries X-Request-ID", async () => {
+        mocks.removeAvatar.mockResolvedValue(undefined)
+
+        const res = await DELETE()
+
+        expect(res.status).toBe(200)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+
+    it("401 response carries X-Request-ID", async () => {
+        mocks.getCurrentUser.mockResolvedValue(null)
+
+        const res = await callPOST({ image: VALID_IMAGE })
+
+        expect(res.status).toBe(401)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+})
+
 const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran" }
 const VALID_IMAGE = "data:image/png;base64,iVBORw0KGgo="
 

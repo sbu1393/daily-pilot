@@ -51,6 +51,14 @@ function wireTransaction(prisma: ReturnType<typeof makePrisma>, impl?: (tx: any)
     )
 }
 
+/** سیمولیشن $transaction با یک کلاینت `tx` متمایز — تست مرز تراکنش (سند §18) */
+function wireTransactionClient(
+    prisma: ReturnType<typeof makePrisma>,
+    tx: ReturnType<typeof makePrisma>,
+) {
+    prisma.$transaction.mockImplementation(async (fn: (client: any) => Promise<any>) => fn(tx))
+}
+
 describe("reserveQuota", () => {
     let prisma: ReturnType<typeof makePrisma>
 
@@ -177,6 +185,50 @@ describe("reserveQuota", () => {
         })
         expect(prisma.aiUsage.upsert).toHaveBeenCalledTimes(3)
     })
+
+    /* ---- P1-4: bounded optimistic retry (بدون denial جعلی، بدون overspend) ---- */
+
+    it("retries on a concurrent change instead of returning a false QUOTA_EXCEEDED", async () => {
+        prisma.aiUsage.findUnique
+            .mockResolvedValueOnce({ reservedUnits: 0, consumedUnits: 0 }) // read اول
+            .mockResolvedValueOnce({ reservedUnits: 1, consumedUnits: 0 }) // read تازه بعد از رقابت
+        prisma.aiUsage.updateMany
+            .mockResolvedValueOnce({ count: 0 }) // CAS باخت
+            .mockResolvedValueOnce({ count: 1 }) // دور بعد موفق
+
+        await expect(reserveQuota(prisma, makeInput({ units: 1 }))).resolves.toBeUndefined()
+
+        expect(prisma.aiUsage.findUnique).toHaveBeenCalledTimes(2)
+        expect(prisma.aiUsage.updateMany).toHaveBeenCalledTimes(2)
+        // هر دور فقط units را increment می‌کند — هرگز overspend
+        for (const call of prisma.aiUsage.updateMany.mock.calls) {
+            expect(call[0].data.reservedUnits).toEqual({ increment: 1 })
+        }
+    })
+
+    it("exhausts bounded retries under pure contention with QUOTA_UNAVAILABLE (not a false QUOTA_EXCEEDED)", async () => {
+        prisma.aiUsage.findUnique.mockResolvedValue({ reservedUnits: 0, consumedUnits: 0 })
+        prisma.aiUsage.updateMany.mockResolvedValue({ count: 0 })
+
+        await expect(reserveQuota(prisma, makeInput())).rejects.toMatchObject({
+            code: "QUOTA_UNAVAILABLE",
+            status: 503,
+        })
+        // حلقه بی‌پایان نیست: حداکثر ۵ دور
+        expect(prisma.aiUsage.findUnique).toHaveBeenCalledTimes(5)
+        expect(prisma.aiUsage.updateMany).toHaveBeenCalledTimes(5)
+    })
+
+    it("still rejects immediately with QUOTA_EXCEEDED when the fresh read is genuinely over the limit", async () => {
+        prisma.aiUsage.findUnique.mockResolvedValue({ reservedUnits: 15, consumedUnits: 0 })
+
+        await expect(reserveQuota(prisma, makeInput({ units: 1 }))).rejects.toMatchObject({
+            code: "QUOTA_EXCEEDED",
+            status: 429,
+        })
+        // exceed واقعی → هیچ تلاش incrementی انجام نمی‌شود
+        expect(prisma.aiUsage.updateMany).not.toHaveBeenCalled()
+    })
 })
 
 describe("completeQuota", () => {
@@ -184,18 +236,18 @@ describe("completeQuota", () => {
 
     beforeEach(() => {
         prisma = makePrisma()
-        prisma.aiUsageEvent.findUnique.mockResolvedValue({ status: "RESERVED" })
         wireTransaction(prisma)
-        prisma.aiUsageEvent.updateMany.mockResolvedValue({ count: 1 })
         prisma.aiUsageEvent.findUnique
             .mockResolvedValueOnce({ status: "RESERVED" })
             .mockResolvedValueOnce({ units: 2, userId: 7 })
-        prisma.aiUsage.findFirst.mockResolvedValue({ id: 100 })
-        prisma.aiUsage.update.mockResolvedValue({})
+        prisma.aiUsageEvent.updateMany.mockResolvedValue({ count: 1 })
+        // P1-3: decrement روی همان periodStart رزرو (updateMany شرطی، نه findFirst+update)
+        prisma.aiUsage.updateMany.mockResolvedValue({ count: 1 })
     })
 
     it("moves counters atomically (reserved −2 / consumed +2) and marks CONSUMED", async () => {
-        const result = await completeQuota(prisma, "req-1", 2)
+        const periodStart = new Date("2026-09-01T00:00:00.000Z")
+        const result = await completeQuota(prisma, "req-1", 2, { periodStart })
 
         expect(result).toBe(true)
         expect(prisma.$transaction).toHaveBeenCalledTimes(1)
@@ -203,23 +255,32 @@ describe("completeQuota", () => {
             where: { requestId: "req-1", status: "RESERVED" },
             data: { status: "CONSUMED" },
         })
-        expect(prisma.aiUsage.update).toHaveBeenCalledWith({
-            where: { id: 100 },
+        expect(prisma.aiUsage.updateMany).toHaveBeenCalledWith({
+            where: {
+                userId: 7,
+                periodType: "MONTHLY",
+                periodStart,
+                reservedUnits: { gte: 2 },
+            },
             data: {
                 reservedUnits: { decrement: 2 },
                 consumedUnits: { increment: 2 },
             },
         })
+        // هیچ انتخاب مبهم «آخرین ماه»ای وجود ندارد
+        expect(prisma.aiUsage.findFirst).not.toHaveBeenCalled()
     })
 
     it("is idempotent: already CONSUMED → no-op (false), no counter movement", async () => {
         prisma.aiUsageEvent.findUnique.mockReset()
         prisma.aiUsageEvent.findUnique.mockResolvedValue({ status: "CONSUMED" })
 
-        const result = await completeQuota(prisma, "req-1", 1)
+        const result = await completeQuota(prisma, "req-1", 1, {
+            periodStart: new Date("2026-09-01T00:00:00.000Z"),
+        })
 
         expect(result).toBe(false)
-        expect(prisma.aiUsage.update).not.toHaveBeenCalled()
+        expect(prisma.aiUsage.updateMany).not.toHaveBeenCalled()
         expect(prisma.aiUsageEvent.updateMany).not.toHaveBeenCalled()
     })
 
@@ -227,20 +288,53 @@ describe("completeQuota", () => {
         prisma.aiUsageEvent.findUnique.mockReset()
         prisma.aiUsageEvent.findUnique.mockResolvedValue({ status: "RELEASED" })
 
-        await expect(completeQuota(prisma, "req-1", 1)).rejects.toMatchObject({
+        await expect(
+            completeQuota(prisma, "req-1", 1, {
+                periodStart: new Date("2026-09-01T00:00:00.000Z"),
+            }),
+        ).rejects.toMatchObject({
             code: "AI_USAGE_CONFLICT",
             status: 409,
         })
-        expect(prisma.aiUsage.update).not.toHaveBeenCalled()
+        expect(prisma.aiUsage.updateMany).not.toHaveBeenCalled()
     })
 
     it("fail-closed: transaction DB error → QUOTA_UNAVAILABLE", async () => {
         prisma.$transaction.mockRejectedValue(new Error("db down"))
 
-        await expect(completeQuota(prisma, "req-1", 1)).rejects.toMatchObject({
+        await expect(
+            completeQuota(prisma, "req-1", 1, {
+                periodStart: new Date("2026-09-01T00:00:00.000Z"),
+            }),
+        ).rejects.toMatchObject({
             code: "QUOTA_UNAVAILABLE",
             status: 503,
         })
+    })
+
+    it("targets the reservation's own period across a month rollover (no findFirst desc)", async () => {
+        const sepPeriod = new Date("2026-09-01T00:00:00.000Z")
+        await completeQuota(prisma, "req-1", 1, { periodStart: sepPeriod })
+
+        const args = prisma.aiUsage.updateMany.mock.calls[0][0]
+        expect(args.where.periodStart).toBe(sepPeriod)
+        expect(prisma.aiUsage.findFirst).not.toHaveBeenCalled()
+    })
+
+    it("fail-closed when the exact period row cannot absorb the decrement (invariant reservedUnits >= 0)", async () => {
+        prisma.aiUsage.updateMany.mockResolvedValue({ count: 0 })
+
+        await expect(
+            completeQuota(prisma, "req-1", 1, {
+                periodStart: new Date("2026-09-01T00:00:00.000Z"),
+            }),
+        ).rejects.toMatchObject({ code: "QUOTA_UNAVAILABLE", status: 503 })
+    })
+
+    it("rejects a missing periodStart as fail-closed QUOTA_UNAVAILABLE", async () => {
+        await expect(
+            completeQuota(prisma, "req-1", 1, undefined as unknown as { periodStart: Date }),
+        ).rejects.toMatchObject({ code: "QUOTA_UNAVAILABLE", status: 503 })
     })
 })
 
@@ -249,27 +343,68 @@ describe("releaseQuota", () => {
 
     beforeEach(() => {
         prisma = makePrisma()
-        prisma.aiUsageEvent.findUnique.mockResolvedValue({ status: "RESERVED" })
         wireTransaction(prisma)
-        prisma.aiUsageEvent.updateMany.mockResolvedValue({ count: 1 })
         prisma.aiUsageEvent.findUnique
             .mockResolvedValueOnce({ status: "RESERVED" })
             .mockResolvedValueOnce({ units: 1, userId: 7 })
-        prisma.aiUsage.findFirst.mockResolvedValue({ id: 100 })
-        prisma.aiUsage.update.mockResolvedValue({})
+        prisma.aiUsageEvent.updateMany.mockResolvedValue({ count: 1 })
+        // P1-3: decrement روی همان periodStart رزرو
+        prisma.aiUsage.updateMany.mockResolvedValue({ count: 1 })
     })
 
     it("decrements reservedUnits only (no consumedUnits change) and marks RELEASED", async () => {
-        const result = await releaseQuota(prisma, "req-1", 1)
+        const periodStart = new Date("2026-09-01T00:00:00.000Z")
+        const result = await releaseQuota(prisma, "req-1", 1, { periodStart })
 
         expect(result).toBe(true)
         expect(prisma.aiUsageEvent.updateMany).toHaveBeenCalledWith({
             where: { requestId: "req-1", status: "RESERVED" },
             data: { status: "RELEASED" },
         })
-        expect(prisma.aiUsage.update).toHaveBeenCalledWith({
-            where: { id: 100 },
+        expect(prisma.aiUsage.updateMany).toHaveBeenCalledWith({
+            where: {
+                userId: 7,
+                periodType: "MONTHLY",
+                periodStart,
+                reservedUnits: { gte: 1 },
+            },
             data: { reservedUnits: { decrement: 1 } },
+        })
+        expect(prisma.aiUsage.findFirst).not.toHaveBeenCalled()
+    })
+
+    it("writes the given failureCode on the same atomic RESERVED → RELEASED transition (فاز ۱ §۱۲)", async () => {
+        const periodStart = new Date("2026-09-01T00:00:00.000Z")
+        const result = await releaseQuota(prisma, "req-1", undefined, {
+            failureCode: "AI_PROVIDER_UNAVAILABLE",
+            periodStart,
+        })
+
+        expect(result).toBe(true)
+        expect(prisma.aiUsageEvent.updateMany).toHaveBeenCalledWith({
+            where: { requestId: "req-1", status: "RESERVED" },
+            data: { status: "RELEASED", failureCode: "AI_PROVIDER_UNAVAILABLE" },
+        })
+        // کاهش شمارنده دست‌نخورده است
+        expect(prisma.aiUsage.updateMany).toHaveBeenCalledWith({
+            where: {
+                userId: 7,
+                periodType: "MONTHLY",
+                periodStart,
+                reservedUnits: { gte: 1 },
+            },
+            data: { reservedUnits: { decrement: 1 } },
+        })
+    })
+
+    it("omits failureCode entirely when none is provided (backward-compatible payload)", async () => {
+        await releaseQuota(prisma, "req-1", undefined, {
+            periodStart: new Date("2026-09-01T00:00:00.000Z"),
+        })
+
+        expect(prisma.aiUsageEvent.updateMany).toHaveBeenCalledWith({
+            where: { requestId: "req-1", status: "RESERVED" },
+            data: { status: "RELEASED" },
         })
     })
 
@@ -277,32 +412,148 @@ describe("releaseQuota", () => {
         prisma.aiUsageEvent.findUnique.mockReset()
         prisma.aiUsageEvent.findUnique.mockResolvedValue({ status: "RELEASED" })
 
-        const result = await releaseQuota(prisma, "req-1", 1)
+        const result = await releaseQuota(prisma, "req-1", 1, {
+            periodStart: new Date("2026-09-01T00:00:00.000Z"),
+        })
 
         expect(result).toBe(false)
-        expect(prisma.aiUsage.update).not.toHaveBeenCalled()
+        expect(prisma.aiUsage.updateMany).not.toHaveBeenCalled()
     })
 
     it("invalid transition: CONSUMED → release → AI_USAGE_CONFLICT (409)", async () => {
         prisma.aiUsageEvent.findUnique.mockReset()
         prisma.aiUsageEvent.findUnique.mockResolvedValue({ status: "CONSUMED" })
 
-        await expect(releaseQuota(prisma, "req-1", 1)).rejects.toMatchObject({
+        await expect(
+            releaseQuota(prisma, "req-1", 1, {
+                periodStart: new Date("2026-09-01T00:00:00.000Z"),
+            }),
+        ).rejects.toMatchObject({
             code: "AI_USAGE_CONFLICT",
             status: 409,
         })
-        expect(prisma.aiUsage.update).not.toHaveBeenCalled()
+        expect(prisma.aiUsage.updateMany).not.toHaveBeenCalled()
     })
 
     it("fail-closed: release DB error → QUOTA_UNAVAILABLE (event stays RESERVED for reconciliation)", async () => {
         prisma.$transaction.mockRejectedValue(new Error("db down"))
 
-        await expect(releaseQuota(prisma, "req-1", 1)).rejects.toMatchObject({
+        await expect(
+            releaseQuota(prisma, "req-1", 1, {
+                periodStart: new Date("2026-09-01T00:00:00.000Z"),
+            }),
+        ).rejects.toMatchObject({
             code: "QUOTA_UNAVAILABLE",
             status: 503,
         })
         // چون transaction شکست خورد، هیچ update موفقی ثبت نشده
-        expect(prisma.aiUsage.update).not.toHaveBeenCalled()
+        expect(prisma.aiUsage.updateMany).not.toHaveBeenCalled()
+    })
+
+    it("fail-closed when the exact period row is missing/insufficient (invariant reservedUnits >= 0)", async () => {
+        prisma.aiUsage.updateMany.mockResolvedValue({ count: 0 })
+
+        await expect(
+            releaseQuota(prisma, "req-1", 1, {
+                periodStart: new Date("2026-09-01T00:00:00.000Z"),
+            }),
+        ).rejects.toMatchObject({ code: "QUOTA_UNAVAILABLE", status: 503 })
+    })
+
+    it("targets the reservation's own period across a month rollover (no findFirst desc)", async () => {
+        const sepPeriod = new Date("2026-09-01T00:00:00.000Z")
+        await releaseQuota(prisma, "req-1", 1, { periodStart: sepPeriod })
+
+        expect(prisma.aiUsage.updateMany.mock.calls[0][0].where.periodStart).toBe(sepPeriod)
+        expect(prisma.aiUsage.findFirst).not.toHaveBeenCalled()
+    })
+})
+
+describe("§18 service boundaries + transaction client (D3)", () => {
+    it("reserve: event creation and quota CAS run on the transaction client, never on root prisma", async () => {
+        const root = makePrisma()
+        const tx = makePrisma()
+
+        root.aiUsageEvent.findUnique.mockResolvedValue(null) // idempotency pre-check
+        root.aiUsage.upsert.mockResolvedValue({ id: 100 })
+        tx.aiUsage.findUnique.mockResolvedValue({ reservedUnits: 0, consumedUnits: 0 })
+        tx.aiUsage.updateMany.mockResolvedValue({ count: 1 })
+        tx.aiUsageEvent.create.mockResolvedValue({ id: 1 })
+        wireTransactionClient(root, tx)
+
+        await expect(reserveQuota(root, makeInput())).resolves.toBeUndefined()
+
+        // creation + CAS روی همان tx تراکنش (§18 / atomicity)
+        expect(tx.aiUsageEvent.create).toHaveBeenCalledTimes(1)
+        expect(tx.aiUsage.updateMany).toHaveBeenCalledTimes(1)
+        // هیچ event/quota mutation روی root prisma
+        expect(root.aiUsageEvent.create).not.toHaveBeenCalled()
+        expect(root.aiUsage.updateMany).not.toHaveBeenCalled()
+        // خواندن idempotency و upsert ردیف دوره، عمدتاً قبل از تراکنش و روی root است
+        expect(root.aiUsageEvent.findUnique).toHaveBeenCalledTimes(1)
+        expect(root.aiUsage.upsert).toHaveBeenCalledTimes(1)
+    })
+
+    it("complete: event transition and quota-row update run on the transaction client", async () => {
+        const root = makePrisma()
+        const tx = makePrisma()
+
+        root.aiUsageEvent.findUnique.mockResolvedValue({ status: "RESERVED" }) // pre-check
+        tx.aiUsageEvent.findUnique.mockResolvedValue({ units: 1, userId: 7 })
+        tx.aiUsageEvent.updateMany.mockResolvedValue({ count: 1 })
+        tx.aiUsage.updateMany.mockResolvedValue({ count: 1 })
+        wireTransactionClient(root, tx)
+
+        await expect(
+            completeQuota(root, "req-1", undefined, { periodStart: NOW }),
+        ).resolves.toBe(true)
+
+        expect(tx.aiUsageEvent.updateMany).toHaveBeenCalledTimes(1)
+        expect(tx.aiUsage.updateMany).toHaveBeenCalledTimes(1)
+        expect(root.aiUsageEvent.updateMany).not.toHaveBeenCalled()
+        expect(root.aiUsage.updateMany).not.toHaveBeenCalled()
+    })
+
+    it("release: event transition (with failureCode) and quota-row update run on the transaction client", async () => {
+        const root = makePrisma()
+        const tx = makePrisma()
+
+        root.aiUsageEvent.findUnique.mockResolvedValue({ status: "RESERVED" })
+        tx.aiUsageEvent.findUnique.mockResolvedValue({ units: 1, userId: 7 })
+        tx.aiUsageEvent.updateMany.mockResolvedValue({ count: 1 })
+        tx.aiUsage.updateMany.mockResolvedValue({ count: 1 })
+        wireTransactionClient(root, tx)
+
+        await expect(
+            releaseQuota(root, "req-1", undefined, {
+                periodStart: NOW,
+                failureCode: "AI_PROVIDER_UNAVAILABLE",
+            }),
+        ).resolves.toBe(true)
+
+        expect(tx.aiUsageEvent.updateMany).toHaveBeenCalledTimes(1)
+        expect(tx.aiUsageEvent.updateMany.mock.calls[0][0].data).toEqual({
+            status: "RELEASED",
+            failureCode: "AI_PROVIDER_UNAVAILABLE",
+        })
+        expect(tx.aiUsage.updateMany).toHaveBeenCalledTimes(1)
+        expect(root.aiUsageEvent.updateMany).not.toHaveBeenCalled()
+        expect(root.aiUsage.updateMany).not.toHaveBeenCalled()
+    })
+
+    it("source boundary: aiQuota owns no direct AiUsageEvent access but keeps the transaction (§18)", async () => {
+        const fs = await import("node:fs")
+        const quotaSrc = await fs.promises.readFile("app/lib/services/aiQuota.service.ts", "utf-8")
+        const usageSrc = await fs.promises.readFile("app/lib/services/aiUsage.service.ts", "utf-8")
+
+        // creation/state-transition مالکیت aiUsage است (سند §18)
+        expect(quotaSrc).not.toMatch(/aiUsageEvent\./)
+        expect(quotaSrc).toMatch(/\$transaction/)
+        expect(quotaSrc).toMatch(/transitionEventToConsumed/)
+        expect(quotaSrc).toMatch(/transitionEventToReleased/)
+        // aiUsage نباید به aiQuota وابسته باشد و نباید transaction بسازد
+        expect(usageSrc).not.toMatch(/from\s+["']\.\/aiQuota\.service["']/)
+        expect(usageSrc).not.toMatch(/\$transaction/)
     })
 })
 

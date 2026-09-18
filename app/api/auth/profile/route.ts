@@ -10,36 +10,41 @@ import {
     validationErrorResponse,
 } from "@/app/lib/apiResponse"
 import { createObservabilityContext } from "@/src/lib/observability/context"
+import { recordError } from "@/src/lib/observability/recordError"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
 import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 
 // GET: اطلاعات حساب کاربری جاری
 export async function GET() {
+    const context = createObservabilityContext("/api/auth/profile", "auth")
     try {
         const user = await getCurrentUser()
-        if (!user) return unauthorizedResponse()
-        return okResponse(user)
+        if (!user) return unauthorizedResponse(context.requestId)
+        context.userId = user.id
+        return okResponse(user, { requestId: context.requestId })
     } catch (error) {
-        const mapped = toServiceErrorResponse(error)
+        recordError(error, context)
+        const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
-        console.error("PROFILE GET ERROR:", error)
-        return errorResponse(500, "INTERNAL", "خطای سرور")
+        return errorResponse(500, "INTERNAL", "خطای سرور", undefined, context.requestId)
     }
 }
 
 // PATCH: ویرایش اطلاعات حساب کاربری
 export async function PATCH(req: NextRequest) {
+    const context = createObservabilityContext("/api/auth/profile", "auth")
     try {
         const user = await getCurrentUser()
-        if (!user) return unauthorizedResponse()
+        if (!user) return unauthorizedResponse(context.requestId)
+        context.userId = user.id
 
         const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
-        if (!body) return validationErrorResponse(undefined)
+        if (!body) return validationErrorResponse(undefined, undefined, context.requestId)
 
         const parsed = profileSchema.safeParse(body)
         if (!parsed.success) {
-            return validationErrorResponse(parsed.error.flatten())
+            return validationErrorResponse(parsed.error.flatten(), undefined, context.requestId)
         }
 
         const updated = await updateProfile(user.id, user.username, parsed.data)
@@ -69,8 +74,6 @@ export async function PATCH(req: NextRequest) {
                     : []),
             ]
 
-            const context = createObservabilityContext("/api/auth/profile", "auth")
-            context.userId = user.id
             const prisma = getPrisma()
             await touchAuthenticatedActivity(user.id, new Date(), prisma)
             await recordProductEvent(
@@ -83,12 +86,12 @@ export async function PATCH(req: NextRequest) {
             // fail-open — analytics failure هرگز پاسخ را fail نمی‌کند
         }
 
-        return okResponse(updated, { message: "اطلاعات حساب با موفقیت ذخیره شد" })
+        return okResponse(updated, { message: "اطلاعات حساب با موفقیت ذخیره شد", requestId: context.requestId })
     } catch (error) {
-        const mapped = toServiceErrorResponse(error)
+        recordError(error, context)
+        const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
-        console.error("PROFILE PATCH ERROR:", error)
-        return errorResponse(500, "INTERNAL", "خطای سرور")
+        return errorResponse(500, "INTERNAL", "خطای سرور", undefined, context.requestId)
     }
 }
 

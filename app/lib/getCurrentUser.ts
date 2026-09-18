@@ -4,6 +4,9 @@ import { getPrisma } from "./getPrisma"
 // فاز ۵ — گام ۱۳: resolve پلن مؤثر فقط از entitlement.service (مالک lazy expiration و effective plan)
 // می‌آید؛ هیچ منطق انقضا/تمدیدی این‌جا تکرار نمی‌شود (سند §17/§27).
 import { resolveEffectivePlan } from "./services/entitlement.service"
+// فاز صفر §26 — خطای زیرساختِ lookup کاربر از boundary مرکزی observability عبور می‌کند
+import { createObservabilityContext } from "@/src/lib/observability/context"
+import { recordError } from "@/src/lib/observability/recordError"
 
 /**
  * کاربر جاری درخواست — تنها مسیر resolve کاربر احراز‌شده (سند فاز ۵ §18/§36 گام ۱۳).
@@ -91,10 +94,9 @@ export async function getCurrentUser() {
 
         return { ...user, plan }
     } catch (error) {
-        console.error("getCurrentUser: user lookup failed", {
-            userId: decoded.id,
-            error,
-        })
+        // فاز صفر §26 — لاگ خام حذف شد. در این نقطه identity قطعی نیست (ممکن است پیش از
+        // احراز هویت کامل اجرا شود) → context فقط requestId/endpoint دارد و هیچ userId ندارد.
+        recordError(error, createObservabilityContext("getCurrentUser"))
 
         throw error
     }

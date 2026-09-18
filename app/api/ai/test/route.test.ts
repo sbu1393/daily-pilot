@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
     reserveQuota: vi.fn(),
     completeQuota: vi.fn(),
     releaseQuota: vi.fn(),
+    markReleaseFailed: vi.fn(),
+    recordError: vi.fn(),
     getPrisma: vi.fn(),
 }))
 
@@ -28,9 +30,15 @@ vi.mock("@/app/lib/services/aiQuota.service", () => ({
     releaseQuota: mocks.releaseQuota,
 }))
 vi.mock("@/app/lib/getPrisma", () => ({ getPrisma: mocks.getPrisma }))
+// P1-5 — سند §۲۱/§۳۲: شکست زیرساخت quota باید از recordError عبور کند (بدون I/O واقعی).
+vi.mock("@/src/lib/observability/recordError", () => ({ recordError: mocks.recordError }))
+// D2 — سند §13: علامت‌گذاری release failure باید بدون I/O واقعی قابل assert باشد.
+vi.mock("@/app/lib/services/aiUsage.service", () => ({
+    markReleaseFailed: mocks.markReleaseFailed,
+}))
 
 import { GET } from "./route"
-import { QuotaExceededError } from "@/app/lib/services/errors"
+import { QuotaExceededError, QuotaUnavailableError } from "@/app/lib/services/errors"
 
 const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran", plan: "FREE" }
 const SAMPLES = [
@@ -136,6 +144,77 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
         expect(parsed.error.code).toBe("QUOTA_EXCEEDED")
         expect(mocks.runAiSamples).not.toHaveBeenCalled()
         expect(mocks.completeQuota).not.toHaveBeenCalled()
+        // P1-5 / سند §۲۱/§۳۲: QUOTA_EXCEEDED خطای expected است → هرگز record نمی‌شود
+        expect(mocks.recordError).not.toHaveBeenCalled()
+    })
+
+    /* ---------------------------------------------------------------- */
+    /* P1-5 — D1: infrastructure failures recorded (§19/§20/§21/§32)     */
+    /* ---------------------------------------------------------------- */
+
+    it("reserve failure → 503 QUOTA_UNAVAILABLE, envelope unchanged, recordError exactly once (P1-5)", async () => {
+        const failure = new QuotaUnavailableError()
+        mocks.reserveQuota.mockRejectedValue(failure)
+
+        const res = await GET()
+
+        expect(res.status).toBe(503)
+        await expect(res.json()).resolves.toMatchObject({
+            ok: false,
+            error: { code: "QUOTA_UNAVAILABLE", message: failure.message },
+        })
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+        expect(mocks.runAiSamples).not.toHaveBeenCalled()
+        expect(mocks.recordError).toHaveBeenCalledTimes(1)
+        expect(mocks.recordError).toHaveBeenCalledWith(
+            failure,
+            expect.objectContaining({
+                endpoint: "/api/ai/test",
+                feature: "ai-test",
+                userId: 1,
+                requestId: res.headers.get("X-Request-ID"),
+            }),
+        )
+    })
+
+    it("complete failure → 503 QUOTA_UNAVAILABLE and recordError exactly once (P1-5, §21)", async () => {
+        const failure = new QuotaUnavailableError()
+        mocks.runAiSamples.mockResolvedValue(SAMPLES)
+        mocks.completeQuota.mockRejectedValue(failure)
+
+        const res = await GET()
+
+        expect(res.status).toBe(503)
+        const parsed = await res.json()
+        expect(parsed.error.code).toBe("QUOTA_UNAVAILABLE")
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+        expect(mocks.recordError).toHaveBeenCalledTimes(1)
+        expect(mocks.recordError).toHaveBeenCalledWith(
+            failure,
+            expect.objectContaining({ userId: 1 }),
+        )
+    })
+
+    it("release failure → 503 QUOTA_UNAVAILABLE and recordError exactly once (fail-closed, §13/§21 — P1-5)", async () => {
+        mocks.runAiSamples.mockRejectedValue(new Error("provider down"))
+        mocks.releaseQuota.mockRejectedValue(new QuotaUnavailableError())
+
+        const res = await GET()
+
+        expect(res.status).toBe(503)
+        const parsed = await res.json()
+        expect(parsed.error.code).toBe("QUOTA_UNAVAILABLE")
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+        expect(mocks.completeQuota).not.toHaveBeenCalled()
+        expect(mocks.recordError).toHaveBeenCalledTimes(1)
+        expect(mocks.recordError.mock.calls[0][0]).toBeInstanceOf(QuotaUnavailableError)
+        // D2 / سند §13: event برای reconciliation علامت می‌خورد و provider دوباره اجرا نمی‌شود
+        expect(mocks.markReleaseFailed).toHaveBeenCalledTimes(1)
+        expect(mocks.markReleaseFailed).toHaveBeenCalledWith(
+            expect.anything(),
+            res.headers.get("X-Request-ID"),
+        )
+        expect(mocks.runAiSamples).toHaveBeenCalledTimes(1)
     })
 
     it("releases the reservation when runAiSamples fails (§12) and keeps envelope", async () => {
@@ -147,6 +226,8 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
         expect(mocks.releaseQuota).toHaveBeenCalledTimes(1)
         expect(mocks.completeQuota).not.toHaveBeenCalled()
         expect(res.status).toBe(500)
+        // D2: release موفق است → هیچ علامت‌گذاری RELEASE_FAILED نباید رخ دهد
+        expect(mocks.markReleaseFailed).not.toHaveBeenCalled()
         errorSpy.mockRestore()
     })
 

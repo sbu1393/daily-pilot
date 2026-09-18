@@ -8,8 +8,11 @@ import {
     toServiceErrorResponse,
     validationErrorResponse,
 } from "@/app/lib/apiResponse"
+import { createObservabilityContext } from "@/src/lib/observability/context"
+import { recordError } from "@/src/lib/observability/recordError"
 
 export async function POST(req: NextRequest) {
+    const context = createObservabilityContext("/api/auth/register", "auth")
     try {
         // محدودیت نرخ: حداکثر چند ثبت‌نام از یک IP در یک بازه
         if (isRateLimited(`register:ip:${clientIp(req)}`, 5, 60 * 60 * 1000)) {
@@ -17,21 +20,24 @@ export async function POST(req: NextRequest) {
                 429,
                 "RATE_LIMITED",
                 "تعداد ثبت‌نام‌ها زیاد شده؛ کمی بعد دوباره تلاش کن",
+                undefined,
+                context.requestId,
             )
         }
 
         // M3: بدنه‌ی نامعتبر/غیر-JSON نباید ۵۰۰ بسازد → همان ۴۰۰ استاندارد ADR-04
         const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
-        if (!body) return validationErrorResponse(undefined)
+        if (!body) return validationErrorResponse(undefined, undefined, context.requestId)
 
         const validation = registerSchema.safeParse(body)
         if (!validation.success) {
-            return validationErrorResponse(validation.error.flatten())
+            return validationErrorResponse(validation.error.flatten(), undefined, context.requestId)
         }
 
         const { username, email, password } = validation.data
 
         const user = await registerUser({ username, email, password })
+        context.userId = user.id
 
         const response = NextResponse.json(
             {
@@ -45,11 +51,13 @@ export async function POST(req: NextRequest) {
             },
             { status: 201 },
         )
+        response.headers.set("X-Request-ID", context.requestId)
 
         return createSession(user, response)
     } catch (error) {
-        const mapped = toServiceErrorResponse(error)
+        recordError(error, context)
+        const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
-        return errorResponse(500, "INTERNAL", "خطای سرور")
+        return errorResponse(500, "INTERNAL", "خطای سرور", undefined, context.requestId)
     }
 }

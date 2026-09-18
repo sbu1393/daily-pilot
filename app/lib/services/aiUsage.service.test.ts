@@ -5,11 +5,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
+    RELEASE_FAILED_CODE,
     assertTransitionAllowed,
     createReservedEvent,
     findEventStatusByRequestId,
-    markEventConsumed,
-    markEventReleased,
+    markReleaseFailed,
+    transitionEventToConsumed,
+    transitionEventToReleased,
 } from "./aiUsage.service"
 
 function makePrisma() {
@@ -93,45 +95,102 @@ describe("createReservedEvent", () => {
     })
 })
 
-describe("markEventConsumed / markEventReleased", () => {
-    it("consumed transition succeeds only from RESERVED", async () => {
+describe("transitionEventToConsumed / transitionEventToReleased (§18 ownership)", () => {
+    it("consumed: read → conditional update from RESERVED → returns the event identity", async () => {
         const prisma = makePrisma()
+        prisma.aiUsageEvent.findUnique.mockResolvedValue({ units: 2, userId: 7 })
         prisma.aiUsageEvent.updateMany.mockResolvedValue({ count: 1 })
 
-        await expect(markEventConsumed(prisma, "req-1")).resolves.toBe(true)
+        await expect(transitionEventToConsumed(prisma, "req-1")).resolves.toEqual({
+            units: 2,
+            userId: 7,
+        })
+
+        expect(prisma.aiUsageEvent.findUnique).toHaveBeenCalledWith({
+            where: { requestId: "req-1" },
+            select: { units: true, userId: true },
+        })
         const args = prisma.aiUsageEvent.updateMany.mock.calls[0][0]
         expect(args.where).toEqual({ requestId: "req-1", status: "RESERVED" })
         expect(args.data).toEqual({ status: "CONSUMED" })
+        // ترتیب قفل‌شده: read → conditional update (بدون تغییر نسبت به قبل)
+        expect(prisma.aiUsageEvent.findUnique.mock.invocationCallOrder[0]).toBeLessThan(
+            prisma.aiUsageEvent.updateMany.mock.invocationCallOrder[0],
+        )
     })
 
-    it("consumed transition returns false when already consumed (count 0)", async () => {
+    it("consumed: returns null when the event does not exist (no update attempted)", async () => {
         const prisma = makePrisma()
+        prisma.aiUsageEvent.findUnique.mockResolvedValue(null)
+
+        await expect(transitionEventToConsumed(prisma, "req-1")).resolves.toBeNull()
+        expect(prisma.aiUsageEvent.updateMany).not.toHaveBeenCalled()
+    })
+
+    it("consumed: returns null when the event is no longer RESERVED (count 0, idempotent no-op)", async () => {
+        const prisma = makePrisma()
+        prisma.aiUsageEvent.findUnique.mockResolvedValue({ units: 1, userId: 1 })
         prisma.aiUsageEvent.updateMany.mockResolvedValue({ count: 0 })
 
-        await expect(markEventConsumed(prisma, "req-1")).resolves.toBe(false)
+        await expect(transitionEventToConsumed(prisma, "req-1")).resolves.toBeNull()
     })
 
-    it("released transition succeeds only from RESERVED", async () => {
-        const prisma = makePrisma()
-        prisma.aiUsageEvent.updateMany.mockResolvedValue({ count: 1 })
+    it("released: writes failureCode only when provided (P1-1 compatibility)", async () => {
+        const withoutCode = makePrisma()
+        withoutCode.aiUsageEvent.findUnique.mockResolvedValue({ units: 1, userId: 7 })
+        withoutCode.aiUsageEvent.updateMany.mockResolvedValue({ count: 1 })
 
-        await expect(markEventReleased(prisma, "req-1")).resolves.toBe(true)
-        const args = prisma.aiUsageEvent.updateMany.mock.calls[0][0]
-        expect(args.where).toEqual({ requestId: "req-1", status: "RESERVED" })
-        expect(args.data).toEqual({ status: "RELEASED" })
+        await expect(transitionEventToReleased(withoutCode, "req-1")).resolves.toEqual({
+            units: 1,
+            userId: 7,
+        })
+        expect(withoutCode.aiUsageEvent.updateMany.mock.calls[0][0].data).toEqual({
+            status: "RELEASED",
+        })
+
+        const withCode = makePrisma()
+        withCode.aiUsageEvent.findUnique.mockResolvedValue({ units: 1, userId: 7 })
+        withCode.aiUsageEvent.updateMany.mockResolvedValue({ count: 1 })
+
+        await expect(
+            transitionEventToReleased(withCode, "req-1", "AI_PROVIDER_UNAVAILABLE"),
+        ).resolves.toEqual({ units: 1, userId: 7 })
+        expect(withCode.aiUsageEvent.updateMany.mock.calls[0][0].data).toEqual({
+            status: "RELEASED",
+            failureCode: "AI_PROVIDER_UNAVAILABLE",
+        })
     })
 
-    it("released transition returns false when already released (count 0)", async () => {
-        const prisma = makePrisma()
-        prisma.aiUsageEvent.updateMany.mockResolvedValue({ count: 0 })
+    it("released: returns null when the event does not exist or is no longer RESERVED", async () => {
+        const missing = makePrisma()
+        missing.aiUsageEvent.findUnique.mockResolvedValue(null)
+        await expect(transitionEventToReleased(missing, "req-1")).resolves.toBeNull()
+        expect(missing.aiUsageEvent.updateMany).not.toHaveBeenCalled()
 
-        await expect(markEventReleased(prisma, "req-1")).resolves.toBe(false)
+        const already = makePrisma()
+        already.aiUsageEvent.findUnique.mockResolvedValue({ units: 1, userId: 7 })
+        already.aiUsageEvent.updateMany.mockResolvedValue({ count: 0 })
+        await expect(transitionEventToReleased(already, "req-1")).resolves.toBeNull()
     })
 
-    it.each([markEventConsumed, markEventReleased])(
-        "%p is fail-closed: DB error → QuotaUnavailableError",
+    it.each([transitionEventToConsumed, transitionEventToReleased])(
+        "%p is fail-closed: DB error on read → QuotaUnavailableError",
         async (fn) => {
             const prisma = makePrisma()
+            prisma.aiUsageEvent.findUnique.mockRejectedValue(new Error("db down"))
+
+            await expect(fn(prisma, "req-1")).rejects.toMatchObject({
+                code: "QUOTA_UNAVAILABLE",
+                status: 503,
+            })
+        },
+    )
+
+    it.each([transitionEventToConsumed, transitionEventToReleased])(
+        "%p is fail-closed: DB error on conditional update → QuotaUnavailableError",
+        async (fn) => {
+            const prisma = makePrisma()
+            prisma.aiUsageEvent.findUnique.mockResolvedValue({ units: 1, userId: 7 })
             prisma.aiUsageEvent.updateMany.mockRejectedValue(new Error("db down"))
 
             await expect(fn(prisma, "req-1")).rejects.toMatchObject({
@@ -140,6 +199,40 @@ describe("markEventConsumed / markEventReleased", () => {
             })
         },
     )
+})
+
+describe("markReleaseFailed (§13 release failure)", () => {
+    it("marks only a still-RESERVED event with failureCode=RELEASE_FAILED (status untouched)", async () => {
+        const prisma = makePrisma()
+        prisma.aiUsageEvent.updateMany.mockResolvedValue({ count: 1 })
+
+        await expect(markReleaseFailed(prisma, "req-1")).resolves.toBe(true)
+
+        const args = prisma.aiUsageEvent.updateMany.mock.calls[0][0]
+        // فقط event همان requestId که هنوز RESERVED است
+        expect(args.where).toEqual({ requestId: "req-1", status: "RESERVED" })
+        // فقط failureCode — وضعیت transition نمی‌شود (event در RESERVED می‌ماند)
+        expect(args.data).toEqual({ failureCode: RELEASE_FAILED_CODE })
+        expect(args.data).not.toHaveProperty("status")
+    })
+
+    it("returns false when the event is not RESERVED / not found (count 0) without throwing", async () => {
+        const prisma = makePrisma()
+        prisma.aiUsageEvent.updateMany.mockResolvedValue({ count: 0 })
+
+        await expect(markReleaseFailed(prisma, "req-1")).resolves.toBe(false)
+    })
+
+    it("is best-effort: DB error never throws (fail-closed path must not break)", async () => {
+        const prisma = makePrisma()
+        prisma.aiUsageEvent.updateMany.mockRejectedValue(new Error("db down"))
+
+        await expect(markReleaseFailed(prisma, "req-1")).resolves.toBe(false)
+    })
+
+    it("never throws even when the prisma client is unusable", async () => {
+        await expect(markReleaseFailed({} as never, "req-1")).resolves.toBe(false)
+    })
 })
 
 describe("assertTransitionAllowed (state machine §11)", () => {

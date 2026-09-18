@@ -1,3 +1,5 @@
+import { AiProviderUnavailableError } from "@/app/lib/services/errors"
+
 import { aiAnalysisSchema, type AiAnalysis } from "./aiSchema"
 import { mockAnalyze } from "./mock"
 import { parseAiJson } from "./repair"
@@ -96,10 +98,21 @@ async function attempt(text: string, strict: boolean): Promise<{ analysis: AiAna
 
 /**
  * تحلیل عنوان تسک — فقط سمت سرور صدا بزن (Route Handler / Server Action).
- * اگه کلید نباشد → Mock. اگه API خطا بده → retry هوشمند → در نهایت Mock.
+ *
+ * فاز ۱ — سند §۲/§۱۲: mock یک امکاناتِ محیط توسعه است و **هرگز** نباید در production به‌عنوان
+ * موفقیت گزارش شود؛ وگرنه quota اشتباه مصرف می‌شود، release رخ نمی‌دهد و failureCode/observability
+ * اجرا نمی‌شود. بنابراین:
+ * - non-production: رفتار قبلی حفظ می‌شود (کلید غایب → Mock؛ شکست پس از retryها → Mock).
+ * - production: هیچ mockی ساخته نمی‌شود؛ کلید غایب یا شکست نهایی provider →
+ *   `AiProviderUnavailableError` (۵۰۳ AI_PROVIDER_UNAVAILABLE) تا caller رزرو کووتا را آزاد کند.
+ * این gate در زمان فراخوانی خوانده می‌شود (نه در سطح ماژول) تا قابل تست بماند.
  */
 export async function analyzeTask(text: string): Promise<AiResult> {
+    // mock فقط در non-production مجاز است (سند §۲ فاز ۱ — محیط‌محور)
+    const allowMockFallback = process.env.NODE_ENV !== "production"
+
     if (!process.env.AIXAI_API_KEY) {
+        if (!allowMockFallback) throw new AiProviderUnavailableError()
         return { source: "mock", analysis: mockAnalyze(text), attempts: 0 }
     }
 
@@ -119,6 +132,9 @@ export async function analyzeTask(text: string): Promise<AiResult> {
             }
         }
     }
+
+    // production — سند §۱۲: شکست نهایی provider هرگز mock/success نیست
+    if (!allowMockFallback) throw new AiProviderUnavailableError()
 
     console.warn("⚠️ AI call failed after retries, falling back to mock:", (lastError as Error)?.message ?? lastError)
     return { source: "mock", analysis: mockAnalyze(text), attempts: MAX_ATTEMPTS }

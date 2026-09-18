@@ -13,9 +13,11 @@ const mocks = vi.hoisted(() => ({
     reanalyzeTask: vi.fn(),
     touchAuthenticatedActivity: vi.fn(),
     recordProductEvent: vi.fn(),
+    recordError: vi.fn(),
     reserveQuota: vi.fn(),
     completeQuota: vi.fn(),
     releaseQuota: vi.fn(),
+    markReleaseFailed: vi.fn(),
     getPrisma: vi.fn(),
 }))
 
@@ -33,7 +35,13 @@ vi.mock("@/app/lib/services/aiQuota.service", () => ({
     completeQuota: mocks.completeQuota,
     releaseQuota: mocks.releaseQuota,
 }))
+// D2 — سند §13: علامت‌گذاری release failure باید بدون I/O واقعی قابل assert باشد.
+vi.mock("@/app/lib/services/aiUsage.service", () => ({
+    markReleaseFailed: mocks.markReleaseFailed,
+}))
 vi.mock("@/app/lib/getPrisma", () => ({ getPrisma: mocks.getPrisma }))
+// فاز ۱ — سند §۲۱: شکست نهایی provider/release باید در observability ثبت شود (بدون I/O واقعی).
+vi.mock("@/src/lib/observability/recordError", () => ({ recordError: mocks.recordError }))
 // planPolicy واقعی استفاده می‌شود (خالص و بدون DB) — FREE=15/PRO=300 در تست خودش پوشش دارد
 
 import { PATCH } from "./route"
@@ -208,17 +216,63 @@ describe("PATCH /api/tasks/[id]/analyze", () => {
         expect(parsed.error.code).toBe("QUOTA_EXCEEDED")
         expect(mocks.reanalyzeTask).not.toHaveBeenCalled()
         expect(mocks.completeQuota).not.toHaveBeenCalled()
+        // P1-5 / سند §۲۱/§۳۲: QUOTA_EXCEEDED خطای expected است → هرگز record نمی‌شود
+        expect(mocks.recordError).not.toHaveBeenCalled()
     })
 
-    it("propagates QUOTA_UNAVAILABLE as 503 and never calls the AI service (fail-closed)", async () => {
-        mocks.reserveQuota.mockRejectedValue(new QuotaUnavailableError())
+    /* ---------------------------------------------------------------- */
+    /* P1-5 — D1: infrastructure failures recorded (§19/§20/§21/§32)     */
+    /* ---------------------------------------------------------------- */
+
+    it("reserve failure → 503 QUOTA_UNAVAILABLE, envelope unchanged, recordError exactly once (P1-5)", async () => {
+        const failure = new QuotaUnavailableError()
+        mocks.reserveQuota.mockRejectedValue(failure)
+
+        const res = await callPATCH({})
+
+        // behavior قبلی دست‌نخورده: status/envelope/عدم فراخوانی AI
+        expect(res.status).toBe(503)
+        await expect(res.json()).resolves.toMatchObject({
+            ok: false,
+            error: { code: "QUOTA_UNAVAILABLE", message: failure.message },
+        })
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+        // D2: reserve failure یک release failure نیست → علامت‌گذاری RELEASE_FAILED انجام نمی‌شود
+        expect(mocks.markReleaseFailed).not.toHaveBeenCalled()
+        expect(mocks.reanalyzeTask).not.toHaveBeenCalled()
+        // observability: دقیقاً یک رکورد، همان error، همان context/requestId
+        expect(mocks.recordError).toHaveBeenCalledTimes(1)
+        expect(mocks.recordError).toHaveBeenCalledWith(
+            failure,
+            expect.objectContaining({
+                endpoint: "/api/tasks/[id]/analyze",
+                feature: "analyze",
+                userId: 1,
+                requestId: res.headers.get("X-Request-ID"),
+            }),
+        )
+    })
+
+    it("complete failure → 503 QUOTA_UNAVAILABLE and recordError exactly once (P1-5, §21)", async () => {
+        const failure = new QuotaUnavailableError()
+        mocks.reanalyzeTask.mockResolvedValue({ task: TASK, aiSource: "1xai" })
+        mocks.completeQuota.mockRejectedValue(failure)
 
         const res = await callPATCH({})
 
         expect(res.status).toBe(503)
         const parsed = await res.json()
         expect(parsed.error.code).toBe("QUOTA_UNAVAILABLE")
-        expect(mocks.reanalyzeTask).not.toHaveBeenCalled()
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+        expect(mocks.recordError).toHaveBeenCalledTimes(1)
+        expect(mocks.recordError).toHaveBeenCalledWith(
+            failure,
+            expect.objectContaining({ userId: 1 }),
+        )
+        // complete شکست خورده → هیچ success-eventی ثبت نمی‌شود
+        expect(mocks.recordProductEvent).not.toHaveBeenCalled()
+        // D2: complete failure یک release failure نیست → علامت‌گذاری RELEASE_FAILED انجام نمی‌شود
+        expect(mocks.markReleaseFailed).not.toHaveBeenCalled()
     })
 
     it("propagates IDEMPOTENCY_CONFLICT as 409 without any AI call or reservation", async () => {
@@ -239,7 +293,12 @@ describe("PATCH /api/tasks/[id]/analyze", () => {
 
         expect(res.status).toBe(404)
         expect(mocks.releaseQuota).toHaveBeenCalledTimes(1)
-        expect(mocks.releaseQuota).toHaveBeenCalledWith(expect.anything(), expect.any(String))
+        expect(mocks.releaseQuota).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.any(String),
+            undefined,
+            { periodStart: expect.any(Date) },
+        )
         expect(mocks.completeQuota).not.toHaveBeenCalled()
     })
 
@@ -254,7 +313,7 @@ describe("PATCH /api/tasks/[id]/analyze", () => {
         expect(mocks.releaseQuota).toHaveBeenCalledTimes(1)
     })
 
-    it("maps a release failure to 503 QUOTA_UNAVAILABLE (fail-closed, §13)", async () => {
+    it("maps a release failure to 503 QUOTA_UNAVAILABLE (fail-closed, §13) and records it exactly once (P1-5)", async () => {
         mocks.reanalyzeTask.mockRejectedValue(new AiProviderUnavailableError())
         mocks.releaseQuota.mockRejectedValue(new QuotaUnavailableError())
 
@@ -263,13 +322,101 @@ describe("PATCH /api/tasks/[id]/analyze", () => {
         expect(res.status).toBe(503)
         const parsed = await res.json()
         expect(parsed.error.code).toBe("QUOTA_UNAVAILABLE")
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+        // release failure = infrastructure failure → دقیقاً یک رکورد (نه provider failure هم)
+        expect(mocks.recordError).toHaveBeenCalledTimes(1)
+        expect(mocks.recordError.mock.calls[0][0]).toBeInstanceOf(QuotaUnavailableError)
+        // D2 / سند §13: event برای reconciliation علامت می‌خورد و provider دوباره اجرا نمی‌شود
+        expect(mocks.markReleaseFailed).toHaveBeenCalledTimes(1)
+        expect(mocks.markReleaseFailed).toHaveBeenCalledWith(
+            expect.anything(),
+            res.headers.get("X-Request-ID"),
+        )
+        expect(mocks.reanalyzeTask).toHaveBeenCalledTimes(1)
+    })
+
+    /* ---------------------------------------------------------------- */
+    /* فاز ۱ — سند §۱۲/§۲۱: شکست نهایی provider یک رویداد عملیاتی است    */
+    /* ---------------------------------------------------------------- */
+
+    it("passes AI_PROVIDER_UNAVAILABLE as failureCode and records the failure exactly once (§12/§21)", async () => {
+        const failure = new AiProviderUnavailableError()
+        mocks.reanalyzeTask.mockRejectedValue(failure)
+
+        const res = await callPATCH({})
+
+        expect(res.status).toBe(503)
+        const parsed = await res.json()
+        expect(parsed.error.code).toBe("AI_PROVIDER_UNAVAILABLE")
+        // failureCode روی همان آزادسازی رزرو نوشته می‌شود (بدون write دوم)
+        expect(mocks.releaseQuota).toHaveBeenCalledTimes(1)
+        expect(mocks.releaseQuota).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.any(String),
+            undefined,
+            { failureCode: "AI_PROVIDER_UNAVAILABLE", periodStart: expect.any(Date) },
+        )
+        // هیچ consumptionی رخ نمی‌دهد
+        expect(mocks.completeQuota).not.toHaveBeenCalled()
+        // observability: دقیقاً یک رکورد با همان context (بدون duplicate با outer catch)
+        expect(mocks.recordError).toHaveBeenCalledTimes(1)
+        expect(mocks.recordError).toHaveBeenCalledWith(
+            failure,
+            expect.objectContaining({
+                endpoint: "/api/tasks/[id]/analyze",
+                feature: "analyze",
+                userId: 1,
+            }),
+        )
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+        // D2: مسیر موفق release (AI_PROVIDER_UNAVAILABLE) نباید با RELEASE_FAILED قاطی شود
+        expect(mocks.markReleaseFailed).not.toHaveBeenCalled()
+    })
+
+    it("records the release failure once and stays fail-closed (§13/§21)", async () => {
+        mocks.reanalyzeTask.mockRejectedValue(new AiProviderUnavailableError())
+        mocks.releaseQuota.mockRejectedValue(new QuotaUnavailableError())
+
+        const res = await callPATCH({})
+
+        expect(res.status).toBe(503)
+        await expect(res.json()).resolves.toMatchObject({
+            ok: false,
+            error: { code: "QUOTA_UNAVAILABLE" },
+        })
+        expect(mocks.recordError).toHaveBeenCalledTimes(1)
+        expect(mocks.recordError.mock.calls[0][0]).toBeInstanceOf(QuotaUnavailableError)
+    })
+
+    it("does not record an operational failure for expected domain errors (§19 فاز ۲)", async () => {
+        mocks.reanalyzeTask.mockRejectedValue(new TaskNotFoundError())
+
+        const res = await callPATCH({})
+
+        expect(res.status).toBe(404)
+        // مثل قبل: آزادسازی رزرو بدون failureCode، ولی روی همان periodStart رزرو
+        expect(mocks.releaseQuota).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.any(String),
+            undefined,
+            { periodStart: expect.any(Date) },
+        )
+        expect(mocks.recordError).not.toHaveBeenCalled()
+    })
+
+    it("does not record anything on a successful analyze", async () => {
+        mocks.reanalyzeTask.mockResolvedValue({ task: TASK, aiSource: "1xai" })
+
+        const res = await callPATCH({})
+
+        expect(res.status).toBe(200)
+        expect(mocks.recordError).not.toHaveBeenCalled()
     })
 
     it("sets the X-Request-ID response header from the server-generated context", async () => {
         mocks.reanalyzeTask.mockResolvedValue({ task: TASK, aiSource: "1xai" })
 
         const res = await callPATCH({})
-
         expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
         // requestId رزرو همان هدر پاسخ است (shared lifecycle — سند §22)
         expect(mocks.reserveQuota.mock.calls[0][1].requestId).toBe(

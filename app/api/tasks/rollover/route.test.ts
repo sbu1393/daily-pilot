@@ -25,6 +25,34 @@ vi.mock("@/app/lib/services/productEvent.service", () => ({
 }))
 
 import { POST } from "./route"
+
+describe("POST /api/tasks/rollover — X-Request-ID (فاز صفر §7)", () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.getCurrentUser.mockResolvedValue(USER)
+        mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
+        mocks.recordProductEvent.mockResolvedValue({ recorded: true, eventName: "task.rolled_over" })
+        mocks.getPrisma.mockReturnValue({})
+    })
+
+    it("200 success carries X-Request-ID", async () => {
+        mocks.rolloverTasks.mockResolvedValue({ moved: MOVED, summaries: SUMMARIES })
+
+        const res = await callPOST({ taskIds: [1, 2] })
+
+        expect(res.status).toBe(200)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+
+    it("404 domain error carries X-Request-ID", async () => {
+        mocks.rolloverTasks.mockRejectedValue(new NoRolloverCandidatesError())
+
+        const res = await callPOST({ taskIds: [1, 2] })
+
+        expect(res.status).toBe(404)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+})
 import { NoRolloverCandidatesError, PlanStaleError } from "@/app/lib/services/errors"
 
 const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran" }

@@ -10,6 +10,7 @@ import {
     validationErrorResponse,
 } from "@/app/lib/apiResponse"
 import { createObservabilityContext } from "@/src/lib/observability/context"
+import { recordError } from "@/src/lib/observability/recordError"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
 import { recordProductEvent } from "@/app/lib/services/productEvent.service"
@@ -24,24 +25,26 @@ export async function GET(
     _req: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
+    const context = createObservabilityContext("/api/tasks/[id]", "tasks")
     try {
         const user = await getCurrentUser()
-        if (!user) return unauthorizedResponse()
+        if (!user) return unauthorizedResponse(context.requestId)
+        context.userId = user.id
 
         const { id } = await params
         const taskId = parseTaskId(id)
         if (taskId == null) {
-            return errorResponse(400, "VALIDATION_ERROR", "شناسه نامعتبر است")
+            return errorResponse(400, "VALIDATION_ERROR", "شناسه نامعتبر است", undefined, context.requestId)
         }
 
         const task = await getTask(user.id, taskId)
 
-        return okResponse(task)
+        return okResponse(task, { requestId: context.requestId })
     } catch (error) {
-        const mapped = toServiceErrorResponse(error)
+        recordError(error, context)
+        const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
-        console.error("GET TASK ERROR:", error)
-        return errorResponse(500, "INTERNAL", "Server error")
+        return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)
     }
 }
 
@@ -49,14 +52,16 @@ export async function DELETE(
     _req: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
+    const context = createObservabilityContext("/api/tasks/[id]", "tasks")
     try {
         const user = await getCurrentUser()
-        if (!user) return unauthorizedResponse()
+        if (!user) return unauthorizedResponse(context.requestId)
+        context.userId = user.id
 
         const { id } = await params
         const taskId = parseTaskId(id)
         if (taskId == null) {
-            return errorResponse(400, "VALIDATION_ERROR", "شناسه نامعتبر است")
+            return errorResponse(400, "VALIDATION_ERROR", "شناسه نامعتبر است", undefined, context.requestId)
         }
 
         const { id: deletedId, summary } = await deleteTask(user.id, taskId)
@@ -64,8 +69,6 @@ export async function DELETE(
         // فاز ۳ — گام ۷: فقط بعد از delete موفق (not-found → مسیر error، بدون event/touch).
         // خارج از business transaction؛ fail-open (§17).
         try {
-            const context = createObservabilityContext("/api/tasks/[id]", "tasks")
-            context.userId = user.id
             const prisma = getPrisma()
             await touchAuthenticatedActivity(user.id, new Date(), prisma)
             await recordProductEvent(
@@ -78,12 +81,12 @@ export async function DELETE(
             // fail-open — analytics failure هرگز پاسخ را fail نمی‌کند
         }
 
-        return okResponse({ id: deletedId, summary }, { message: "تسک حذف شد" })
+        return okResponse({ id: deletedId, summary }, { message: "تسک حذف شد", requestId: context.requestId })
     } catch (error) {
-        const mapped = toServiceErrorResponse(error)
+        recordError(error, context)
+        const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
-        console.error("DELETE TASK ERROR:", error)
-        return errorResponse(500, "INTERNAL", "Server error")
+        return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)
     }
 }
 
@@ -93,21 +96,23 @@ export async function PATCH(
     req: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
+    const context = createObservabilityContext("/api/tasks/[id]", "tasks")
     try {
         const user = await getCurrentUser()
-        if (!user) return unauthorizedResponse()
+        if (!user) return unauthorizedResponse(context.requestId)
+        context.userId = user.id
 
         const { id } = await params
         const taskId = parseTaskId(id)
         if (taskId == null) {
-            return errorResponse(400, "VALIDATION_ERROR", "شناسه نامعتبر است")
+            return errorResponse(400, "VALIDATION_ERROR", "شناسه نامعتبر است", undefined, context.requestId)
         }
 
         // Malformed JSON → 400 VALIDATION_ERROR (الگوی P2) نه 500
         const body = await req.json().catch(() => ({}))
         const parsed = makeUpdateTaskSchema(user.timezone).safeParse(body)
         if (!parsed.success) {
-            return validationErrorResponse(parsed.error.flatten())
+            return validationErrorResponse(parsed.error.flatten(), undefined, context.requestId)
         }
 
         const { task, changed, changedFields } = await updateTask(user.id, user.timezone, taskId, parsed.data)
@@ -116,8 +121,7 @@ export async function PATCH(
         // no-op → بدون event و بدون touch. خارج از business transaction؛ fail-open (§17).
         if (changed) {
             try {
-                const context = createObservabilityContext("/api/tasks/[id]", "tasks")
-                context.userId = user.id
+                // context اصلی handler استفاده می‌شود — هیچ context/requestId دومی این‌جا ساخته نمی‌شود
                 const prisma = getPrisma()
                 await touchAuthenticatedActivity(user.id, new Date(), prisma)
                 await recordProductEvent(
@@ -132,11 +136,11 @@ export async function PATCH(
             }
         }
 
-        return okResponse(task, { message: "تسک به‌روزرسانی شد" })
+        return okResponse(task, { message: "تسک به‌روزرسانی شد", requestId: context.requestId })
     } catch (error) {
-        const mapped = toServiceErrorResponse(error)
+        recordError(error, context)
+        const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
-        console.error("UPDATE TASK ERROR:", error)
-        return errorResponse(500, "INTERNAL", "Server error")
+        return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)
     }
 }

@@ -209,17 +209,28 @@ describe("getCurrentUser (M1 — auth vs infrastructure failures)", () => {
         expect(mocks.findUnique).not.toHaveBeenCalled()
     })
 
-    it("logs with context and rethrows on a database failure (M1 — no misleading 401)", async () => {
+    it("routes the DB failure through the observability boundary and rethrows (M1/فاز صفر §26)", async () => {
         const dbError = new Error("connection pool exhausted")
         mocks.findUnique.mockRejectedValue(dbError)
         const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
         await expect(getCurrentUser()).rejects.toThrow("connection pool exhausted")
 
-        expect(errorSpy).toHaveBeenCalledWith("getCurrentUser: user lookup failed", {
-            userId: 1,
-            error: dbError,
+        // فاز صفر §26: لاگ خام حذف شده — خروجی structured JSON از recordError است
+        const payload = JSON.parse(errorSpy.mock.calls[0][0] as string)
+        expect(payload).toMatchObject({
+            endpoint: "getCurrentUser",
+            message: "connection pool exhausted",
+            severity: "ERROR",
         })
+        expect(typeof payload.requestId).toBe("string")
+        // هندل raw error object و userId هرگز در لاگ نیست (پیش از احراز هویت کامل)
+        expect(errorSpy.mock.calls[0][1]).toBeUndefined()
+        expect(payload).not.toHaveProperty("userId")
+        // هیچ لاگ خامی با برچسب قدیمی ثبت نشده است
+        expect(
+            errorSpy.mock.calls.some((c) => c[0] === "getCurrentUser: user lookup failed"),
+        ).toBe(false)
     })
 
     it("still throws when JWT_SECRET is missing (unchanged contract)", async () => {

@@ -19,6 +19,8 @@ import {
     assertTransitionAllowed,
     createReservedEvent,
     findEventStatusByRequestId,
+    transitionEventToConsumed,
+    transitionEventToReleased,
     type PrismaClientLike,
 } from "./aiUsage.service"
 
@@ -42,11 +44,21 @@ export interface ReserveQuotaInput {
  * 1. idempotency: requestId موجود (هر وضعیتی) → IdempotencyConflictError؛ رزرو جدیدی ساخته نمی‌شود.
  * 2. upsert ایمن ردیف AiUsage ماهانه (race اولین ردیف با unique constraint + retry محدود).
  * 3. ثبت AiUsageEvent RESERVED.
- * 4. رزرو اتمیک داخل $transaction:
- *      - re-check شرطی روی مقادیر تازه + increment در همان transaction.
- *      - اگر شرط برقرار نبود → QUOTA_EXCEEDED (هیچ تغییر دیگری باقی نمی‌ماند چون transaction
- *        rollback می‌شود و رویداد RESERVED هم حذف می‌شود — all-or-nothing).
+ * 4. رزرو اتمیک داخل $transaction (bounded optimistic retry — سند §8/§9):
+ *      - در هر دور مقادیر تازه خوانده می‌شوند؛
+ *      - اگر `reserved + consumed + units > allowed` → QUOTA_EXCEEDED (exceed واقعی، بدون retry)؛
+ *      - CAS increment فقط روی همان مقادیر خوانده‌شده؛ count===1 → موفق؛
+ *      - count===0 (تغییر همزمان) → دور بعد، نه denial جعلی؛
+ *      - exhaustion (فقط contention) → QUOTA_UNAVAILABLE (fail-closed).
+ *      transaction rollback می‌شود و رویداد RESERVED هم حذف می‌شود — all-or-nothing.
+ *
+ * نکته‌ی محدودیت Prisma (§9): expression `consumedUnits + reservedUnits + n <= allowedUnits`
+ * داخل `where` قابل بیان نیست (Prisma مقایسه‌ی بین دو ستون را پشتیبانی نمی‌کند)؛ raw SQL و
+ * Serializable هم طبق سند ممنوع‌اند. پس guard با CAS روی مقادیر تازه + retry محدود پیاده شده است.
  */
+
+/** حداکثر تلاش optimistic برای رزرو (بدون حلقه‌ی بی‌پایان) */
+const RESERVE_MAX_ATTEMPTS = 5
 export async function reserveQuota(
     prisma: PrismaClientLike,
     input: ReserveQuotaInput,
@@ -62,47 +74,47 @@ export async function reserveQuota(
 
     try {
         await prisma.$transaction(async (tx: any) => {
-            // 3) رویداد RESERVED داخل همان transaction — تکراری بودن هم‌زمان با P2002 رد می‌شود
-            await tx.aiUsageEvent.create({
-                data: {
-                    requestId: input.requestId,
-                    userId: input.userId,
-                    feature: input.feature,
-                    model: input.model,
-                    units: input.units,
-                    status: "RESERVED",
-                    attempts: 1,
-                },
+            // 3) رویداد RESERVED داخل همان transaction — creation مالکیت aiUsage است (سند §18)
+            //    و تکراری بودن هم‌زمان با P2002 رد می‌شود (mapping داخل همان helper).
+            //    کلاینت همان `tx` است تا atomicity حفظ شود.
+            await createReservedEvent(tx, {
+                requestId: input.requestId,
+                userId: input.userId,
+                feature: input.feature,
+                model: input.model,
+                units: input.units,
             })
 
-            // 4) خواندن مقادیر تازه و رزرو شرطی اتمیک در همان transaction
-            const usage = await tx.aiUsage.findUnique({
-                where: { id: row.id },
-                select: { reservedUnits: true, consumedUnits: true },
-            })
-            if (!usage) throw new QuotaUnavailableError()
+            // 4) رزرو اتمیک با bounded optimistic retry (سند §8/§9):
+            //    در هر دور مقادیر تازه خوانده می‌شوند و increment فقط با CAS روی همان مقادیر
+            //    اجرا می‌شود — هرگز overspend، و یک تغییر همزمان باعث denial جعلی نمی‌شود.
+            for (let attempt = 0; attempt < RESERVE_MAX_ATTEMPTS; attempt++) {
+                const usage = await tx.aiUsage.findUnique({
+                    where: { id: row.id },
+                    select: { reservedUnits: true, consumedUnits: true },
+                })
+                if (!usage) throw new QuotaUnavailableError()
 
-            // Invariant دقیق سند: reservedUnits + consumedUnits + units <= allowedUnits
-            const claimedTotal = usage.reservedUnits + usage.consumedUnits + input.units
-            if (claimedTotal > input.allowedUnits) {
-                throw new QuotaExceededError()
+                // Invariant دقیق سند: reservedUnits + consumedUnits + units <= allowedUnits
+                const claimedTotal = usage.reservedUnits + usage.consumedUnits + input.units
+                if (claimedTotal > input.allowedUnits) {
+                    throw new QuotaExceededError()
+                }
+
+                const conditional = await tx.aiUsage.updateMany({
+                    where: {
+                        id: row.id,
+                        reservedUnits: usage.reservedUnits,
+                        consumedUnits: usage.consumedUnits,
+                    },
+                    data: { reservedUnits: { increment: input.units } },
+                })
+                if (conditional.count === 1) return // رزرو موفق — خروج از transaction
+                // count === 0 → تغییر همزمان؛ دور بعد با مقادیر تازه
             }
 
-            // Increment شرطی: فقط اگر از آخرین خواندن چیزی تغییر نکرده باشد (optimistic concurrency).
-            // در PostgreSQL تحت READ COMMITTED، Prisma update با where روی مقادیر خوانده‌شده،
-            // تغییرات هم‌زمان را با count===0 آشکار می‌کند؛ در آن صورت برای سادگی و بدون
-            // حلقه‌ی بی‌پایان، رزرو رد می‌شود (safe-side: کم‌رزرو، هرگز overspend).
-            const conditional = await tx.aiUsage.updateMany({
-                where: {
-                    id: row.id,
-                    reservedUnits: usage.reservedUnits,
-                    consumedUnits: usage.consumedUnits,
-                },
-                data: { reservedUnits: { increment: input.units } },
-            })
-            if (conditional.count === 0) {
-                throw new QuotaExceededError()
-            }
+            // exhaustion: فقط contention بوده (نه exceed) → fail-closed، نه QUOTA_EXCEEDED جعلی
+            throw new QuotaUnavailableError()
         })
     } catch (error) {
         if (
@@ -151,13 +163,22 @@ async function upsertUsageRow(
  * completeQuota — RESERVED → CONSUMED (سند §11).
  * در یک transaction: reservedUnits − units و consumedUnits + units (اتمیک، دقیقاً یک‌بار).
  * Idempotent: CONSUMED → no-op (false). نامعتبر: RELEASED → AiUsageConflictError.
+ *
+ * `options.periodStart` دقیقاً همان periodی است که رزرو روی آن انجام شده (سند §۶/§۱۱)؛
+ * دیگر با `findFirst … orderBy periodStart desc` «آخرین ماه» حدس زده نمی‌شود — پس rollover
+ * ماه، رزرو ماه قبل را آلوده نمی‌کند. گارد `reservedUnits >= delta` invariant
+ * `reservedUnits >= 0` را حفظ می‌کند و نبود/ناسازگاری ردیف → fail-closed.
  */
 export async function completeQuota(
     prisma: PrismaClientLike,
     requestId: string,
     /** فقط برای fallback وقتی event یافت نشود؛ عمل واقعی از event.units خوانده می‌شود */
-    units?: number,
+    units: number | undefined,
+    /** periodStart دقیقِ همان رزرو (اجباری — بدون آن complete مبهم است) */
+    options: { periodStart: Date },
 ): Promise<boolean> {
+    if (!options?.periodStart) throw new QuotaUnavailableError()
+
     const status = await findEventStatusByRequestId(prisma, requestId)
     const transition = status === null ? "allowed" : assertTransitionAllowed(status, "CONSUMED")
     if (transition === "conflict") throw new AiUsageConflictError()
@@ -165,33 +186,27 @@ export async function completeQuota(
 
     try {
         return await prisma.$transaction(async (tx: any) => {
-            const event = await tx.aiUsageEvent.findUnique({
-                where: { requestId },
-                select: { units: true, userId: true },
-            })
-            if (!event) return false
+            // transition مالکیت aiUsage است (سند §18) — با همان `tx` تراکنش کووتا:
+            // read event → conditional event update → (در ادامه) quota-row update
+            const event = await transitionEventToConsumed(tx, requestId)
+            if (event === null) return false
 
-            // تغییر وضعیت فقط از RESERVED — اتمیک، دوباره‌complete ناممکن (سند §11)
-            const updatedEvent = await tx.aiUsageEvent.updateMany({
-                where: { requestId, status: "RESERVED" },
-                data: { status: "CONSUMED" },
-            })
-            if (updatedEvent.count === 0) return false
+            const delta = event.units ?? units ?? 0
 
-            const usage = await tx.aiUsage.findFirst({
-                where: { userId: event.userId },
-                orderBy: { periodStart: "desc" },
-                select: { id: true },
-            })
-            if (!usage) return false
-
-            await tx.aiUsage.update({
-                where: { id: usage.id },
+            // فقط روی همان periodStart رزرو + گارد `reservedUnits >= delta` (invariant §7).
+            const applied = await tx.aiUsage.updateMany({
+                where: {
+                    userId: event.userId,
+                    periodType: "MONTHLY",
+                    periodStart: options.periodStart,
+                    reservedUnits: { gte: delta },
+                },
                 data: {
-                    reservedUnits: { decrement: event.units ?? units ?? 0 },
-                    consumedUnits: { increment: event.units ?? units ?? 0 },
+                    reservedUnits: { decrement: delta },
+                    consumedUnits: { increment: delta },
                 },
             })
+            if (applied.count === 0) throw new QuotaUnavailableError()
             return true
         })
     } catch (error) {
@@ -204,13 +219,25 @@ export async function completeQuota(
  * releaseQuota — RESERVED → RELEASED (سند §11/§13).
  * کاهش اتمیک reservedUnits به اندازه‌ی رزرو. Idempotent: RELEASED → no-op (false).
  * نامعتبر: CONSUMED → AiUsageConflictError. خطای DB → QuotaUnavailableError (fail-closed).
+ *
+ * `options.failureCode` (فاز ۱ §۱۲) در همان transition اتمیک نوشته می‌شود؛ در صورت ندادن آن،
+ * رفتار و داده‌ی نوشته‌شده دقیقاً مثل قبل است (backward compatible). مقدار آن باید یک کد امن
+ * از taxonomy خطا باشد (مثل کد همان ServiceError) — هرگز پیام/provider payload نیست.
+ *
+ * `options.periodStart` دقیقاً همان periodی است که رزرو روی آن انجام شده (سند §۶/§۱۱)؛
+ * دیگر «آخرین ماه» با `findFirst … desc` انتخاب نمی‌شود و گارد `reservedUnits >= delta`
+ * invariant `reservedUnits >= 0` را حفظ می‌کند.
  */
 export async function releaseQuota(
     prisma: PrismaClientLike,
     requestId: string,
     /** فقط برای fallback وقتی event یافت نشود؛ عمل واقعی از event.units خوانده می‌شود */
-    units?: number,
+    units: number | undefined,
+    /** periodStart دقیقِ همان رزرو (اجباری) + failureCode اختیاری */
+    options: { failureCode?: string; periodStart: Date },
 ): Promise<boolean> {
+    if (!options?.periodStart) throw new QuotaUnavailableError()
+
     const status = await findEventStatusByRequestId(prisma, requestId)
     const transition = status === null ? "allowed" : assertTransitionAllowed(status, "RELEASED")
     if (transition === "conflict") throw new AiUsageConflictError()
@@ -218,29 +245,23 @@ export async function releaseQuota(
 
     try {
         return await prisma.$transaction(async (tx: any) => {
-            const event = await tx.aiUsageEvent.findUnique({
-                where: { requestId },
-                select: { units: true, userId: true },
-            })
-            if (!event) return false
+            // transition مالکیت aiUsage است (سند §18/§13) — با همان `tx` تراکنش کووتا
+            const event = await transitionEventToReleased(tx, requestId, options.failureCode)
+            if (event === null) return false
 
-            const updatedEvent = await tx.aiUsageEvent.updateMany({
-                where: { requestId, status: "RESERVED" },
-                data: { status: "RELEASED" },
-            })
-            if (updatedEvent.count === 0) return false
+            const delta = event.units ?? units ?? 0
 
-            const usage = await tx.aiUsage.findFirst({
-                where: { userId: event.userId },
-                orderBy: { periodStart: "desc" },
-                select: { id: true },
+            // فقط روی همان periodStart رزرو + گارد `reservedUnits >= delta` (invariant §7).
+            const applied = await tx.aiUsage.updateMany({
+                where: {
+                    userId: event.userId,
+                    periodType: "MONTHLY",
+                    periodStart: options.periodStart,
+                    reservedUnits: { gte: delta },
+                },
+                data: { reservedUnits: { decrement: delta } },
             })
-            if (!usage) return false
-
-            await tx.aiUsage.update({
-                where: { id: usage.id },
-                data: { reservedUnits: { decrement: event.units ?? units ?? 0 } },
-            })
+            if (applied.count === 0) throw new QuotaUnavailableError()
             return true
         })
     } catch (error) {

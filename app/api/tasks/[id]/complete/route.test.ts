@@ -26,6 +26,34 @@ vi.mock("@/app/lib/services/productEvent.service", () => ({
 }))
 
 import { PATCH } from "./route"
+
+describe("PATCH /api/tasks/[id]/complete — X-Request-ID (فاز صفر §7/§25)", () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.getCurrentUser.mockResolvedValue(USER)
+        mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
+        mocks.recordProductEvent.mockResolvedValue({ recorded: true, eventName: "task.completed" })
+        mocks.getPrisma.mockReturnValue({})
+    })
+
+    it("200 success carries X-Request-ID", async () => {
+        mocks.completeTask.mockResolvedValue({ task: TASK, result: RESULT, summaries: SUMMARIES })
+
+        const res = await callPATCH({ spentMinutes: 40 })
+
+        expect(res.status).toBe(200)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+
+    it("404 domain error carries X-Request-ID", async () => {
+        mocks.completeTask.mockRejectedValue(new TaskNotFoundError())
+
+        const res = await callPATCH({ spentMinutes: 40 })
+
+        expect(res.status).toBe(404)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+})
 import { TaskAlreadyDoneError, TaskNotFoundError } from "@/app/lib/services/errors"
 
 const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran" }

@@ -25,6 +25,39 @@ vi.mock("@/app/lib/services/productEvent.service", () => ({
 
 import { GET } from "./route"
 
+describe("GET /api/planner/history — X-Request-ID (فاز صفر §7)", () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.getCurrentUser.mockResolvedValue({
+            id: 1,
+            username: "test",
+            email: "t@example.com",
+            timezone: "Asia/Tehran",
+        })
+        mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
+        mocks.recordProductEvent.mockResolvedValue({ recorded: true, eventName: "planner.history_viewed" })
+        mocks.getPrisma.mockReturnValue({})
+    })
+
+    it("GET success response carries X-Request-ID", async () => {
+        mocks.getHistoryMarkers.mockResolvedValue([])
+
+        const res = await GET(
+            new NextRequest("http://localhost/api/planner/history?from=2026-01-01&to=2026-01-31"),
+        )
+
+        expect(res.status).toBe(200)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+
+    it("GET validation error carries X-Request-ID", async () => {
+        const res = await GET(new NextRequest("http://localhost/api/planner/history?from=2026-01-01"))
+
+        expect(res.status).toBe(400)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+})
+
 const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran" }
 const MARKERS = [
     { dayKey: "2026-01-01", hasPlan: true },

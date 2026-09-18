@@ -33,23 +33,99 @@ export function resolvePlanPolicy(user: { plan?: string | null }): PlanPolicy {
 }
 
 export interface MonthlyPeriod {
-    /** شروع ماه جاری — 00:00:00.000 UTC */
+    /** شروع ماه جاری — 00:00:00.000 در timezone کاربر، به شکل instant پایدار UTC */
     periodStart: Date
     /** شروع ماه بعد — مرز rollover؛ ماه جدید AiUsage row مستقل خودش را می‌گیرد */
     nextPeriodStart: Date
 }
 
+/** timezone معتبر (IANA) است؟ — بدون fallback پنهان در محاسبه */
+function isValidTimezone(timezone: string): boolean {
+    try {
+        new Intl.DateTimeFormat("en-US", { timeZone: timezone })
+        return true
+    } catch {
+        return false
+    }
+}
+
+/** اختلاف timezone با UTC در لحظه‌ی داده‌شده، بر حسب میلی‌ثانیه */
+function timeZoneOffsetMs(date: Date, timezone: string): number {
+    const parts = new Intl.DateTimeFormat("en", {
+        timeZone: timezone,
+        hourCycle: "h23",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+    }).formatToParts(date)
+
+    const pick = (type: string): number => {
+        const part = parts.find((p) => p.type === type)
+        if (!part) throw new Error(`Intl did not return "${type}" part`)
+        return Number(part.value)
+    }
+
+    const asUtc = Date.UTC(
+        pick("year"),
+        pick("month") - 1,
+        pick("day"),
+        pick("hour"),
+        pick("minute"),
+        pick("second"),
+    )
+
+    return asUtc - date.getTime()
+}
+
+/** سال/ماه تقویمی محلی در timezone داده‌شده */
+function localYearMonth(date: Date, timezone: string): { year: number; month: number } {
+    const parts = new Intl.DateTimeFormat("en", {
+        timeZone: timezone,
+        year: "numeric",
+        month: "2-digit",
+    }).formatToParts(date)
+
+    const pick = (type: string): number => {
+        const part = parts.find((p) => p.type === type)
+        if (!part) throw new Error(`Intl did not return "${type}" part`)
+        return Number(part.value)
+    }
+
+    return { year: pick("year"), month: pick("month") }
+}
+
 /**
- * بازه‌ی ماهانه‌ی تقویمی UTC شامل لحظه‌ی now.
- * (فاز ۱: پرود سند محاسبه‌ی monthStart بر اساس User.timezone را برای reserve/complete
- *  به لایه‌ی aiQuota می‌سپارد که با context کاربر فراخوانی می‌شود؛ این تابع مرز UTC تقویمی است.)
+ * instant UTC متناظر با 00:00:00 روز اول یک ماه محلی (`local month start`).
+ * دو پاس برای درستی در مرزهای DST (مثل Europe/Berlin) — همان الگوی getLocalMidnight.
  */
-export function getMonthlyPeriod(now: Date): MonthlyPeriod {
-    const periodStart = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0),
-    )
-    const nextPeriodStart = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0, 0),
-    )
-    return { periodStart, nextPeriodStart }
+function localMonthStartUtc(year: number, month: number, timezone: string): Date {
+    const wallUtc = Date.UTC(year, month - 1, 1, 0, 0, 0, 0)
+    let ts = wallUtc - timeZoneOffsetMs(new Date(wallUtc), timezone)
+    ts = wallUtc - timeZoneOffsetMs(new Date(ts), timezone)
+    return new Date(ts)
+}
+
+/**
+ * بازه‌ی ماهانه‌ی تقویمی محلیِ timezone کاربر شامل لحظه‌ی now (سند §۶):
+ *   local month start → timezone user → UTC instant → periodStart
+ *
+ * - پیش‌فرض `"UTC"` است تا فراخوان‌های بدون timezone و همه‌ی تست‌های قبلی دقیقاً رفتار قبل را
+ *   حفظ کنند (backward compatible).
+ * - timezone نامعتبر/خالی → fallback صریح به UTC (fail-safe؛ بدون پرتاب خطا در مسیر quota).
+ */
+export function getMonthlyPeriod(now: Date, timezone: string = "UTC"): MonthlyPeriod {
+    const tz = timezone && isValidTimezone(timezone) ? timezone : "UTC"
+    const { year, month } = localYearMonth(now, tz)
+
+    // rollover سالانهٔ دسامبر → ژانویه
+    const nextYear = month === 12 ? year + 1 : year
+    const nextMonth = month === 12 ? 1 : month + 1
+
+    return {
+        periodStart: localMonthStartUtc(year, month, tz),
+        nextPeriodStart: localMonthStartUtc(nextYear, nextMonth, tz),
+    }
 }

@@ -9,11 +9,13 @@ import {
     validationErrorResponse,
 } from "@/app/lib/apiResponse"
 import { createObservabilityContext } from "@/src/lib/observability/context"
+import { recordError } from "@/src/lib/observability/recordError"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
 import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 
 export async function POST(req: NextRequest) {
+    const context = createObservabilityContext("/api/auth/login", "auth")
     try {
         // محدودیت نرخ: به ازای IP (قبل از خواندن بدنه) و به ازای ایمیل (بعد از اعتبارسنجی)
         if (isRateLimited(`login:ip:${clientIp(req)}`)) {
@@ -21,17 +23,19 @@ export async function POST(req: NextRequest) {
                 429,
                 "RATE_LIMITED",
                 "تلاش‌های زیادی انجام شده؛ کمی بعد دوباره تلاش کن",
+                undefined,
+                context.requestId,
             )
         }
 
         // M3: بدنه‌ی نامعتبر/غیر-JSON نباید ۵۰۰ بسازد → همان ۴۰۰ استاندارد ADR-04
         const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
-        if (!body) return validationErrorResponse(undefined)
+        if (!body) return validationErrorResponse(undefined, undefined, context.requestId)
 
         const validation = loginSchema.safeParse(body)
 
         if (!validation.success) {
-            return validationErrorResponse(validation.error.flatten())
+            return validationErrorResponse(validation.error.flatten(), undefined, context.requestId)
         }
 
         const { email, password } = validation.data
@@ -41,17 +45,18 @@ export async function POST(req: NextRequest) {
                 429,
                 "RATE_LIMITED",
                 "تلاش‌های زیادی برای این حساب انجام شده؛ کمی بعد دوباره تلاش کن",
+                undefined,
+                context.requestId,
             )
         }
 
         const user = await authenticate(email, password)
+        context.userId = user.id
 
         // فاز ۳ — گام ۷: auth.login_succeeded فقط بعد از موفقیت واقعی authentication،
         // قبل از ساخت session (مرز موفقیت auth)؛ خارج از business transaction؛
         // fail-open — هرگز نتیجه‌ی login را تغییر نمی‌دهد (سند §17).
         try {
-            const context = createObservabilityContext("/api/auth/login", "auth")
-            context.userId = user.id
             const prisma = getPrisma()
             await touchAuthenticatedActivity(user.id, new Date(), prisma)
             await recordProductEvent(
@@ -77,12 +82,13 @@ export async function POST(req: NextRequest) {
             },
             { status: 200 },
         )
+        response.headers.set("X-Request-ID", context.requestId)
 
         return createSession(user, response)
     } catch (error) {
-        const mapped = toServiceErrorResponse(error)
+        recordError(error, context)
+        const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
-        console.error("LOGIN ERROR:", error)
-        return errorResponse(500, "INTERNAL", "خطای سرور")
+        return errorResponse(500, "INTERNAL", "خطای سرور", undefined, context.requestId)
     }
 }

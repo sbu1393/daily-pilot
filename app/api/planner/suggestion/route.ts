@@ -9,6 +9,7 @@ import {
     unauthorizedResponse,
 } from "@/app/lib/apiResponse"
 import { createObservabilityContext } from "@/src/lib/observability/context"
+import { recordError } from "@/src/lib/observability/recordError"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
 import { recordProductEvent } from "@/app/lib/services/productEvent.service"
@@ -17,9 +18,11 @@ import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 // فقط خواندنی: هیچ mutation، هیچ persist، هیچ AI (موتور pure suggestDay).
 // date اختیاری است؛ پیش‌فرض «امروزِ» کاربر بر اساس timezone سرور-محور (§6.2.2.1).
 export async function GET(req: NextRequest) {
+    const context = createObservabilityContext("/api/planner/suggestion", "planner")
     try {
         const user = await getCurrentUser()
-        if (!user) return unauthorizedResponse()
+        if (!user) return unauthorizedResponse(context.requestId)
+        context.userId = user.id
 
         const dateParam = req.nextUrl.searchParams.get("date")
         const dayKey = dateParam ?? getCanonicalToday(user.timezone)
@@ -27,7 +30,7 @@ export async function GET(req: NextRequest) {
         // Phase 2A (M10): اعتبارسنجی سخت‌گیرانه‌ی مشترک — قالب + تقویم واقعی،
         // یکسان با /api/planner/day و /api/planner/history
         if (!isValidCanonicalDayKey(dayKey)) {
-            return errorResponse(400, "VALIDATION_ERROR", "فرمت روز نامعتبر است")
+            return errorResponse(400, "VALIDATION_ERROR", "فرمت روز نامعتبر است", undefined, context.requestId)
         }
 
         // A1 Phase 1 — پاسخ شامل basis (planVersion/rebalancedVersion/availableMinutes/taskCount)
@@ -37,8 +40,6 @@ export async function GET(req: NextRequest) {
         // فاز ۳ — گام ۱۰: planner.suggestion_viewed فقط بعد از verified successful view؛
         // touch + event خارج از business operation؛ fail-open (§17). properties خالی (allowlist گام ۳).
         try {
-            const context = createObservabilityContext("/api/planner/suggestion", "planner")
-            context.userId = user.id
             const prisma = getPrisma()
             await touchAuthenticatedActivity(user.id, new Date(), prisma)
             await recordProductEvent(
@@ -53,11 +54,11 @@ export async function GET(req: NextRequest) {
         }
 
         // ADR-04: { ok, data: suggestion }
-        return okResponse(suggestion)
+        return okResponse(suggestion, { requestId: context.requestId })
     } catch (error) {
-        const mapped = toServiceErrorResponse(error)
+        recordError(error, context)
+        const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
-        console.error("GET DAY SUGGESTION ERROR:", error)
-        return errorResponse(500, "INTERNAL", "Server error")
+        return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)
     }
 }

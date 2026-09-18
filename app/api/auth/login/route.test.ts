@@ -32,6 +32,44 @@ vi.mock("@/app/lib/services/productEvent.service", () => ({
 }))
 
 import { POST } from "./route"
+
+describe("POST /api/auth/login — X-Request-ID (فاز صفر §7/§25)", () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.clientIp.mockReturnValue("1.2.3.4")
+        mocks.isRateLimited.mockReturnValue(false)
+        mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
+        mocks.recordProductEvent.mockResolvedValue({ recorded: true, eventName: "auth.login_succeeded" })
+        mocks.getPrisma.mockReturnValue({})
+        mocks.createSession.mockImplementation((_user: unknown, response: unknown) => response)
+        mocks.authenticate.mockResolvedValue(USER)
+    })
+
+    it("200 success (with session) carries X-Request-ID", async () => {
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(200)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+
+    it("401 error carries X-Request-ID", async () => {
+        mocks.authenticate.mockRejectedValue(new InvalidCredentialsError())
+
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(401)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+
+    it("429 rate-limit response carries X-Request-ID", async () => {
+        mocks.isRateLimited.mockReturnValue(true)
+
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(429)
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+})
 import { InvalidCredentialsError } from "@/app/lib/services/errors"
 
 const USER = { id: 1, username: "test", email: "test@example.com" }

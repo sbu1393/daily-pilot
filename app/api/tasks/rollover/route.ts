@@ -10,19 +10,22 @@ import {
     validationErrorResponse,
 } from "@/app/lib/apiResponse"
 import { createObservabilityContext } from "@/src/lib/observability/context"
+import { recordError } from "@/src/lib/observability/recordError"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
 import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 
 export async function POST(req: NextRequest) {
+    const context = createObservabilityContext("/api/tasks/rollover", "tasks")
     try {
         const user = await getCurrentUser()
-        if (!user) return unauthorizedResponse()
+        if (!user) return unauthorizedResponse(context.requestId)
+        context.userId = user.id
 
         const body = await req.json()
         const parsed = rolloverSchema.safeParse(body)
         if (!parsed.success) {
-            return validationErrorResponse(parsed.error.flatten())
+            return validationErrorResponse(parsed.error.flatten(), undefined, context.requestId)
         }
 
         // A1 Phase 4 — planVersion اختیاری: پاسخ ADR-04 بدون تغییر می‌ماند؛ فقط رد کهنه‌ها
@@ -34,8 +37,6 @@ export async function POST(req: NextRequest) {
         // واقعاً moved شده‌اند؛ moved=[] → هیچ event. touch تک‌بار در boundary موفقیت.
         // خارج از business transaction؛ fail-open (§17).
         try {
-            const context = createObservabilityContext("/api/tasks/rollover", "tasks")
-            context.userId = user.id
             const prisma = getPrisma()
             await touchAuthenticatedActivity(user.id, new Date(), prisma)
             for (const item of moved) {
@@ -55,11 +56,11 @@ export async function POST(req: NextRequest) {
             // fail-open — analytics failure هرگز پاسخ را fail نمی‌کند
         }
 
-        return okResponse({ moved, summaries })
+        return okResponse({ moved, summaries }, { requestId: context.requestId })
     } catch (error) {
-        const mapped = toServiceErrorResponse(error)
+        recordError(error, context)
+        const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
-        console.error("ROLLOVER TASKS ERROR:", error)
-        return errorResponse(500, "INTERNAL", "Server error")
+        return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)
     }
 }

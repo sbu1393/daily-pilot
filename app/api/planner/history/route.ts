@@ -9,6 +9,7 @@ import {
     unauthorizedResponse,
 } from "@/app/lib/apiResponse"
 import { createObservabilityContext } from "@/src/lib/observability/context"
+import { recordError } from "@/src/lib/observability/recordError"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
 import { recordProductEvent } from "@/app/lib/services/productEvent.service"
@@ -16,9 +17,11 @@ import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 // GET /api/planner/history?from=2026-01-01&to=2026-01-31
 // کلیدهای روز صفر-پد هستند (canonical میلادی) → مقایسه‌ی رشته‌ای from/to درسته
 export async function GET(req: NextRequest) {
+    const context = createObservabilityContext("/api/planner/history", "planner")
     try {
         const user = await getCurrentUser()
-        if (!user) return unauthorizedResponse()
+        if (!user) return unauthorizedResponse(context.requestId)
+        context.userId = user.id
 
         const from = req.nextUrl.searchParams.get("from")
         const to = req.nextUrl.searchParams.get("to")
@@ -31,7 +34,7 @@ export async function GET(req: NextRequest) {
             !isValidCanonicalDayKey(to) ||
             from > to
         ) {
-            return errorResponse(400, "VALIDATION_ERROR", "بازه‌ی نامعتبر")
+            return errorResponse(400, "VALIDATION_ERROR", "بازه‌ی نامعتبر", undefined, context.requestId)
         }
 
         const markers = await getHistoryMarkers(user.id, from, to)
@@ -39,8 +42,6 @@ export async function GET(req: NextRequest) {
         // فاز ۳ — گام ۱۰: planner.history_viewed فقط بعد از verified successful view؛
         // touch + event خارج از business operation؛ fail-open (§17). properties خالی (allowlist گام ۳).
         try {
-            const context = createObservabilityContext("/api/planner/history", "planner")
-            context.userId = user.id
             const prisma = getPrisma()
             await touchAuthenticatedActivity(user.id, new Date(), prisma)
             await recordProductEvent(
@@ -54,11 +55,11 @@ export async function GET(req: NextRequest) {
             // fail-open — analytics failure هرگز پاسخ را fail نمی‌کند
         }
 
-        return okResponse(markers)
+        return okResponse(markers, { requestId: context.requestId })
     } catch (error) {
-        const mapped = toServiceErrorResponse(error)
+        recordError(error, context)
+        const mapped = toServiceErrorResponse(error, context.requestId)
         if (mapped) return mapped
-        console.error("HISTORY ERROR:", error)
-        return errorResponse(500, "INTERNAL", "Server error")
+        return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)
     }
 }

@@ -155,6 +155,39 @@ describe("POST /api/billing/checkout (§35 Checkout route tests)", () => {
         expect(mocks.prepareCheckout).not.toHaveBeenCalled()
     })
 
+    it("ignores client-supplied price/plan/state fields — values come from server config only", async () => {
+        const order = pendingOrder({ providerAuthority: "A1" })
+        mocks.prepareCheckout.mockResolvedValue({ order, reused: true })
+
+        // بدنه‌ی کامل حمله‌ی price-tampering: قیمت/ارز/مدت/پلن/وضعیت/مالکیت
+        const res = await post("key-1", {
+            amount: 1,
+            currency: "USD",
+            entitlementDays: 9999,
+            planCode: "PRO",
+            plan: "PRO",
+            userId: 999,
+            status: "PAID",
+            providerAuthority: "A-ATTACKER",
+            entitlementId: "forged",
+        })
+
+        expect(res.status).toBe(200)
+        // قرارداد فراخوانی سرویس دست‌نخورده است: فقط کلید idempotency + تنظیمات سروری
+        // (بدون amount/currency/entitlementDays/plan/status/userId از بدنه).
+        expect(mocks.prepareCheckout).toHaveBeenCalledWith(expect.anything(), {
+            userId: USER.id, // مالکیت از نشست احراز‌شده، نه از بدنه
+            checkoutIdempotencyKey: "key-1",
+            orderTtlMs: SETTINGS.orderTtlMs,
+            requestId: expect.any(String),
+        })
+        // هیچ مقدار کاربر در پاسخ بازتاب نمی‌یابد (redirect فقط از authority ذخیره‌شده‌ی سروری)
+        const payload = JSON.stringify(await res.json())
+        expect(payload).not.toContain("9999")
+        expect(payload).not.toContain("A-ATTACKER")
+        expect(payload).not.toContain("USD")
+    })
+
     it("trims the key before passing it to the service (route-level shape validation)", async () => {
         const order = pendingOrder({ providerAuthority: "A1" })
         mocks.prepareCheckout.mockResolvedValue({ order, reused: true })

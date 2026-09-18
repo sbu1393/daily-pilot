@@ -9,10 +9,12 @@ import { NextRequest } from "next/server"
 
 const mocks = vi.hoisted(() => ({
     getCurrentUser: vi.fn(),
+    isRateLimited: vi.fn(),
     reanalyzeTask: vi.fn(),
 }))
 
 vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: mocks.getCurrentUser }))
+vi.mock("@/app/lib/rateLimit", () => ({ isRateLimited: mocks.isRateLimited }))
 vi.mock("@/app/lib/services/tasks.service", () => ({ reanalyzeTask: mocks.reanalyzeTask }))
 
 import { PATCH } from "./route"
@@ -31,6 +33,7 @@ describe("PATCH /api/tasks/[id]/analyze", () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mocks.getCurrentUser.mockResolvedValue(USER)
+        mocks.isRateLimited.mockReturnValue(false)
     })
 
     it("returns 200 with { ok: true, data: { task, aiSource } } and no summary key (A6)", async () => {
@@ -44,6 +47,24 @@ describe("PATCH /api/tasks/[id]/analyze", () => {
         expect(parsed.data).not.toHaveProperty("summary")
         // بدون text → متن فعلی تسک دوباره تحلیل میشود
         expect(mocks.reanalyzeTask).toHaveBeenCalledWith(1, "Asia/Tehran", 5, undefined)
+        expect(mocks.isRateLimited).toHaveBeenCalledWith("analyze:user:1", 5, 15 * 60 * 1000)
+    })
+
+    it("returns 429 RATE_LIMITED and never calls reanalyzeTask when the user limit is exhausted", async () => {
+        mocks.isRateLimited.mockReturnValue(true)
+
+        const res = await callPATCH({})
+
+        expect(res.status).toBe(429)
+        await expect(res.json()).resolves.toEqual({
+            ok: false,
+            error: {
+                code: "RATE_LIMITED",
+                message: "تعداد درخواست‌های هوش مصنوعی زیاد شده؛ کمی بعد دوباره تلاش کن",
+            },
+        })
+        expect(mocks.isRateLimited).toHaveBeenCalledWith("analyze:user:1", 5, 15 * 60 * 1000)
+        expect(mocks.reanalyzeTask).not.toHaveBeenCalled()
     })
 
     it("forwards the explicit text override when provided", async () => {

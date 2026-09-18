@@ -65,6 +65,62 @@
     padding: 3px 10px;
     width: max-content;
   }
+
+  /* ===== موبایل ≤560px — نوار فشرده‌ی چیپی آمار روز (گزینه ۳) =====
+     فقط موبایل؛ دسکتاپ/تبلت همان گرید کارتی قبلی را دارند. */
+  @media (max-width: 560px) {
+    .statsWrap {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 8px;
+      margin: 12px 0 4px;
+      /* padding-top برای جای برچسب شناور over-budget تا clip نشود */
+      padding: 10px 2px 6px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-x: contain;
+      /* اسکرول‌بار نامرئی — اسکرول لمسی/ماوس سر جایش است */
+      scrollbar-width: none;
+    }
+    .statsWrap::-webkit-scrollbar {
+      display: none;
+    }
+    .statCard {
+      position: relative;
+      flex: 0 0 auto;
+      gap: 2px;
+      padding: 8px 11px;
+      border-radius: 14px;
+      box-shadow: 0 4px 14px rgba(var(--ink-rgb), 0.05);
+    }
+    .statHead {
+      gap: 5px;
+      font-size: 0.62rem;
+      white-space: nowrap;
+    }
+    .statHead svg {
+      width: 12px;
+      height: 12px;
+    }
+    .statValue {
+      font-size: 0.88rem;
+      white-space: nowrap;
+    }
+    /* progress bar به نشانگر باریک درون چیپ تبدیل می‌شود */
+    .progressTrack {
+      height: 4px;
+      margin-top: 2px;
+    }
+    /* over-budget: برچسب شناور روی لبه‌ی چیپ — ارتفاع ردیف را زیاد نمی‌کند */
+    .warnChip {
+      position: absolute;
+      top: -9px;
+      inset-inline-end: 6px;
+      padding: 1px 8px;
+      font-size: 0.6rem;
+    }
+  }
   
   .statsFooter {
     margin-top: 10px;
@@ -90,6 +146,38 @@
     color: var(--primary-dark);
   }
   
+.dayHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-top: 24px;
+    min-height: 44px;
+}
+
+.dayTitle {
+    margin: 0;
+    font-size: 1.2rem;
+    font-weight: 800;
+    color: var(--ink);
+}
+
+.dayHeader .editBtn {
+    flex: none;
+}
+
+@media (max-width: 520px) {
+    .dayHeader {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .dayHeader .editBtn {
+        align-self: flex-start;
+    }
+}
+
   /* ===== مودال شروع روز ===== */
   .overlay {
     position: fixed;
@@ -191,6 +279,9 @@
     margin-bottom: 16px;
     transition: border-color 0.2s ease;
     text-align: center;
+    /* اعداد فارسی در متن تایپ‌شده (فقط نمایش — مقدار DOM دست‌نخورده می‌ماند) */
+    font-feature-settings: "ss01";
+    -webkit-font-feature-settings: "ss01";
   }
   .minuteInput:focus {
     outline: none;

@@ -21,7 +21,7 @@ vi.mock("@/app/lib/getPrisma", () => ({ getPrisma: getPrismaMock }))
 
 vi.mock("bcryptjs", () => ({ default: { hash: vi.fn(async () => "hashed-password") } }))
 
-import { EmailTakenError, ServiceError } from "./errors"
+import { EmailTakenError, ServiceError, UsernameTakenError } from "./errors"
 import { registerUser } from "./auth.service"
 
 const INPUT = { username: "testuser", email: "test@example.com", password: "secret123" }
@@ -46,7 +46,15 @@ describe("registerUser (E1 — uniqueness race)", () => {
         })
     })
 
-    it("still throws EmailTakenError when the pre-check finds a duplicate (pre-existing semantics)", async () => {
+    it("throws UsernameTakenError when the pre-check finds a duplicate username", async () => {
+        prismaMock.user.findUnique
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({ id: 8 })
+
+        await expect(registerUser(INPUT)).rejects.toBeInstanceOf(UsernameTakenError)
+        expect(prismaMock.user.create).not.toHaveBeenCalled()
+    })
+    it("throws EmailTakenError when the pre-check finds a duplicate email", async () => {
         prismaMock.user.findUnique.mockResolvedValue({ id: 3, email: "test@example.com" })
 
         await expect(registerUser(INPUT)).rejects.toBeInstanceOf(EmailTakenError)

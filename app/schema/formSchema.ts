@@ -10,6 +10,8 @@ export const registerSchema = z.object({
 
     email: z
         .string()
+        .trim()
+        .toLowerCase()
         .email("ایمیل معتبر نیست"),
 
 
@@ -36,6 +38,8 @@ export const loginSchema = z.object({
 
     email:z
     .string()
+    .trim()
+    .toLowerCase()
     .email("ایمیل معتبر نیست"),
 
 

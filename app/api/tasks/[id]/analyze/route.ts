@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { isRateLimited } from "@/app/lib/rateLimit"
 import { reanalyzeTask } from "@/app/lib/services/tasks.service"
 import { reanalyzeTaskSchema } from "@/app/schema/plannerSchema"
 import {
@@ -32,6 +33,19 @@ export async function PATCH(
             return validationErrorResponse(parsed.error.flatten())
         }
         const { text: textOverride } = parsed.data
+
+        const limited = isRateLimited(
+            `analyze:user:${user.id}`,
+            5,
+            15 * 60 * 1000,
+        )
+        if (limited) {
+            return errorResponse(
+                429,
+                "RATE_LIMITED",
+                "تعداد درخواست‌های هوش مصنوعی زیاد شده؛ کمی بعد دوباره تلاش کن",
+            )
+        }
 
         const { task, aiSource } = await reanalyzeTask(
             user.id,

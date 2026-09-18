@@ -7,10 +7,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
     getCurrentUser: vi.fn(),
+    isRateLimited: vi.fn(),
     runAiSamples: vi.fn(),
 }))
 
 vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: mocks.getCurrentUser }))
+vi.mock("@/app/lib/rateLimit", () => ({ isRateLimited: mocks.isRateLimited }))
 vi.mock("@/app/lib/services/analysis.service", () => ({ runAiSamples: mocks.runAiSamples }))
 
 import { GET } from "./route"
@@ -25,6 +27,7 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mocks.getCurrentUser.mockResolvedValue(USER)
+        mocks.isRateLimited.mockReturnValue(false)
     })
 
     it("returns 200 with the standard success envelope { ok: true, data: results }", async () => {
@@ -35,6 +38,24 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
         expect(res.status).toBe(200)
         await expect(res.json()).resolves.toEqual({ ok: true, data: SAMPLES })
         expect(mocks.runAiSamples).toHaveBeenCalledTimes(1)
+        expect(mocks.isRateLimited).toHaveBeenCalledWith("ai-test:user:1", 1, 60 * 60 * 1000)
+    })
+
+    it("returns 429 RATE_LIMITED and never calls runAiSamples when the user limit is exhausted", async () => {
+        mocks.isRateLimited.mockReturnValue(true)
+
+        const res = await GET()
+
+        expect(res.status).toBe(429)
+        await expect(res.json()).resolves.toEqual({
+            ok: false,
+            error: {
+                code: "RATE_LIMITED",
+                message: "تعداد درخواست‌های هوش مصنوعی زیاد شده؛ کمی بعد دوباره تلاش کن",
+            },
+        })
+        expect(mocks.isRateLimited).toHaveBeenCalledWith("ai-test:user:1", 1, 60 * 60 * 1000)
+        expect(mocks.runAiSamples).not.toHaveBeenCalled()
     })
 
     it("keeps the payload under data (payload preserved, envelope added)", async () => {

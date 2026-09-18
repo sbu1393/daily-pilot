@@ -37,7 +37,7 @@ export async function getCurrentUser() {
 
     // M1 — انتظاری: توکن نامعتبر/منقضی/دستکاری‌شده → کاربر ناشناس، بدون لاگ نویز.
     try {
-        decoded = jwt.verify(token.value, secret) as {
+        decoded = jwt.verify(token.value, secret, { algorithms: ["HS256"] }) as {
             id: number
             email: string
         }

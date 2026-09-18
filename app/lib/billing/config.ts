@@ -138,8 +138,9 @@ function positiveInt(env: BillingEnvSource, key: string): number {
     return parsed
 }
 
-/** URL مطلق http(s) — بدون حدس روی host؛ فقط اعتبارسنجی شکل. */
-function httpUrl(env: BillingEnvSource, key: string): string {
+/** URL مطلق http(s) — بدون حدس روی host؛ فقط اعتبارسنجی شکل.
+ *  @param httpsOnly اگر true باشد، فقط https: پذیرفته می‌شود (RB6: production HTTPS enforcement). */
+function httpUrl(env: BillingEnvSource, key: string, httpsOnly = false): string {
     const value = requiredString(env, key)
     let parsed: URL
     try {
@@ -149,6 +150,9 @@ function httpUrl(env: BillingEnvSource, key: string): string {
     }
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
         throw new Error(`billing config: ${key} must be an absolute http(s) URL`)
+    }
+    if (httpsOnly && parsed.protocol !== "https:") {
+        throw new Error(`billing config: ${key} must use HTTPS in production mode`)
     }
     // حذف اسلش‌های انتهایی تا الحاق مسیرهای provider به double-slash منجر نشود.
     return value.replace(/\/+$/, "")
@@ -197,6 +201,10 @@ function providerTimeoutMs(env: BillingEnvSource): number {
  * در نبود/نامعتبر بودن هر کلید لازم، بلافاصله خطا می‌دهد (fail-fast).
  */
 export function resolveBillingConfig(env: BillingEnvSource): BillingConfig {
+    // RB6: mode را ابتدا resolve کن تا httpsOnly بر اساس آن تعیین شود.
+    const mode = zarinpalMode(env)
+    const isProduction = mode === "production"
+
     return {
         provider: BILLING_PROVIDER,
         orderTtlMs: positiveInt(env, BILLING_ENV.orderTtlMs),
@@ -208,16 +216,17 @@ export function resolveBillingConfig(env: BillingEnvSource): BillingConfig {
         },
         zarinpal: {
             merchantId: requiredString(env, BILLING_ENV.merchantId),
-            mode: zarinpalMode(env),
-            baseUrl: httpUrl(env, BILLING_ENV.baseUrl),
-            callbackUrl: httpUrl(env, BILLING_ENV.callbackUrl),
+            mode,
+            baseUrl: httpUrl(env, BILLING_ENV.baseUrl, isProduction),
+            callbackUrl: httpUrl(env, BILLING_ENV.callbackUrl, isProduction),
             description: requiredString(env, BILLING_ENV.zarinpalDescription),
             timeoutMs: providerTimeoutMs(env),
         },
         // مقصدهای ریدایرکت callback: هر دو الزامی و مطلق http(s) — بدون default حدسی (سند §11).
+        // RB6: در production مقصدهای نتیجه هم باید HTTPS باشند.
         resultUrls: {
-            success: httpUrl(env, BILLING_ENV.resultUrlSuccess),
-            failure: httpUrl(env, BILLING_ENV.resultUrlFailure),
+            success: httpUrl(env, BILLING_ENV.resultUrlSuccess, isProduction),
+            failure: httpUrl(env, BILLING_ENV.resultUrlFailure, isProduction),
         },
     }
 }

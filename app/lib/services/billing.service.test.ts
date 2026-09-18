@@ -719,19 +719,15 @@ describe("billing.service", () => {
             expect(db.paymentOrder.updateMany).not.toHaveBeenCalled()
         })
 
-        it("treats a null verified amount as 'not reportable' (not a mismatch)", async () => {
-            db.paymentOrder.update.mockResolvedValue(order({ status: "PAID", entitlementId: "ent_1" }))
-
-            const result = await finalizeVerifiedPayment(
-                db as never,
-                { authority: "A1", verification: { reference: null, amount: null } },
-                NOW,
-            )
-
-            expect(result.finalized).toBe(true)
-            const claimData = db.paymentOrder.updateMany.mock.calls[0][0].data
-            expect(claimData.status).toBe("PAID")
-            expect("providerReference" in claimData).toBe(false)
+        it("rejects a null verified amount without any mutation (RB2: no payment without amount proof)", async () => {
+            await expect(
+                finalizeVerifiedPayment(
+                    db as never,
+                    { authority: "A1", verification: { reference: null, amount: null } },
+                    NOW,
+                ),
+            ).rejects.toBeInstanceOf(PaymentInvalidAmountError)
+            expect(db.paymentOrder.updateMany).not.toHaveBeenCalled()
         })
 
         it("finalizes a first purchase: conditional claim → entitlement → link (ACTIVATED)", async () => {

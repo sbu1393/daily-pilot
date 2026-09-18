@@ -157,6 +157,7 @@
 
 .dayTitle {
     margin: 0;
+    min-width: 0;
     font-size: 1.2rem;
     font-weight: 800;
     color: var(--ink);
@@ -167,14 +168,22 @@
 }
 
 @media (max-width: 520px) {
+    /* عنوان + دکمه در یک ردیف باقی می‌مانند (justify-content: space-between از .dayHeader)،
+       فقط فاصله و اندازه‌ها فشرده‌تر می‌شوند تا در RTL روی هم نیفتند. */
     .dayHeader {
-        align-items: flex-start;
-        flex-direction: column;
         gap: 10px;
+        margin-top: 18px;
+    }
+
+    .dayHeader .dayTitle {
+        flex: 1 1 auto;
+        font-size: 1.05rem;
+        line-height: 1.5;
     }
 
     .dayHeader .editBtn {
-        align-self: flex-start;
+        padding: 6px 10px;
+        font-size: 0.72rem;
     }
 }
 

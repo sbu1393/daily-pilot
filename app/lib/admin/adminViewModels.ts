@@ -208,30 +208,58 @@ export function buildErrorsPageVM(data: AdminErrorLogsPage | null, loading: bool
 
 // ---------- Overview viewmodel ----------
 
+/**
+ * سقف ردیف‌های فید خطاهای اخیر داشبورد. سرور `ADMIN_OVERVIEW_RECENT_ERRORS` ردیف bounded می‌دهد؛
+ * UI هرگز بیشتر از این تعداد رندر نمی‌کند (مرز سخت سمت نمایش).
+ */
+export const ADMIN_OVERVIEW_ERROR_FEED_LIMIT = 10
+
+/**
+ * نمای کلی داشبورد — هر widget مستقل است (§12):
+ * `null` یعنی همان بخش unavailable بوده و UI فقط همان بخش را مخفی می‌کند.
+ * `users.total` نیز nullable است (شمارش کل ثبت‌نام‌شده‌ها می‌تواند ناموفق باشد).
+ */
 export type OverviewVM = {
-    users: { dau: number; wau: number; mau: number }
+    users: { total: number | null; dau: number; wau: number; mau: number }
     activity: AdminOverview["activity"] | null
-    aiQuota: AdminOverview["aiQuota"]
+    aiQuota: AdminOverview["aiQuota"] | null
+    aiUsage: AdminOverview["aiUsage"] | null
     errors: AdminOverview["errors"] | null
+    billing: AdminOverview["billing"] | null
+    recentErrors: AdminErrorLogView[]
 }
 
 /**
  * widgetهای مستقل (§12): شکست هر بخش داده فقط همان بخش را unavailable می‌کند.
- * هیچ metric جدیدی از داده‌ی موجود ساخته نمی‌شود — فقط show/hide.
+ * هیچ metric جدیدی از داده‌ی موجود ساخته نمی‌شود — فقط show/hide و قالب‌بندی.
+ * فید خطاهای اخیر با projection صریح (allowlist) ساخته می‌شود؛ metadata/stack هرگز وارد UI نمی‌شود.
  */
 export function buildOverviewVM(overview: AdminOverview | null): OverviewVM {
     if (overview === null) {
-        return { users: { dau: 0, wau: 0, mau: 0 }, activity: null, aiQuota: null, errors: null }
+        return {
+            users: { total: null, dau: 0, wau: 0, mau: 0 },
+            activity: null,
+            aiQuota: null,
+            aiUsage: null,
+            errors: null,
+            billing: null,
+            recentErrors: [],
+        }
     }
+    const users = overview.users
     return {
         users: {
-            dau: typeof overview.users?.dau === "number" ? overview.users.dau : 0,
-            wau: typeof overview.users?.wau === "number" ? overview.users.wau : 0,
-            mau: typeof overview.users?.mau === "number" ? overview.users.mau : 0,
+            total: typeof users?.total === "number" ? users.total : null,
+            dau: typeof users?.dau === "number" ? users.dau : 0,
+            wau: typeof users?.wau === "number" ? users.wau : 0,
+            mau: typeof users?.mau === "number" ? users.mau : 0,
         },
         activity: isActivityWidget(overview.activity) ? overview.activity : null,
         aiQuota: isAiQuotaWidget(overview.aiQuota) ? overview.aiQuota : null,
+        aiUsage: isAiUsageWidget(overview.aiUsage) ? overview.aiUsage : null,
         errors: isErrorStatsWidget(overview.errors) ? overview.errors : null,
+        billing: isBillingWidget(overview.billing) ? overview.billing : null,
+        recentErrors: toRecentErrorFeed(overview.recentErrors),
     }
 }
 
@@ -251,6 +279,65 @@ function isErrorStatsWidget(value: unknown): value is AdminOverview["errors"] {
     if (value === null || typeof value !== "object") return false
     const v = value as Record<string, unknown>
     return typeof v.totalInWindow === "number" && Array.isArray(v.bySeverity)
+}
+
+function isAiUsageWidget(value: unknown): value is NonNullable<AdminOverview["aiUsage"]> {
+    if (value === null || typeof value !== "object") return false
+    const v = value as Record<string, unknown>
+    return (
+        typeof v.totalRequests === "number" &&
+        typeof v.requestsInWindow === "number" &&
+        Array.isArray(v.byStatus)
+    )
+}
+
+function isBillingWidget(value: unknown): value is NonNullable<AdminOverview["billing"]> {
+    if (value === null || typeof value !== "object") return false
+    const v = value as Record<string, unknown>
+    return (
+        typeof v.activeSubscriptions === "number" &&
+        typeof v.paidInWindow === "number" &&
+        Array.isArray(v.recentPayments)
+    )
+}
+
+/**
+ * فید خطاهای اخیر — projection allowlist روی DTO سرور.
+ * ردیف ناقص حذف می‌شود و `metadata` عمداً وارد نمی‌شود (فید به آن نیازی ندارد و UI
+ * هرگز JSON خام را render نمی‌کند). خروجی حداکثر `ADMIN_OVERVIEW_ERROR_FEED_LIMIT` ردیف است.
+ */
+function toRecentErrorFeed(value: unknown): AdminErrorLogView[] {
+    if (!Array.isArray(value)) return []
+    const feed: AdminErrorLogView[] = []
+    for (const row of value) {
+        if (row === null || typeof row !== "object") continue
+        const r = row as Record<string, unknown>
+        const id = r.id
+        const endpoint = r.endpoint
+        const errorCode = r.errorCode
+        const severity = r.severity
+        const message = r.message
+        const createdAt = r.createdAt
+        if (typeof id !== "string" || typeof endpoint !== "string") continue
+        if (typeof errorCode !== "string" || typeof severity !== "string") continue
+        if (typeof message !== "string" || typeof createdAt !== "string") continue
+        feed.push({
+            id,
+            requestId: typeof r.requestId === "string" ? r.requestId : null,
+            userId: typeof r.userId === "number" ? r.userId : null,
+            endpoint,
+            feature: typeof r.feature === "string" ? r.feature : null,
+            errorCode,
+            statusCode: typeof r.statusCode === "number" ? r.statusCode : 0,
+            category: typeof r.category === "string" ? r.category : "UNKNOWN",
+            severity,
+            message,
+            environment: typeof r.environment === "string" ? r.environment : null,
+            createdAt,
+        })
+        if (feed.length >= ADMIN_OVERVIEW_ERROR_FEED_LIMIT) break
+    }
+    return feed
 }
 
 // ---------- User detail viewmodel ----------
@@ -324,6 +411,57 @@ export function buildAiUsagePageVM(
     if (data === null) return { status: resolveListStatus(loading, error, 0), items: [], quota: null }
     const items = Array.isArray(data.items) ? data.items : []
     return { status: resolveListStatus(loading, error, items.length), items, quota: data }
+}
+
+// ---------- KPI helpers (pure — فقط aggregate مستقیم روی داده‌ی سرور) ----------
+
+/** همان طبقه‌بندی severity که سرویس/UI استفاده می‌کند؛ هر مقدار ناشناخته → OTHER. */
+export type SeverityCounts = {
+    CRITICAL: number
+    ERROR: number
+    WARNING: number
+    INFO: number
+    OTHER: number
+}
+
+/**
+ * شمارش خطاها به تفکیک شدت از `bySeverity` سرور — بدون هیچ derive آماری جدید.
+ * مقدار تکراری جمع نمی‌شود (آخرین مقدار برنده نیست): همه‌ی ردیف‌های یک شدت با هم جمع می‌شوند.
+ */
+export function countBySeverity(rows: { severity: string; count: number }[]): SeverityCounts {
+    const counts: SeverityCounts = { CRITICAL: 0, ERROR: 0, WARNING: 0, INFO: 0, OTHER: 0 }
+    if (!Array.isArray(rows)) return counts
+    for (const row of rows) {
+        const raw = typeof row?.count === "number" && Number.isFinite(row.count) ? row.count : 0
+        switch (row?.severity) {
+            case "CRITICAL":
+                counts.CRITICAL += raw
+                break
+            case "ERROR":
+                counts.ERROR += raw
+                break
+            case "WARNING":
+                counts.WARNING += raw
+                break
+            case "INFO":
+                counts.INFO += raw
+                break
+            default:
+                counts.OTHER += raw
+        }
+    }
+    return counts
+}
+
+/**
+ * ماسک شناسه‌ی داخلی سفارش پرداخت برای نمایش (`••••1234`).
+ * هیچ شناسه‌ی کاملی در UI نمایش داده نمی‌شود؛ ورودی کوتاه/خالی → ماسک کامل.
+ */
+export function maskIdTail(id: string): string {
+    const trimmed = id.trim()
+    if (trimmed.length === 0) return "—"
+    if (trimmed.length <= 4) return "••••"
+    return `••••${trimmed.slice(-4)}`
 }
 
 // ---------- Formatting helpers (pure) ----------

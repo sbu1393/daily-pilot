@@ -14,7 +14,7 @@ function AppShell({
             <Header user={user} />
             {/* نوار اشتراک: دقیقاً زیر هدر و بالای محتوا (تقویم) */}
             <Link
-                href="/admin/subscription"
+                href="/subscription"
                 className="bg-amber-400 hover:bg-amber-500 text-white font-bold py-2 px-4 rounded-lg shadow-md mx-4 mt-2 mb-4 inline-block"
             >
                 ارتقای حساب به ویژه

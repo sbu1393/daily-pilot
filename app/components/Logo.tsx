@@ -33,7 +33,7 @@ export default function Logo({ size = 32, className = "", pill = true }: LogoPro
         >
             <img
                 src="/logo.webp"
-                alt="روزچین"
+                alt="روزساز"
                 style={{
                     height: `${size}px`,
                     width: "auto",

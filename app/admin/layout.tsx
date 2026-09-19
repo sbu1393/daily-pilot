@@ -15,7 +15,7 @@ import AppShell from "@/app/components/layout/AppShell"
 //    این گارد defense-in-depth است: اگر نقشِ یک نشستِ باز بین دو request پس گرفته شود،
 //    API همان ۴۰۳ را می‌دهد و UI فقط پیام «بدون دسترسی» را نشان می‌دهد (AdminAccessGate).
 export const metadata: Metadata = {
-    title: "مدیریت | روزچین",
+    title: "مدیریت | روزساز",
     robots: { index: false, follow: false },
 }
 

@@ -496,7 +496,7 @@ function PageHead() {
             <div>
                 <h1 className={styles.pageTitle}>نمای کلی مدیریت</h1>
                 <p className={styles.pageSub}>
-                    نمای read-only از وضعیت عملیاتی روزچین — کاربران، خطاها، مصرف AI و اشتراک‌ها.
+                    نمای read-only از وضعیت عملیاتی روزساز — کاربران، خطاها، مصرف AI و اشتراک‌ها.
                 </p>
             </div>
             <div className={styles.headSpacer} />

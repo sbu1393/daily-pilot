@@ -56,7 +56,7 @@ export default function JalaliCalendar() {
     const { selectedDate, setSelectedDate, timezone } = useCalendar()
     const today = getCanonicalToday(timezone)
     const initialMonth = canonicalKeyToJalali(selectedDate || today)
-    const [view, setView] = useState<View>("month")
+    const [view, setView] = useState<View>("nearby")
     const [viewedMonth, setViewedMonth] = useState({
         year: initialMonth.year,
         month: initialMonth.month,

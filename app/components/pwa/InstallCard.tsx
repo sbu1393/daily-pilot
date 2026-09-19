@@ -45,7 +45,7 @@ export default function InstallCard() {
             <div className="dp-card-soft">
                 <h3 className="dp-card-title">✅ برنامه نصب شده است</h3>
                 <p className="dp-card-text">
-                    روزچین روی این دستگاه نصب هست و مثل یک اپ اجرا میشه. از همین‌جا با یک لمس
+                    روزساز روی این دستگاه نصب هست و مثل یک اپ اجرا میشه. از همین‌جا با یک لمس
                     به برنامه‌ریزی روزت بپرداز!
                 </p>
             </div>
@@ -55,7 +55,7 @@ export default function InstallCard() {
     const install = async () => {
         const accepted = await promptInstall()
         if (accepted) {
-            toast.success("نصب انجام شد؛ آیکون روزچین روی گوشی‌ات اضافه شد 🎉")
+            toast.success("نصب انجام شد؛ آیکون روزساز روی گوشی‌ات اضافه شد 🎉")
         } else {
             toast.info("می‌توانی بعداً از منوی مرورگر نصب کنی")
         }
@@ -67,7 +67,7 @@ export default function InstallCard() {
                 <QrCode size={20} /> نصب روی گوشی
             </h3>
             <p className="dp-card-text">
-                با دوربین گوشی کد زیر را اسکن کن یا لینک را روی گوشی باز کن تا روزچین مثل یک اپ
+                با دوربین گوشی کد زیر را اسکن کن یا لینک را روی گوشی باز کن تا روزساز مثل یک اپ
                 واقعی نصب بشه — آیکون روی صفحه اصلی، اجرای تمام‌صفحه و کارکرد آفلاین.
             </p>
 
@@ -75,7 +75,7 @@ export default function InstallCard() {
                 <div className="dp-qr-wrap">
                     {qrDataUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={qrDataUrl} alt="کد QR نصب روزچین" className="dp-qr-img" />
+                        <img src={qrDataUrl} alt="کد QR نصب روزساز" className="dp-qr-img" />
                     ) : (
                         <div className="dp-qr-placeholder">در حال ساخت کد…</div>
                     )}
@@ -104,7 +104,7 @@ export default function InstallCard() {
                     )}
 
                     <p className="dp-card-hint">
-                        <Smartphone size={14} /> روزچین روی اندروید، iOS، ویندوز و مک قابل نصب است.
+                        <Smartphone size={14} /> روزساز روی اندروید، iOS، ویندوز و مک قابل نصب است.
                     </p>
                 </div>
             </div>

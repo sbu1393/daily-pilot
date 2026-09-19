@@ -35,9 +35,9 @@ export default function Hero({ user }: { user: AvatarUser | null }) {
                     <Logo size={85} />
                 </motion.div>
                 <motion.h1 variants={item}>
-                    با<span className={styles.brand}>روزچین</span>
+                    با<span className={styles.brand}>روزساز</span>
                     <br />
-                    روزت رو بچین
+                    روزت رو بساز
                 </motion.h1>
                 <motion.p variants={item}>
                     یک سیستم هوشمند برای برنامه‌ریزی، مدیریت کارها و ساختن عادت‌های بهتر.

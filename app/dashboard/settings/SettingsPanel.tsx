@@ -529,7 +529,7 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                     <motion.section key="install" className={styles.section} {...tabMotion}>
                         <h2 className={styles.title}>نصب برنامه</h2>
                         <p className={styles.subtitle}>
-                            روزچین را مثل یک اپ واقعی روی گوشی یا کامپیوترت نصب کن.
+                            روزساز را مثل یک اپ واقعی روی گوشی یا کامپیوترت نصب کن.
                         </p>
                         <InstallCard />
                     </motion.section>
@@ -561,9 +561,9 @@ export default function SettingsPanel({ user }: { user: UserData }) {
 
                         {infoTab === "about" && (
                             <div className={styles.card}>
-                                <h3 className={styles.cardTitle}>درباره روزچین</h3>
+                                <h3 className={styles.cardTitle}>درباره روزساز</h3>
                                 <p className={styles.text}>
-                                    روزچین یک برنامه‌ی هوشمند برنامه‌ریزی روزانه هست که با کمک هوش مصنوعی
+                                    روزساز یک برنامه‌ی هوشمند برنامه‌ریزی روزانه هست که با کمک هوش مصنوعی
                                     به شما کمک می‌کنه کارهای روزانه‌ خودتون رو اولویت‌ بندی کنین، برای هر کار زمان
                                 واقع‌بینانه‌ای تخصیص بدین و عادت‌های بهتری بسازین.
                                 </p>
@@ -618,9 +618,9 @@ function FeedbackForm() {
             toast.error("لطفاً متن پیام را بنویسید")
             return
         }
-        const subject = encodeURIComponent("بازخورد کاربر روزچین")
+        const subject = encodeURIComponent("بازخورد کاربر روزساز")
         const body = encodeURIComponent(`${message.trim()}\\n\\n— از طرف: ${email.trim() || "کاربر ناشناس"}`)
-        window.location.href = `mailto:Roozchin@gmail.com?subject=${subject}&body=${body}`
+        window.location.href = `mailto:Roozsaz@gmail.com?subject=${subject}&body=${body}`
         toast.success("برنامه‌ی ایمیل شما باز می‌شود؛ فقط کافی است ارسال را بزنید")
     }
 
@@ -628,7 +628,7 @@ function FeedbackForm() {
         <div className={styles.card}>
             <h3 className={styles.cardTitle}>انتقادات و پیشنهادات</h3>
             <p className={styles.muted}>
-                نظر شما برای بهتر شدن روزچین ارزشمند است. پیام خود را بنویسید تا از طریق ایمیل برای ما ارسال شود.
+                نظر شما برای بهتر شدن روزساز ارزشمند است. پیام خود را بنویسید تا از طریق ایمیل برای ما ارسال شود.
             </p>
             <div className="dp-form">
                 <div className="dp-field">

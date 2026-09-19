@@ -1,7 +1,6 @@
-// فاز ۴ — Step 7: استایل‌های ماژولار صفحات Admin
-//
-// فقط از CSS variables موجود globals.css استفاده می‌شود (هیچ token/theme جدید).
-// کلاس‌های مشترک dp-btn/dp-card سراسری باقی‌اند؛ این ماژول فقط چیدمان اختصاصی admin است.
+/* فاز ۴ — Step 7: استایل‌های ماژولار صفحات Admin */
+/* فقط از CSS variables موجود globals.css استفاده می‌شود (هیچ token/theme جدید). */
+/* کلاس‌های مشترک dp-btn/dp-card سراسری باقی‌اند؛ این ماژول فقط چیدمان اختصاصی admin است. */
 
 .page {
     display: grid;

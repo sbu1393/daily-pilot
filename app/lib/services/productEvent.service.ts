@@ -49,7 +49,7 @@ export interface ProductEventRecord {
 /** نتیجه‌ی recordProductEvent — هرگز throw نمی‌کند. */
 export type RecordProductEventResult =
     | { recorded: true; eventName: ProductEventName }
-    | { recorded: false; reason: "invalid_event" | "persistence_failed" | "persistence_timeout" }
+    | { recorded: false; reason: "invalid_event" | "persistence_failed" | "persistence_timeout" | "persistence_disabled" }
 
 /** تزریق وابستگی برای تست — پیش‌فرض کلاینت واقعی Prisma. */
 export interface ProductEventDeps {
@@ -61,6 +61,19 @@ export interface ProductEventOptions {
     timeoutMs?: number
     /** فقط مسیر تست: پرش از timeout guard برای کنترل کامل سناریو. */
     skipTimeoutGuard?: boolean
+}
+
+/**
+ * بررسی وجود Prisma model ProductEvent — اگر model/migration موجود نباشد،
+ * بدون کرش، false برمی‌گرداند تا caller بتواند fail-open عمل کند.
+ */
+function isProductEventModelAvailable(): boolean {
+    try {
+        const prisma = getPrisma()
+        return prisma != null && typeof prisma.productEvent?.create === "function"
+    } catch {
+        return false
+    }
 }
 
 function makeDefaultCreate() {
@@ -101,6 +114,12 @@ export async function recordProductEvent(
         return { recorded: true, eventName: validation.eventName }
     }
 
+    // 4) گارد model Prisma: اگر ProductEvent table/migration موجود نباشد،
+    //    بدون کرش و بدون log spam، fail-open برمی‌گردانیم.
+    if (!deps?.create && !isProductEventModelAvailable()) {
+        return { recorded: false, reason: "persistence_disabled" }
+    }
+
     const create = deps?.create ?? makeDefaultCreate()
     const row: ProductEventRow = {
         userId,
@@ -127,10 +146,13 @@ export async function recordProductEvent(
 
         // مسیر production: timeout guard — برنده‌ی race تشخیص داده می‌شود؛
         // rejection دیرهنگام insert بلعیده می‌شود (بدون unhandledRejection، بدون fallback تکراری).
-        let insertSettled = false
+        let reported = false
         const insertPromise = create({ data: row })
         void insertPromise.catch(() => {
-            if (!insertSettled) reportPersistenceFailure(context)
+            if (!reported) {
+                reported = true
+                reportPersistenceFailure(context)
+            }
         })
 
         let timer: ReturnType<typeof setTimeout> | undefined
@@ -144,14 +166,20 @@ export async function recordProductEvent(
                 if (typeof timer.unref === "function") timer.unref()
             }),
         ])
-        insertSettled = true
         if (timer !== undefined) clearTimeout(timer)
 
         if (outcome === "timeout") {
-            reportPersistenceFailure(context)
+            if (!reported) {
+                reported = true
+                reportPersistenceFailure(context)
+            }
             return { recorded: false, reason: "persistence_timeout" }
         }
         if (outcome === "failed") {
+            if (!reported) {
+                reported = true
+                reportPersistenceFailure(context)
+            }
             return { recorded: false, reason: "persistence_failed" }
         }
         return { recorded: true, eventName: validation.eventName }

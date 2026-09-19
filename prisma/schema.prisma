@@ -281,3 +281,13 @@ model Entitlement {
 
   @@index([status, currentPeriodEnd])
 }
+
+model OtpCode {
+  id        String   @id @default(cuid())
+  email     String
+  codeHash  String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}

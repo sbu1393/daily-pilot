@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSession } from "@/app/lib/createSession"
 import { loginSchema } from "@/app/schema/formSchema"
 import { isRateLimited, clientIp } from "@/app/lib/rateLimit"
+import { verifyRecaptcha } from "@/app/lib/recaptcha"
 import { authenticate } from "@/app/lib/services/auth.service"
 import {
     errorResponse,
@@ -31,6 +32,18 @@ export async function POST(req: NextRequest) {
         // M3: بدنه‌ی نامعتبر/غیر-JSON نباید ۵۰۰ بسازد → همان ۴۰۰ استاندارد ADR-04
         const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
         if (!body) return validationErrorResponse(undefined, undefined, context.requestId)
+
+        // reCAPTCHA v3: قبل از هر work دیتابیسی — بات‌ها همین‌جا مسدود می‌شوند
+        const recaptchaToken = typeof body.recaptchaToken === "string" ? body.recaptchaToken : ""
+        if (!(await verifyRecaptcha(recaptchaToken))) {
+            return errorResponse(
+                400,
+                "RECAPTCHA_FAILED",
+                "تأیید انسان بودن ناموفق بود؛ دوباره تلاش کن",
+                undefined,
+                context.requestId,
+            )
+        }
 
         const validation = loginSchema.safeParse(body)
 

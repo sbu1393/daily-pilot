@@ -3,6 +3,7 @@
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useState } from "react"
+import { useGoogleReCaptcha } from "react-google-recaptcha-v3"
 import { registerSchema } from "@/app/schema/formSchema"
 import { z } from "zod"
 import FormInput from "@/app/components/FormInput"
@@ -54,15 +55,25 @@ export default function RegisterForm() {
 
     const [loading, setLoading] = useState(false)
     const router = useRouter()
+    const { executeRecaptcha } = useGoogleReCaptcha()
 
     const onSubmit = async (data: RegisterInput) => {
+        if (!executeRecaptcha) {
+            toast.error("کپچا هنوز بارگذاری نشده؛ کمی صبر کن و دوباره تلاش کن")
+            return
+        }
+        const recaptchaToken = await executeRecaptcha("register")
+        if (!recaptchaToken) {
+            toast.error("تأیید کپچا ناموفق بود؛ دوباره تلاش کن")
+            return
+        }
         try {
             setLoading(true)
 
             await api("/api/auth/register", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(data)
+                body: JSON.stringify({ ...data, recaptchaToken })
             })
 
             toast.success("ثبت نام با موفقیت انجام شد")

@@ -1,5 +1,5 @@
 /* ============================================================
-   Daily Pilot — Service Worker (PWA)
+   روزساز — Service Worker (PWA)
    راهبرد کش:
    - ناوبری (HTML): Network-First با ذخیره‌ی آخرین نسخه برای حالت آفلاین
    - دارایی‌های استاتیک هم‌ریشه: Stale-While-Revalidate

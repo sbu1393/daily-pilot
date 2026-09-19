@@ -66,7 +66,7 @@ export default function LoginForm() {
             transition={{ duration: .28, ease: "easeOut" }}
         >
             <AuthCard
-                title="ورود به روزچین"
+                title="ورود به روزساز"
                 subtitle="روزت را با خلبان خودکار برنامه ریزی کن"
             >
                 <form

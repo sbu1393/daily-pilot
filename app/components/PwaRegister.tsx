@@ -54,7 +54,7 @@ export default function PwaRegister() {
                     // فقط کلاس‌های سراسری dp-btn + چیدمان کوچک inline)
                     toast.info(
                         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                            <span>نسخه‌ی جدید روزچین آماده است 🎉</span>
+                            <span>نسخه‌ی جدید روزساز آماده است 🎉</span>
                             <button
                                 type="button"
                                 className="dp-btn dp-btn-primary"

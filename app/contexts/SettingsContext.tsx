@@ -226,7 +226,7 @@ export function SettingsProvider({
                 "Notification" in window &&
                 Notification.permission === "granted"
             ) {
-                new Notification("یادآور روزچین", {
+                new Notification("یادآور روزساز", {
                     body: "وقت برنامه‌ریزی روزت رسیده است ✨",
                 })
             }

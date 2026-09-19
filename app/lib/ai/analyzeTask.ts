@@ -19,7 +19,7 @@ const MAX_ATTEMPTS = Math.max(1, Number(process.env.AI_MAX_ATTEMPTS ?? 3))
 // تایماوت هر تلاش: پیش‌فرض ۱۲ ثانیه — جمع تلاش‌ها نباید از محدودیت پلتفرم رد بشه
 const TIMEOUT_MS = Math.max(3000, Number(process.env.AI_TIMEOUT_MS ?? 12000))
 
-const SYSTEM_PROMPT = `تو دستیار تحلیل تسک در اپلیکیشن برنامه‌ریزی هوشمند «Daily Pilot» هستی.
+const SYSTEM_PROMPT = `تو دستیار تحلیل تسک در اپلیکیشن برنامه‌ریزی هوشمند «روزساز» هستی.
 عنوان یک کار را می‌گیری و فقط یک JSON معتبر برمی‌گردانی (بدون markdown و بدون توضیح اضافه) با این ساختار:
 {
   "priority": "HIGH" یا "MEDIUM" یا "LOW",

@@ -4,7 +4,7 @@ import type { TaskItem } from "@/app/components/task/taskTypes"
 import type { DaySummary } from "@/app/hooks/useDaySummary"
 
 /**
- * لایه‌ی آفلاین Daily Pilot
+ * لایه‌ی آفلاین روزساز
  * ---------------------------------------------------------------
  * - کش روزها: آخرین تسک‌ها و خلاصه‌ی هر روز در localStorage نگه داشته می‌شود
  *   تا وقتی اینترنت قطع است کاربر داشبورد و تسک‌هایش را ببیند.

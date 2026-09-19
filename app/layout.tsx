@@ -8,6 +8,7 @@ import PwaRegister from "./components/PwaRegister"
 import OfflineIndicator from "./components/OfflineIndicator"
 import Splash from "./components/Splash"
 import { ToastContainer } from "react-toastify"
+import { GoogleReCaptchaProvider } from "react-google-recaptcha-v3"
 
 /**
  * فونت وزیرمتن سلف‌هاست‌شده (نسخه رسمی v33.003).
@@ -61,15 +62,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="theme-color" media="(prefers-color-scheme: light)" content="#6366f1" />
         <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b1120" />
       </head>          <body className={vazir.className}>
-        <Splash />
-        <CalendarProvider>
-          <SettingsProvider>
-            {children}
-            <OfflineIndicator />
-            <ToastContainer position="bottom-left" rtl closeOnClick pauseOnHover />
-            <PwaRegister />
-          </SettingsProvider>
-        </CalendarProvider>
+        <GoogleReCaptchaProvider
+          reCaptchaKey={process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY ?? ""}
+          scriptProps={{ async: true, defer: true, appendTo: "head" }}
+        >
+          <Splash />
+          <CalendarProvider>
+            <SettingsProvider>
+              {children}
+              <OfflineIndicator />
+              <ToastContainer position="bottom-left" rtl closeOnClick pauseOnHover />
+              <PwaRegister />
+            </SettingsProvider>
+          </CalendarProvider>
+        </GoogleReCaptchaProvider>
       </body>
     </html>
   )

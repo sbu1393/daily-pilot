@@ -2,6 +2,7 @@
 
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
+import { useGoogleReCaptcha } from "react-google-recaptcha-v3"
 import { loginSchema } from "@/app/schema/formSchema"
 import { z } from "zod"
 import FormInput from "@/app/components/FormInput"
@@ -42,13 +43,23 @@ export default function LoginForm() {
     })
 
     const router = useRouter()
+    const { executeRecaptcha } = useGoogleReCaptcha()
 
     const onCredentialSubmit = async (data: LoginInput) => {
+        if (!executeRecaptcha) {
+            toast.error("کپچا هنوز بارگذاری نشده؛ کمی صبر کن و دوباره تلاش کن")
+            return
+        }
+        const recaptchaToken = await executeRecaptcha("login")
+        if (!recaptchaToken) {
+            toast.error("تأیید کپچا ناموفق بود؛ دوباره تلاش کن")
+            return
+        }
         try {
             await api("/api/auth/login", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(data),
+                body: JSON.stringify({ ...data, recaptchaToken }),
             })
 
             toast.success("ورود موفق بود")

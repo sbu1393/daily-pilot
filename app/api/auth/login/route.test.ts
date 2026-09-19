@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
     touchAuthenticatedActivity: vi.fn(),
     recordProductEvent: vi.fn(),
     getPrisma: vi.fn(),
+    verifyRecaptcha: vi.fn(),
 }))
 
 vi.mock("@/app/lib/rateLimit", () => ({
@@ -30,6 +31,8 @@ vi.mock("@/app/lib/services/userActivity.service", () => ({
 vi.mock("@/app/lib/services/productEvent.service", () => ({
     recordProductEvent: mocks.recordProductEvent,
 }))
+// reCAPTCHA v3: بدون mock، verifyRecaptcha تماس واقعی با Google می‌زند و همیشه false می‌دهد.
+vi.mock("@/app/lib/recaptcha", () => ({ verifyRecaptcha: mocks.verifyRecaptcha }))
 
 import { POST } from "./route"
 
@@ -38,6 +41,7 @@ describe("POST /api/auth/login — X-Request-ID (فاز صفر §7/§25)", () =>
         vi.clearAllMocks()
         mocks.clientIp.mockReturnValue("1.2.3.4")
         mocks.isRateLimited.mockReturnValue(false)
+        mocks.verifyRecaptcha.mockResolvedValue(true)
         mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
         mocks.recordProductEvent.mockResolvedValue({ recorded: true, eventName: "auth.login_succeeded" })
         mocks.getPrisma.mockReturnValue({})
@@ -73,7 +77,11 @@ describe("POST /api/auth/login — X-Request-ID (فاز صفر §7/§25)", () =>
 import { InvalidCredentialsError } from "@/app/lib/services/errors"
 
 const USER = { id: 1, username: "test", email: "test@example.com" }
-const VALID_BODY = { email: "test@example.com", password: "secret123" }
+const VALID_BODY = {
+    email: "test@example.com",
+    password: "secret123",
+    recaptchaToken: "test-token",
+}
 
 const callPOST = (body: unknown) =>
     POST(new NextRequest("http://localhost/api/auth/login", {
@@ -86,6 +94,7 @@ describe("POST /api/auth/login", () => {
         vi.clearAllMocks()
         mocks.clientIp.mockReturnValue("1.2.3.4")
         mocks.isRateLimited.mockReturnValue(false)
+        mocks.verifyRecaptcha.mockResolvedValue(true)
         mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
         mocks.recordProductEvent.mockResolvedValue({
             recorded: true,
@@ -206,6 +215,21 @@ describe("POST /api/auth/login", () => {
 
         expect(res.status).toBe(200)
         expect(res.cookies.get("token")?.value).toBe("mocked-jwt")
+        expect(mocks.recordProductEvent).not.toHaveBeenCalled()
+    })
+
+    it("returns 400 RECAPTCHA_FAILED (before authentication) when human verification fails", async () => {
+        mocks.verifyRecaptcha.mockResolvedValue(false)
+
+        const res = await callPOST(VALID_BODY)
+
+        expect(mocks.verifyRecaptcha).toHaveBeenCalledWith("test-token")
+        expect(res.status).toBe(400)
+        const parsed = await res.json()
+        expect(parsed.ok).toBe(false)
+        expect(parsed.error.code).toBe("RECAPTCHA_FAILED")
+        expect(mocks.authenticate).not.toHaveBeenCalled()
+        expect(mocks.createSession).not.toHaveBeenCalled()
         expect(mocks.recordProductEvent).not.toHaveBeenCalled()
     })
 

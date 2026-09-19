@@ -1,11 +1,31 @@
 import { NextRequest, NextResponse } from "next/server"
 import { generateOtpCode, hashOtp } from "@/lib/otp"
 import { getPrisma } from "@/app/lib/getPrisma"
+import { verifyRecaptcha } from "@/app/lib/recaptcha"
 import { Resend } from "resend"
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json().catch(() => null)) as { email?: string } | null
+    const body = (await req.json().catch(() => null)) as
+      | { email?: string; recaptchaToken?: string }
+      | null
+
+    // reCAPTCHA v3: fail-closed و قبل از هر کار حساس (ساخت کد در DB / ارسال ایمیل).
+    // بدون توکن معتبر، حتی یک کد OTP ساخته و ارسال نمی‌شود (ضدِ OTP bombing).
+    const recaptchaToken = typeof body?.recaptchaToken === "string" ? body.recaptchaToken : ""
+    if (!(await verifyRecaptcha(recaptchaToken))) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: {
+            code: "RECAPTCHA_FAILED",
+            message: "تأیید انسان بودن ناموفق بود؛ دوباره تلاش کن",
+          },
+        },
+        { status: 400 },
+      )
+    }
+
     const email = body?.email?.trim().toLowerCase()
 
     if (!email) {

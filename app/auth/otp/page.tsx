@@ -1,16 +1,27 @@
 "use client"
 
 import { useState } from "react"
+import { useGoogleReCaptcha } from "react-google-recaptcha-v3"
 
 export default function OtpPage() {
   const [email, setEmail] = useState("")
   const [code, setCode] = useState("")
   const [step, setStep] = useState<"email" | "code">("email")
   const [loading, setLoading] = useState(false)
+  const { executeRecaptcha } = useGoogleReCaptcha()
 
   const handleSendOtp = async () => {
     if (!email.trim()) {
       alert("لطفاً ایمیل را وارد کنید")
+      return
+    }
+    if (!executeRecaptcha) {
+      alert("کپچا هنوز بارگذاری نشده؛ کمی صبر کن و دوباره تلاش کن")
+      return
+    }
+    const recaptchaToken = await executeRecaptcha("send_otp")
+    if (!recaptchaToken) {
+      alert("تأیید کپچا ناموفق بود؛ دوباره تلاش کن")
       return
     }
     setLoading(true)
@@ -18,7 +29,7 @@ export default function OtpPage() {
       const res = await fetch("/api/auth/send-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
+        body: JSON.stringify({ email: email.trim(), recaptchaToken }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -38,12 +49,21 @@ export default function OtpPage() {
       alert("لطفاً کد را وارد کنید")
       return
     }
+    if (!executeRecaptcha) {
+      alert("کپچا هنوز بارگذاری نشده؛ کمی صبر کن و دوباره تلاش کن")
+      return
+    }
+    const recaptchaToken = await executeRecaptcha("verify_otp")
+    if (!recaptchaToken) {
+      alert("تأیید کپچا ناموفق بود؛ دوباره تلاش کن")
+      return
+    }
     setLoading(true)
     try {
       const res = await fetch("/api/auth/verify-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), code: code.trim() }),
+        body: JSON.stringify({ email: email.trim(), code: code.trim(), recaptchaToken }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {

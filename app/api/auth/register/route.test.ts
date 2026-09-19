@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
     clientIp: vi.fn(),
     createSession: vi.fn(),
     registerUser: vi.fn(),
+    verifyRecaptcha: vi.fn(),
 }))
 
 vi.mock("@/app/lib/rateLimit", () => ({
@@ -19,6 +20,8 @@ vi.mock("@/app/lib/rateLimit", () => ({
 }))
 vi.mock("@/app/lib/createSession", () => ({ createSession: mocks.createSession }))
 vi.mock("@/app/lib/services/auth.service", () => ({ registerUser: mocks.registerUser }))
+// reCAPTCHA v3: بدون mock، verifyRecaptcha تماس واقعی با Google می‌زند و همیشه false می‌دهد.
+vi.mock("@/app/lib/recaptcha", () => ({ verifyRecaptcha: mocks.verifyRecaptcha }))
 
 import { POST } from "./route"
 
@@ -27,6 +30,7 @@ describe("POST /api/auth/register — X-Request-ID (فاز صفر §7/§25)", ()
         vi.clearAllMocks()
         mocks.clientIp.mockReturnValue("1.2.3.4")
         mocks.isRateLimited.mockReturnValue(false)
+        mocks.verifyRecaptcha.mockResolvedValue(true)
         mocks.createSession.mockImplementation((_user: unknown, response: unknown) => response)
     })
 
@@ -56,6 +60,7 @@ const VALID_BODY = {
     email: "test@example.com",
     password: "secret123",
     confirmPassword: "secret123",
+    recaptchaToken: "test-token",
 }
 
 const callPOST = (body: unknown) =>
@@ -69,6 +74,7 @@ describe("POST /api/auth/register", () => {
         vi.clearAllMocks()
         mocks.clientIp.mockReturnValue("1.2.3.4")
         mocks.isRateLimited.mockReturnValue(false)
+        mocks.verifyRecaptcha.mockResolvedValue(true)
         mocks.createSession.mockImplementation((_user: unknown, response: NextResponse) => {
             response.cookies.set("token", "mocked-jwt", { httpOnly: true, path: "/" })
             return response
@@ -169,6 +175,20 @@ describe("POST /api/auth/register", () => {
         expect(parsed.error.code).toBe("VALIDATION_ERROR")
         expect(parsed.error.errors).toBeDefined()
         expect(mocks.registerUser).not.toHaveBeenCalled()
+    })
+
+    it("returns 400 RECAPTCHA_FAILED (before any DB work) when human verification fails", async () => {
+        mocks.verifyRecaptcha.mockResolvedValue(false)
+
+        const res = await callPOST(VALID_BODY)
+
+        expect(mocks.verifyRecaptcha).toHaveBeenCalledWith("test-token")
+        expect(res.status).toBe(400)
+        const parsed = await res.json()
+        expect(parsed.ok).toBe(false)
+        expect(parsed.error.code).toBe("RECAPTCHA_FAILED")
+        expect(mocks.registerUser).not.toHaveBeenCalled()
+        expect(mocks.createSession).not.toHaveBeenCalled()
     })
 
     it("maps an unexpected error to 500 INTERNAL with the fa fallback message", async () => {

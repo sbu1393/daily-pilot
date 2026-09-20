@@ -1,0 +1,175 @@
+/* ============================================================
+   صفحهٔ اشتراک — چیدمان و ظاهر کارت‌های پلن
+   فقط از توکن‌های دیزاین سیستم استفاده می‌کند تا تم روشن/تیره
+   خودکار سازگار بماند (رنگ طلایی در globals.css تعریف شده است).
+   ============================================================ */
+
+.page {
+    width: min(1080px, 92%);
+    margin: auto;
+    padding: 32px 0 44px;
+}
+
+/* ---------- سربرگ ---------- */
+.head {
+    text-align: center;
+    margin-bottom: 38px;
+}
+
+.title {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: 1.6rem;
+    font-weight: 900;
+    color: var(--ink);
+}
+
+.titleIcon {
+    color: var(--gold-from);
+    flex: 0 0 auto;
+}
+
+.subtitle {
+    margin: 10px 0 0;
+    color: var(--muted);
+    font-size: .9rem;
+    line-height: 1.9;
+}
+
+/* ---------- شبکهٔ پلن‌ها ---------- */
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(258px, 1fr));
+    gap: 22px;
+    align-items: stretch;
+}
+
+/* ---------- کارت پلن ---------- */
+.card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 28px 22px 22px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(16px);
+    transition: var(--transition);
+}
+
+.card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-md);
+}
+
+/* پلن ویژه: بوردر طلایی + هالهٔ ملایم طلایی (ring معادل) */
+.cardFeatured {
+    border: 2px solid var(--gold-from);
+    box-shadow: 0 0 0 4px var(--gold-soft), var(--shadow-md), var(--shadow-gold);
+}
+
+.cardFeatured:hover {
+    box-shadow: 0 0 0 4px var(--gold-soft), var(--shadow-lg), var(--shadow-gold-lg);
+}
+
+@media (min-width: 768px) {
+    /* برجسته‌سازی ملایم کارت ویژه نسبت به دو پلن دیگر */
+    .cardFeatured {
+        transform: translateY(-6px);
+    }
+
+    .cardFeatured:hover {
+        transform: translateY(-10px);
+    }
+}
+
+/* ---------- برچسب ویژه ---------- */
+.badge {
+    position: absolute;
+    top: -12px;
+    right: 18px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 12px;
+    border-radius: var(--radius-full);
+    background: var(--gradient-gold);
+    color: var(--gold-ink);
+    font-size: .72rem;
+    font-weight: 800;
+    letter-spacing: .2px;
+    box-shadow: var(--shadow-sm), var(--shadow-gold);
+}
+
+/* ---------- عنوان و قیمت ---------- */
+.cardTitle {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: var(--ink);
+}
+
+.priceRow {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.priceValue {
+    font-size: 1.9rem;
+    font-weight: 900;
+    line-height: 1.25;
+    letter-spacing: -.4px;
+    color: var(--ink);
+}
+
+.pricePeriod {
+    font-size: .78rem;
+    font-weight: 700;
+    color: var(--muted);
+}
+
+/* ---------- لیست ویژگی‌ها ---------- */
+.features {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 11px;
+}
+
+.feature {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    font-size: .86rem;
+    line-height: 1.75;
+    color: var(--ink-2);
+}
+
+.check,
+.checkGold {
+    flex: 0 0 auto;
+    margin-top: 3px;
+}
+
+/* تیک پلن‌های معمولی سبز، تیک پلن ویژه طلایی */
+.check {
+    color: var(--success);
+}
+
+.checkGold {
+    color: var(--gold-from);
+}
+
+/* ---------- دکمهٔ اقدام ---------- */
+.cta {
+    margin-top: auto;
+    padding-top: 4px;
+}

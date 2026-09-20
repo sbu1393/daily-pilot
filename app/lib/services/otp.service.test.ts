@@ -148,4 +148,27 @@ describe("sendOtpEmail", () => {
         expect(result).toEqual({ sent: false, error: "RESEND_API_KEY is not configured" })
         expect(mocks.emailSend).not.toHaveBeenCalled()
     })
+
+    it("logs the failure with the masked recipient and the provider error (never the raw code)", async () => {
+        mocks.emailSend.mockResolvedValue({
+            data: null,
+            error: { name: "validation_error", statusCode: 403, message: "domain not verified" },
+        })
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+        const result = await sendOtpEmail("user@example.com", "123456")
+
+        expect(result.sent).toBe(false)
+        const failureLog = errorSpy.mock.calls.find((call) =>
+            String(call[0]).includes("email delivery FAILED"),
+        ) as unknown as [string, Record<string, unknown>] | undefined
+        expect(failureLog).toBeDefined()
+        expect(failureLog?.[1].to).toBe("us***@example.com")
+        expect(failureLog?.[1].error).toBe("domain not verified")
+        // نه آدرس کامل و نه کد OTP در لاگ نمی‌نشیند
+        const logged = JSON.stringify(errorSpy.mock.calls)
+        expect(logged).not.toContain("user@example.com")
+        expect(logged).not.toContain("123456")
+        errorSpy.mockRestore()
+    })
 })

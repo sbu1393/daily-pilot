@@ -67,6 +67,17 @@ function logDiagnostic(reason: TurnstileFailureReason, fields: Record<string, un
     console.warn(`${LOG_PREFIX} rejected: ${reason}`, { reason, ...fields })
 }
 
+/**
+ * لاگ موفقیت تأیید — یک خط کوتاه با action/hostname و status پاسخ Cloudflare.
+ *
+ * چرا لازم است؟ عیب‌یابی «تیک سبز کلاینت ولی خطای سرور» بدون این خط دو پهلو می‌ماند:
+ * فقط با دیدن `accepted` می‌توان مطمئن شد شکست بعدی مربوط به کپچا نیست و از سرویس
+ * دیگری (مثل ارسال ایمیل) می‌آید. هیچ مقدار حساسی اینجا لاگ نمی‌شود.
+ */
+function logAccepted(fields: Record<string, unknown>): void {
+    console.log(`${LOG_PREFIX} accepted`, fields)
+}
+
 /** خواندن allowlist دامنه‌ها از env: "example.com, *.preview.example.com" */
 function parseAllowedHostnames(raw: string | undefined): string[] {
     return (raw ?? "")
@@ -190,6 +201,18 @@ export async function verifyTurnstile(
             })
             return false
         }
+
+        // تأیید کامل — یک خط لاگ موفقیت تا «تیک سبز کلاینت» با «تأیید واقعی سرور»
+        // قابل تطبیق باشد و شکست‌های بعدی (مثل ارسال ایمیل) اشتباهاً به کپچا نسبت داده نشوند.
+        logAccepted({
+            success: true,
+            httpStatus: res.status,
+            returnedAction: data.action ?? null,
+            expectedAction: options.expectedAction ?? null,
+            actionAllowed,
+            returnedHostname: data.hostname ?? null,
+            allowlistConfigured: allowlist.length > 0,
+        })
 
         return true
     } catch (error) {

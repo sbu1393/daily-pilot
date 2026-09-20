@@ -13,13 +13,17 @@ const SECRET = "test-secret"
 const TOKEN = "test-token"
 const HOSTNAME = "app.example.com"
 
-/** پاسخ شبیه‌سازی‌شدهٔ Response — فقط چیزهایی که کد می‌خواند. */
-const jsonResponse = (payload: unknown, ok = true) =>
-    ({ ok, json: async () => payload }) as unknown as Response
+/**
+ * پاسخ شبیه‌سازی‌شدهٔ Response — فقط چیزهایی که کد می‌خواند.
+ * `status` هم مدل می‌شود چون Response واقعی همیشه آن را دارد و کد از آن در لاگ
+ * تشخیصی استفاده می‌کند (وگرنه لاگ در تست مقدار undefined می‌گیرد).
+ */
+const jsonResponse = (payload: unknown, ok = true, status = ok ? 200 : 500) =>
+    ({ ok, status, json: async () => payload }) as unknown as Response
 
 /** پاسخ با بدنهٔ غیرقابل‌تجزیه (شبیه‌سازی HTML خطای Cloudflare). */
 const brokenJsonResponse = (ok = true) =>
-    ({ ok, json: async () => { throw new Error("invalid json") } }) as unknown as Response
+    ({ ok, status: ok ? 200 : 500, json: async () => { throw new Error("invalid json") } }) as unknown as Response
 
 /** پاسخ موفق استاندارد Cloudflare. */
 const successResponse = (extra: Record<string, unknown> = {}) =>
@@ -394,13 +398,29 @@ describe("verifyTurnstile — server-side diagnostics", () => {
         expectNoSecretLeak()
     })
 
-    it("writes no diagnostic at all when the verification succeeds", async () => {
+    it("writes no rejection when the verification succeeds, but logs an `accepted` line with success/action", async () => {
+        const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
         fetchMock.mockResolvedValue(successResponse())
 
         await expect(
             verifyTurnstile(TOKEN, { expectedAction: "register" }),
         ).resolves.toBe(true)
 
+        // هرگز لاگ «rejected» برای مسیر موفق
         expect(warnSpy).not.toHaveBeenCalled()
+
+        // یک خط موفقیت: برای تفکیک «کپچا تأیید شد» از خطاهای بعدی (مثل ارسال ایمیل)
+        expect(logSpy).toHaveBeenCalledTimes(1)
+        const [message, fields] = logSpy.mock.calls[0] as unknown as [string, Record<string, unknown>]
+        expect(message).toContain("accepted")
+        expect(fields.success).toBe(true)
+        expect(fields.httpStatus).toBe(200)
+        expect(fields.returnedAction).toBe("register")
+        expect(fields.expectedAction).toBe("register")
+        expect(fields.actionAllowed).toBe(true)
+
+        const logged = JSON.stringify(logSpy.mock.calls)
+        expect(logged).not.toContain(SECRET)
+        expect(logged).not.toContain(TOKEN)
     })
 })

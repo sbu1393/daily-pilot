@@ -14,7 +14,10 @@
 
 import { getPrisma } from "@/app/lib/getPrisma"
 import { generateOtpCode, hashOtp } from "@/lib/otp"
-import { sendEmail, type SendEmailResult } from "@/app/lib/email"
+import { maskEmailForLog, sendEmail, type SendEmailResult } from "@/app/lib/email"
+
+/** پیشوند ثابت لاگ‌های این سرویس (برای فیلتر کردن در لاگ سرور). */
+const LOG_PREFIX = "[otp]"
 
 /** عمر چالش OTP — ۱۰ دقیقه (هم‌راستا با متن ایمیل و قرارداد قبلی). */
 export const OTP_TTL_MS = 10 * 60 * 1000
@@ -62,6 +65,13 @@ export async function createOtpChallenge(
         data: { email, codeHash, expiresAt },
     })
 
+    // کد خام هرگز لاگ نمی‌شود؛ فقط شناسهٔ چالش برای correlation با ایمیل/لاگ مسیر.
+    console.log(`${LOG_PREFIX} challenge created`, {
+        challengeId: record.id,
+        to: maskEmailForLog(email),
+        expiresAt: expiresAt.toISOString(),
+    })
+
     return { challengeId: record.id, code, expiresAt }
 }
 
@@ -83,5 +93,21 @@ export function otpEmailHtml(code: string): string {
  * اگر این نتیجه بررسی نشود، یک شکست واقعی به «کد ارسال شد» تبدیل می‌شود.
  */
 export async function sendOtpEmail(email: string, code: string): Promise<SendEmailResult> {
-    return sendEmail(email, otpEmailSubject(), otpEmailHtml(code))
+    const result = await sendEmail(email, otpEmailSubject(), otpEmailHtml(code))
+
+    // لاگ سطح سرویس: نتیجهٔ دقیق Resend (کد خطا/status/message در email.ts لاگ می‌شود)
+    // تا شکست ارسال از شکست کپچا و از خطاهای دیگر در لاگ سرور قابل تفکیک باشد.
+    if (result.sent) {
+        console.log(`${LOG_PREFIX} email delivered to provider`, {
+            to: maskEmailForLog(email),
+            resendId: result.id,
+        })
+    } else {
+        console.error(`${LOG_PREFIX} email delivery FAILED — OTP cannot reach the user`, {
+            to: maskEmailForLog(email),
+            error: result.error,
+        })
+    }
+
+    return result
 }

@@ -109,8 +109,19 @@ describe("POST /api/auth/login", () => {
 
     it("returns 503 EMAIL_DELIVERY_FAILED when the email provider rejects the send (never silent)", async () => {
         mocks.sendOtpEmail.mockResolvedValue({ sent: false, error: "domain not verified" })
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
         const res = await callPOST(VALID_BODY)
+
+        // لاگ سرور باید مرز مرحله + علت Resend را نشان دهد تا با خطای کپچا اشتباه نشود
+        const failureLog = errorSpy.mock.calls.find((call) =>
+            String(call[0]).includes("EMAIL_DELIVERY_FAILED"),
+        ) as unknown as [string, Record<string, unknown>] | undefined
+        expect(failureLog).toBeDefined()
+        expect(failureLog?.[1].resendError).toBe("domain not verified")
+        expect(failureLog?.[1].requestId).toEqual(expect.any(String))
+        expect(failureLog?.[1].httpStatus).toBe(503)
+        errorSpy.mockRestore()
 
         expect(res.status).toBe(503)
         const parsed = await res.json()
@@ -253,8 +264,16 @@ describe("POST /api/auth/login", () => {
 
     it("returns 400 CAPTCHA_FAILED (before authentication) when human verification fails", async () => {
         mocks.verifyTurnstile.mockResolvedValue(false)
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
         const res = await callPOST(VALID_BODY)
+
+        // لاگ مرز مرحله با requestId — برای تفکیک قطعی «کپچا» از «ایمیل»
+        const stepLog = warnSpy.mock.calls.find((call) =>
+            String(call[0]).includes("CAPTCHA_FAILED"),
+        ) as unknown as [string, Record<string, unknown>] | undefined
+        expect(stepLog?.[1].requestId).toEqual(expect.any(String))
+        warnSpy.mockRestore()
 
         // action مورد انتظار از سرور می‌آید، نه از بدنه‌ی درخواست
         expect(mocks.verifyTurnstile).toHaveBeenCalledWith("test-token", {

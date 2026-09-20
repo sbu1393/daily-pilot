@@ -18,13 +18,27 @@ export type SendEmailResult =
 /** آدرس sandbox پیش‌فرض Resend — فقط برای توسعه؛ در production محدودیت ارسال دارد. */
 const SANDBOX_FROM = "DailyPilot <onboarding@resend.dev>"
 
+/**
+ * پیشوند کلیدهای API معتبر Resend. اگر مقدار env با این پیشوند شروع نشود، یعنی
+ * مقدار اشتباه/ناقص در environment نشسته است و Resend پاسخ 401 می‌دهد.
+ */
+const RESEND_KEY_PREFIX = "re_"
+
 /** پیشوند ثابت همه‌ی لاگ‌های این ماژول (برای فیلتر کردن در لاگ سرور). */
 const LOG_PREFIX = "[email]"
 
-/** آدرس فرستنده — در هر فراخوانی خوانده می‌شود تا مقدار runtime (نه زمان import) اعمال شود. */
-function resolveFromAddress(): string {
+/**
+ * آدرس فرستنده — در هر فراخوانی خوانده می‌شود تا مقدار runtime (نه زمان import) اعمال شود.
+ * (trim می‌شود تا فاصله/`\n` انتهایی از هر دو مسیر — ایمیل و endpoint دیباگ — یکسان حذف شود.)
+ */
+export function resolveFromAddress(): string {
     const configured = process.env.RESEND_FROM_EMAIL
-    return configured && configured.trim() !== "" ? configured : SANDBOX_FROM
+    return configured && configured.trim() !== "" ? configured.trim() : SANDBOX_FROM
+}
+
+/** آیا آدرس فرستنده همان sandbox پیش‌فرض Resend است؟ (منبع یکتای این تشخیص برای route دیباگ) */
+export function isSandboxFromAddress(from: string = resolveFromAddress()): boolean {
+    return from === SANDBOX_FROM
 }
 
 /**
@@ -70,18 +84,49 @@ export async function sendEmail(
     subject: string,
     html: string,
 ): Promise<SendEmailResult> {
-    const apiKey = process.env.RESEND_API_KEY
+    // کلید در هر فراخوانی از env خوانده می‌شود (مقدار runtime، نه زمان import) و **trim** می‌شود:
+    // یک فاصله یا `\n` انتهایی در مقدار env (paste دستی یا `vercel env add` با echo) باعث
+    // می‌شود SDK هدر «Authorization: Bearer <key>\n» بسازد و Resend آن را 401 رد کند.
+    const rawApiKey = process.env.RESEND_API_KEY
+    const apiKey = (rawApiKey ?? "").trim()
+    // فقط boolean لاگ می‌شود؛ خودِ secret تحت هیچ شرایطی (حتی به‌صورت بخشی) چاپ نمی‌شود.
+    const keyHadSurroundingWhitespace = rawApiKey !== undefined && rawApiKey !== apiKey
+
     const from = resolveFromAddress()
     const senderIsSandbox = from === SANDBOX_FROM
 
     // پیکربندی ناقص → شکست صریح (بدون کرش)
-    if (!apiKey || apiKey.trim() === "") {
-        // اینجا هیچ تماسی با Resend نمی‌شود؛ پس لاگ باید صریحاً همین را بگوید
+    if (apiKey === "") {
+        // اینجا هیچ تماسی با Resend نمی‌شود؛ پس لاگ باید صریحاً همین را بگوید.
+        // `keyVariablePresent` تفاوت «متغیر تعریف‌نشده» و «متغیر تعریف‌شدهٔ خالی» را نشان می‌دهد.
         console.error(`${LOG_PREFIX} RESEND_API_KEY is not configured — email not sent`, {
+            keyVariablePresent: rawApiKey !== undefined,
+            keyHadSurroundingWhitespace,
             to: maskEmailForLog(to),
             from,
+            senderIsSandbox,
         })
         return { sent: false, error: "RESEND_API_KEY is not configured" }
+    }
+
+    // کلیدهای Resend همیشه با `re_` شروع می‌شوند؛ در غیر این صورت مقدار env اشتباه است
+    // (کلید سرویس دیگر، کلید ناقص، یا مقدار جابه‌جا) و Resend آن را 401 رد می‌کند.
+    if (!apiKey.startsWith(RESEND_KEY_PREFIX)) {
+        console.warn(
+            `${LOG_PREFIX} RESEND_API_KEY does not start with "${RESEND_KEY_PREFIX}" — Resend will most likely reject it with 401`,
+            {
+                keyHadSurroundingWhitespace,
+                to: maskEmailForLog(to),
+                from,
+                senderIsSandbox,
+            },
+        )
+    } else if (keyHadSurroundingWhitespace) {
+        console.warn(`${LOG_PREFIX} RESEND_API_KEY had surrounding whitespace — trimmed before use`, {
+            to: maskEmailForLog(to),
+            from,
+            senderIsSandbox,
+        })
     }
 
     // اعتبارسنجی حداقلی ورودی
@@ -118,6 +163,9 @@ export async function sendEmail(
                 from,
                 senderIsSandbox,
                 to: maskEmailForLog(to),
+                // تفکیک «کلید معیوب (فاصله/\n)» از «کلید اشتباه/باطل» — بدون افشای مقدار
+                keyHadSurroundingWhitespace,
+                keyStartsWithResendPrefix: apiKey.startsWith(RESEND_KEY_PREFIX),
                 hint,
             })
 
@@ -138,7 +186,9 @@ export async function sendEmail(
             errorName: err instanceof Error ? err.name : typeof err,
             errorMessage: err instanceof Error ? err.message : String(err),
             from,
+            senderIsSandbox,
             to: maskEmailForLog(to),
+            keyHadSurroundingWhitespace,
         })
         return { sent: false, error: "Email delivery failed" }
     }

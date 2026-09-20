@@ -1,27 +1,26 @@
 "use client"
 
-import { useState } from "react"
-import { useGoogleReCaptcha } from "react-google-recaptcha-v3"
+import { useRef, useState } from "react"
+import CaptchaWidget, { type CaptchaWidgetHandle } from "@/app/components/CaptchaWidget"
+import { CAPTCHA_ACTIONS } from "@/app/lib/captchaActions"
 
 export default function OtpPage() {
   const [email, setEmail] = useState("")
   const [code, setCode] = useState("")
   const [step, setStep] = useState<"email" | "code">("email")
   const [loading, setLoading] = useState(false)
-  const { executeRecaptcha } = useGoogleReCaptcha()
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const captchaRef = useRef<CaptchaWidgetHandle | null>(null)
 
   const handleSendOtp = async () => {
     if (!email.trim()) {
       alert("لطفاً ایمیل را وارد کنید")
       return
     }
-    if (!executeRecaptcha) {
-      alert("کپچا هنوز بارگذاری نشده؛ کمی صبر کن و دوباره تلاش کن")
-      return
-    }
-    const recaptchaToken = await executeRecaptcha("send_otp")
-    if (!recaptchaToken) {
-      alert("تأیید کپچا ناموفق بود؛ دوباره تلاش کن")
+    // تا دریافت توکن معتبر Turnstile، ارسال مسدود است (ضدِ OTP bombing)
+    const token = captchaRef.current?.getToken() ?? captchaToken
+    if (!token) {
+      alert("لطفاً تأیید امنیتی را کامل کن و دوباره تلاش کن")
       return
     }
     setLoading(true)
@@ -29,7 +28,7 @@ export default function OtpPage() {
       const res = await fetch("/api/auth/send-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), recaptchaToken }),
+        body: JSON.stringify({ email: email.trim(), turnstileToken: token }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -41,6 +40,8 @@ export default function OtpPage() {
       alert("خطا در ارتباط با سرور")
     } finally {
       setLoading(false)
+      // توکن Turnstile یک‌بارمصرف است: برای درخواست بعدی توکن تازه لازم است
+      captchaRef.current?.reset()
     }
   }
 
@@ -49,13 +50,9 @@ export default function OtpPage() {
       alert("لطفاً کد را وارد کنید")
       return
     }
-    if (!executeRecaptcha) {
-      alert("کپچا هنوز بارگذاری نشده؛ کمی صبر کن و دوباره تلاش کن")
-      return
-    }
-    const recaptchaToken = await executeRecaptcha("verify_otp")
-    if (!recaptchaToken) {
-      alert("تأیید کپچا ناموفق بود؛ دوباره تلاش کن")
+    const token = captchaRef.current?.getToken() ?? captchaToken
+    if (!token) {
+      alert("لطفاً تأیید امنیتی را کامل کن و دوباره تلاش کن")
       return
     }
     setLoading(true)
@@ -63,7 +60,11 @@ export default function OtpPage() {
       const res = await fetch("/api/auth/verify-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), code: code.trim(), recaptchaToken }),
+        body: JSON.stringify({
+          email: email.trim(),
+          code: code.trim(),
+          turnstileToken: token,
+        }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -76,6 +77,7 @@ export default function OtpPage() {
       alert("خطا در ارتباط با سرور")
     } finally {
       setLoading(false)
+      captchaRef.current?.reset()
     }
   }
 
@@ -96,9 +98,19 @@ export default function OtpPage() {
           />
         </label>
 
+        <CaptchaWidget
+          ref={captchaRef}
+          action={step === "email" ? CAPTCHA_ACTIONS.sendOtp : CAPTCHA_ACTIONS.verifyOtp}
+          onTokenChange={setCaptchaToken}
+        />
+
         {step === "email" && (
-          <button onClick={handleSendOtp} disabled={loading} style={{ padding: 10 }}>
-            {loading ? "در حال ارسال..." : "ارسال کد"}
+          <button
+            onClick={handleSendOtp}
+            disabled={loading || !captchaToken}
+            style={{ padding: 10 }}
+          >
+            {loading ? "در حال ارسال..." : !captchaToken ? "منتظر تأیید امنیتی…" : "ارسال کد"}
           </button>
         )}
 
@@ -116,8 +128,12 @@ export default function OtpPage() {
                 style={{ width: "100%", padding: 8, marginTop: 4 }}
               />
             </label>
-            <button onClick={handleVerifyOtp} disabled={loading} style={{ padding: 10 }}>
-              {loading ? "در حال تأیید..." : "تأیید"}
+            <button
+              onClick={handleVerifyOtp}
+              disabled={loading || !captchaToken}
+              style={{ padding: 10 }}
+            >
+              {loading ? "در حال تأیید..." : !captchaToken ? "منتظر تأیید امنیتی…" : "تأیید"}
             </button>
           </>
         )}

@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
     touchAuthenticatedActivity: vi.fn(),
     recordProductEvent: vi.fn(),
     getPrisma: vi.fn(),
-    verifyRecaptcha: vi.fn(),
+    verifyTurnstile: vi.fn(),
 }))
 
 vi.mock("@/app/lib/rateLimit", () => ({
@@ -31,8 +31,8 @@ vi.mock("@/app/lib/services/userActivity.service", () => ({
 vi.mock("@/app/lib/services/productEvent.service", () => ({
     recordProductEvent: mocks.recordProductEvent,
 }))
-// reCAPTCHA v3: بدون mock، verifyRecaptcha تماس واقعی با Google می‌زند و همیشه false می‌دهد.
-vi.mock("@/app/lib/recaptcha", () => ({ verifyRecaptcha: mocks.verifyRecaptcha }))
+// Cloudflare Turnstile: بدون mock، verifyTurnstile تماس واقعی با Cloudflare می‌زند.
+vi.mock("@/app/lib/turnstile", () => ({ verifyTurnstile: mocks.verifyTurnstile }))
 
 import { POST } from "./route"
 
@@ -41,7 +41,7 @@ describe("POST /api/auth/login — X-Request-ID (فاز صفر §7/§25)", () =>
         vi.clearAllMocks()
         mocks.clientIp.mockReturnValue("1.2.3.4")
         mocks.isRateLimited.mockReturnValue(false)
-        mocks.verifyRecaptcha.mockResolvedValue(true)
+        mocks.verifyTurnstile.mockResolvedValue(true)
         mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
         mocks.recordProductEvent.mockResolvedValue({ recorded: true, eventName: "auth.login_succeeded" })
         mocks.getPrisma.mockReturnValue({})
@@ -80,7 +80,7 @@ const USER = { id: 1, username: "test", email: "test@example.com" }
 const VALID_BODY = {
     email: "test@example.com",
     password: "secret123",
-    recaptchaToken: "test-token",
+    turnstileToken: "test-token",
 }
 
 const callPOST = (body: unknown) =>
@@ -94,7 +94,7 @@ describe("POST /api/auth/login", () => {
         vi.clearAllMocks()
         mocks.clientIp.mockReturnValue("1.2.3.4")
         mocks.isRateLimited.mockReturnValue(false)
-        mocks.verifyRecaptcha.mockResolvedValue(true)
+        mocks.verifyTurnstile.mockResolvedValue(true)
         mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
         mocks.recordProductEvent.mockResolvedValue({
             recorded: true,
@@ -218,16 +218,19 @@ describe("POST /api/auth/login", () => {
         expect(mocks.recordProductEvent).not.toHaveBeenCalled()
     })
 
-    it("returns 400 RECAPTCHA_FAILED (before authentication) when human verification fails", async () => {
-        mocks.verifyRecaptcha.mockResolvedValue(false)
+    it("returns 400 CAPTCHA_FAILED (before authentication) when human verification fails", async () => {
+        mocks.verifyTurnstile.mockResolvedValue(false)
 
         const res = await callPOST(VALID_BODY)
 
-        expect(mocks.verifyRecaptcha).toHaveBeenCalledWith("test-token")
+        // action مورد انتظار از سرور می‌آید، نه از بدنه‌ی درخواست
+        expect(mocks.verifyTurnstile).toHaveBeenCalledWith("test-token", {
+            expectedAction: "login",
+        })
         expect(res.status).toBe(400)
         const parsed = await res.json()
         expect(parsed.ok).toBe(false)
-        expect(parsed.error.code).toBe("RECAPTCHA_FAILED")
+        expect(parsed.error.code).toBe("CAPTCHA_FAILED")
         expect(mocks.authenticate).not.toHaveBeenCalled()
         expect(mocks.createSession).not.toHaveBeenCalled()
         expect(mocks.recordProductEvent).not.toHaveBeenCalled()

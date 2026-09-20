@@ -2,7 +2,9 @@
 
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { useGoogleReCaptcha } from "react-google-recaptcha-v3"
+import { useRef, useState } from "react"
+import CaptchaWidget, { type CaptchaWidgetHandle } from "@/app/components/CaptchaWidget"
+import { CAPTCHA_ACTIONS } from "@/app/lib/captchaActions"
 import { loginSchema } from "@/app/schema/formSchema"
 import { z } from "zod"
 import FormInput from "@/app/components/FormInput"
@@ -42,24 +44,22 @@ export default function LoginForm() {
         mode: "onSubmit",
     })
 
+    const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+    const captchaRef = useRef<CaptchaWidgetHandle | null>(null)
     const router = useRouter()
-    const { executeRecaptcha } = useGoogleReCaptcha()
 
     const onCredentialSubmit = async (data: LoginInput) => {
-        if (!executeRecaptcha) {
-            toast.error("کپچا هنوز بارگذاری نشده؛ کمی صبر کن و دوباره تلاش کن")
-            return
-        }
-        const recaptchaToken = await executeRecaptcha("login")
-        if (!recaptchaToken) {
-            toast.error("تأیید کپچا ناموفق بود؛ دوباره تلاش کن")
+        // تا دریافت توکن معتبر Turnstile ارسال مسدود است (دکمه هم غیرفعال می‌شود).
+        const token = captchaRef.current?.getToken() ?? captchaToken
+        if (!token) {
+            toast.error("لطفاً تأیید امنیتی را کامل کن و دوباره تلاش کن")
             return
         }
         try {
             await api("/api/auth/login", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ...data, recaptchaToken }),
+                body: JSON.stringify({ ...data, turnstileToken: token }),
             })
 
             toast.success("ورود موفق بود")
@@ -67,6 +67,9 @@ export default function LoginForm() {
             router.refresh()
         } catch (error) {
             toast.error(error instanceof Error ? error.message : "خطا در ارتباط با سرور")
+        } finally {
+            // توکن Turnstile یک‌بارمصرف است: پس از هر درخواست پاک و ویجت دوباره چالش می‌گیرد
+            captchaRef.current?.reset()
         }
     }
 
@@ -93,12 +96,18 @@ export default function LoginForm() {
                         />
                     ))}
 
+                    <CaptchaWidget
+                        ref={captchaRef}
+                        action={CAPTCHA_ACTIONS.login}
+                        onTokenChange={setCaptchaToken}
+                    />
+
                     <button
                         type="submit"
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || !captchaToken}
                         className="dp-btn dp-btn-primary dp-btn-block"
                     >
-                        {isSubmitting ? "در حال ورود…" : "ورود"}
+                        {isSubmitting ? "در حال ورود…" : !captchaToken ? "منتظر تأیید امنیتی…" : "ورود"}
                     </button>
                 </form>
 

@@ -1,24 +1,26 @@
 import { NextRequest, NextResponse } from "next/server"
 import { generateOtpCode, hashOtp } from "@/lib/otp"
 import { getPrisma } from "@/app/lib/getPrisma"
-import { verifyRecaptcha } from "@/app/lib/recaptcha"
+import { verifyTurnstile } from "@/app/lib/turnstile"
+import { CAPTCHA_ACTIONS } from "@/app/lib/captchaActions"
 import { Resend } from "resend"
 
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json().catch(() => null)) as
-      | { email?: string; recaptchaToken?: string }
+      | { email?: string; turnstileToken?: string }
       | null
 
-    // reCAPTCHA v3: fail-closed و قبل از هر کار حساس (ساخت کد در DB / ارسال ایمیل).
+    // Turnstile: fail-closed و قبل از هر کار حساس (ساخت کد در DB / ارسال ایمیل).
     // بدون توکن معتبر، حتی یک کد OTP ساخته و ارسال نمی‌شود (ضدِ OTP bombing).
-    const recaptchaToken = typeof body?.recaptchaToken === "string" ? body.recaptchaToken : ""
-    if (!(await verifyRecaptcha(recaptchaToken))) {
+    // توجه: هر درخواست باید توکن تازه داشته باشد؛ توکن مصرف‌شده/منقضی رد می‌شود.
+    const turnstileToken = typeof body?.turnstileToken === "string" ? body.turnstileToken : ""
+    if (!(await verifyTurnstile(turnstileToken, { expectedAction: CAPTCHA_ACTIONS.sendOtp }))) {
       return NextResponse.json(
         {
           ok: false,
           error: {
-            code: "RECAPTCHA_FAILED",
+            code: "CAPTCHA_FAILED",
             message: "تأیید انسان بودن ناموفق بود؛ دوباره تلاش کن",
           },
         },

@@ -3,8 +3,9 @@ import { NextRequest } from "next/server"
 
 /* ------------------------------------------------------------------ */
 /* Route smoke test: POST /api/auth/send-otp                           */
-/* reCAPTCHA: fetch و RECAPTCHA_SECRET_KEY mock می‌شوند → verifyRecaptcha*/
-/* واقعی اجرا می‌شود ولی هیچ تماس شبکه‌ای با Google نمی‌رود.            */
+/* کپچا: ماژول @/app/lib/turnstile mock شده است → هیچ تماس شبکه‌ای با   */
+/* Cloudflare نمی‌رود. قرارداد HTTP خودِ verifier جداگانه در            */
+/* app/lib/turnstile.test.ts تست می‌شود.                               */
 /* Prisma و Resend و lib/otp mock شده‌اند: بدون DB و بدون ایمیل واقعی.  */
 /* ------------------------------------------------------------------ */
 
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
     generateOtpCode: vi.fn(),
     hashOtp: vi.fn(),
     verifyOtp: vi.fn(),
+    verifyTurnstile: vi.fn<(token: string, options?: unknown) => Promise<boolean>>(),
 }))
 
 vi.mock("@/app/lib/getPrisma", () => ({
@@ -37,15 +39,13 @@ vi.mock("@/lib/otp", () => ({
     hashOtp: mocks.hashOtp,
     verifyOtp: mocks.verifyOtp,
 }))
+// Cloudflare Turnstile: fail-closed پیش‌فرض — فقط توکن غیرخالی «معتبر» است.
+vi.mock("@/app/lib/turnstile", () => ({ verifyTurnstile: mocks.verifyTurnstile }))
 
 import { POST } from "./route"
 
-const RECAPTCHA_SECRET = "test-secret"
-const RECAPTCHA_TOKEN = "test-token"
+const TURNSTILE_TOKEN = "test-token"
 const EMAIL = "user@example.com"
-
-const jsonResponse = (payload: unknown, ok = true) =>
-    ({ ok, json: async () => payload }) as unknown as Response
 
 const callPOST = (body: unknown) =>
     POST(
@@ -56,15 +56,12 @@ const callPOST = (body: unknown) =>
     )
 
 describe("POST /api/auth/send-otp", () => {
-    let fetchMock: ReturnType<typeof vi.fn<(url: string, init: RequestInit) => Promise<Response>>>
-
     beforeEach(() => {
         vi.clearAllMocks()
-        fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<Response>>()
-        vi.stubGlobal("fetch", fetchMock)
-        vi.stubEnv("RECAPTCHA_SECRET_KEY", RECAPTCHA_SECRET)
         vi.stubEnv("RESEND_API_KEY", "test-resend-key")
 
+        // پیش‌فرض: فقط توکن غیرخالی معتبر است (معادل رفتار fail-closed سرور)
+        mocks.verifyTurnstile.mockImplementation(async (token: string) => token.length > 0)
         mocks.generateOtpCode.mockReturnValue("123456")
         mocks.hashOtp.mockResolvedValue("hashed-code")
         mocks.otpCreate.mockResolvedValue({ id: "otp_1" })
@@ -72,65 +69,43 @@ describe("POST /api/auth/send-otp", () => {
     })
 
     afterEach(() => {
-        vi.unstubAllGlobals()
         vi.unstubAllEnvs()
     })
 
     /* -------------------------------------------------------------- */
-    /* reCAPTCHA — fail-closed                                        */
+    /* Turnstile — fail-closed                                         */
     /* -------------------------------------------------------------- */
 
-    it("returns 400 RECAPTCHA_FAILED without a captcha token and never creates a code or sends an email", async () => {
+    it("returns 400 CAPTCHA_FAILED without a captcha token and never creates a code or sends an email", async () => {
         const res = await callPOST({ email: EMAIL })
 
         expect(res.status).toBe(400)
         const parsed = await res.json()
         expect(parsed.ok).toBe(false)
-        expect(parsed.error.code).toBe("RECAPTCHA_FAILED")
+        expect(parsed.error.code).toBe("CAPTCHA_FAILED")
+
+        // توکن غایب به verifier به‌صورت رشته‌ی خالی می‌رسد (قرارداد بدنه)
+        expect(mocks.verifyTurnstile).toHaveBeenCalledWith("", {
+            expectedAction: "send_otp",
+        })
 
         // هیچ کار حساسی انجام نشده — نه کد ساخته شد، نه ایمیلی رفت
         expect(mocks.otpCreate).not.toHaveBeenCalled()
         expect(mocks.emailSend).not.toHaveBeenCalled()
         expect(mocks.generateOtpCode).not.toHaveBeenCalled()
-        // توکن خالی → حتی به Google هم درخواست نرفت
-        expect(fetchMock).not.toHaveBeenCalled()
     })
 
-    it("returns 400 RECAPTCHA_FAILED for an invalid token (Google success:false)", async () => {
-        fetchMock.mockResolvedValue(
-            jsonResponse({ success: false, "error-codes": ["invalid-input-response"] }),
-        )
+    it("returns 400 CAPTCHA_FAILED when the verifier rejects the token (invalid, expired, used, wrong hostname/action, timeout)", async () => {
+        mocks.verifyTurnstile.mockResolvedValue(false)
 
-        const res = await callPOST({ email: EMAIL, recaptchaToken: "bad-token" })
+        const res = await callPOST({ email: EMAIL, turnstileToken: "bad-token" })
 
         expect(res.status).toBe(400)
         const parsed = await res.json()
-        expect(parsed.error.code).toBe("RECAPTCHA_FAILED")
-        expect(mocks.otpCreate).not.toHaveBeenCalled()
-        expect(mocks.emailSend).not.toHaveBeenCalled()
-    })
-
-    it("returns 400 RECAPTCHA_FAILED for a low-score token (bot-like, below 0.5)", async () => {
-        fetchMock.mockResolvedValue(jsonResponse({ success: true, score: 0.1 }))
-
-        const res = await callPOST({ email: EMAIL, recaptchaToken: RECAPTCHA_TOKEN })
-
-        expect(res.status).toBe(400)
-        const parsed = await res.json()
-        expect(parsed.error.code).toBe("RECAPTCHA_FAILED")
-        expect(mocks.otpCreate).not.toHaveBeenCalled()
-        expect(mocks.emailSend).not.toHaveBeenCalled()
-    })
-
-    it("fails closed (400 RECAPTCHA_FAILED) when RECAPTCHA_SECRET_KEY is missing", async () => {
-        vi.stubEnv("RECAPTCHA_SECRET_KEY", "")
-
-        const res = await callPOST({ email: EMAIL, recaptchaToken: RECAPTCHA_TOKEN })
-
-        expect(res.status).toBe(400)
-        const parsed = await res.json()
-        expect(parsed.error.code).toBe("RECAPTCHA_FAILED")
-        expect(fetchMock).not.toHaveBeenCalled()
+        expect(parsed.error.code).toBe("CAPTCHA_FAILED")
+        expect(mocks.verifyTurnstile).toHaveBeenCalledWith("bad-token", {
+            expectedAction: "send_otp",
+        })
         expect(mocks.otpCreate).not.toHaveBeenCalled()
         expect(mocks.emailSend).not.toHaveBeenCalled()
     })
@@ -140,9 +115,7 @@ describe("POST /api/auth/send-otp", () => {
     /* -------------------------------------------------------------- */
 
     it("creates a 10-minute code and sends the email when the captcha token is valid", async () => {
-        fetchMock.mockResolvedValue(jsonResponse({ success: true, score: 0.9 }))
-
-        const res = await callPOST({ email: EMAIL, recaptchaToken: RECAPTCHA_TOKEN })
+        const res = await callPOST({ email: EMAIL, turnstileToken: TURNSTILE_TOKEN })
 
         expect(res.status).toBe(200)
         await expect(res.json()).resolves.toEqual({
@@ -150,13 +123,10 @@ describe("POST /api/auth/send-otp", () => {
             message: "کد با موفقیت ارسال شد",
         })
 
-        // توکن واقعاً به Google's siteverify فرستاده شده است
-        expect(fetchMock).toHaveBeenCalledTimes(1)
-        const [, init] = fetchMock.mock.calls[0]
-        expect(init.method).toBe("POST")
-        const params = init.body as URLSearchParams
-        expect(params.get("secret")).toBe(RECAPTCHA_SECRET)
-        expect(params.get("response")).toBe(RECAPTCHA_TOKEN)
+        // action سمت سرور تعیین می‌شود، نه از بدنه‌ی درخواست
+        expect(mocks.verifyTurnstile).toHaveBeenCalledWith(TURNSTILE_TOKEN, {
+            expectedAction: "send_otp",
+        })
 
         // رکورد OTP با هش (نه کد خام) و انقضای ۱۰ دقیقه‌ای
         expect(mocks.otpCreate).toHaveBeenCalledTimes(1)
@@ -176,11 +146,9 @@ describe("POST /api/auth/send-otp", () => {
     })
 
     it("normalizes the email before storing it", async () => {
-        fetchMock.mockResolvedValue(jsonResponse({ success: true, score: 0.9 }))
-
         const res = await callPOST({
             email: "  USER@Example.COM  ",
-            recaptchaToken: RECAPTCHA_TOKEN,
+            turnstileToken: TURNSTILE_TOKEN,
         })
 
         expect(res.status).toBe(200)
@@ -193,9 +161,7 @@ describe("POST /api/auth/send-otp", () => {
     /* -------------------------------------------------------------- */
 
     it("returns 400 VALIDATION_ERROR when the email is missing but the captcha is valid", async () => {
-        fetchMock.mockResolvedValue(jsonResponse({ success: true, score: 0.9 }))
-
-        const res = await callPOST({ recaptchaToken: RECAPTCHA_TOKEN })
+        const res = await callPOST({ turnstileToken: TURNSTILE_TOKEN })
 
         expect(res.status).toBe(400)
         const parsed = await res.json()
@@ -219,11 +185,10 @@ describe("POST /api/auth/send-otp", () => {
     })
 
     it("returns 500 INTERNAL when email delivery fails after a valid captcha", async () => {
-        fetchMock.mockResolvedValue(jsonResponse({ success: true, score: 0.9 }))
         mocks.emailSend.mockRejectedValue(new Error("resend down"))
         const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-        const res = await callPOST({ email: EMAIL, recaptchaToken: RECAPTCHA_TOKEN })
+        const res = await callPOST({ email: EMAIL, turnstileToken: TURNSTILE_TOKEN })
 
         expect(res.status).toBe(500)
         const parsed = await res.json()

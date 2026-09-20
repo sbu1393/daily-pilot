@@ -180,6 +180,27 @@ export class UsernameTakenError extends ServiceError {
     }
 }
 
+/**
+ * 503 — شکست ارسال ایمیل ترانزاکشنی (سرویس بیرونی Resend).
+ *
+ * این کد عمداً وجود دارد تا نتیجه‌ی Resend بی‌صدا رد نشود: مسیر OTP دو مرحله‌ای
+ * بدون ایمیل کار نمی‌کند، پس شکست ارسال باید یک خطای صریح (و قابل recordError)
+ * باشد، نه یک پاسخ ۲۰۰ که کاربر را در انتظار کدی بی‌فایده بگذارد.
+ * category/severity مطابق الگوی خطاهای وابستگی بیرونی (EXTERNAL_SERVICE/ERROR).
+ */
+export class EmailDeliveryFailedError extends ServiceError {
+    constructor() {
+        super(
+            503,
+            "EMAIL_DELIVERY_FAILED",
+            "ارسال کد تأیید ناموفق بود؛ دوباره تلاش کن",
+            undefined,
+            "EXTERNAL_SERVICE",
+            "ERROR",
+        )
+    }
+}
+
 // ---------- فاز ۱ — Quota / Idempotency ----------
 // نگاشت کدها طبق سند فاز یک (§19/§20):
 // QUOTA_EXCEEDED / IDEMPOTENCY_CONFLICT / AI_USAGE_CONFLICT → business/conflict → recordError = false

@@ -1,28 +1,33 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { NextRequest, type NextResponse } from "next/server"
+import { NextRequest } from "next/server"
+import { InvalidCredentialsError } from "@/app/lib/services/errors"
 
 /* ------------------------------------------------------------------ */
-/* B1 — Route smoke test: POST /api/auth/login (ADR-04).               */
-/* authenticate mocked (no DB); rateLimit mocked; createSession mocked */
-/* (cookie behavior asserted via the mock, no JWT generation).         */
+/* Route smoke test: POST /api/auth/login (ADR-04)                     */
+/*                                                                     */
+/* ورود دو مرحله‌ای (2FA): رمز عبور + کد ایمیل.                         */
+/* - authenticate mocked (no DB)                                       */
+/* - rateLimit mocked                                                  */
+/* - otp.service mocked (چالش + ارسال ایمیل بدون DB/شبکه واقعی)         */
+/* - هیچ سشنی در این مرحله ساخته نمی‌شود (createSession صدا زده نمی‌شود) */
 /* ------------------------------------------------------------------ */
 
 const mocks = vi.hoisted(() => ({
     isRateLimited: vi.fn(),
     clientIp: vi.fn(),
-    createSession: vi.fn(),
     authenticate: vi.fn(),
     touchAuthenticatedActivity: vi.fn(),
     recordProductEvent: vi.fn(),
     getPrisma: vi.fn(),
     verifyTurnstile: vi.fn(),
+    createOtpChallenge: vi.fn(),
+    sendOtpEmail: vi.fn(),
 }))
 
 vi.mock("@/app/lib/rateLimit", () => ({
     isRateLimited: mocks.isRateLimited,
     clientIp: mocks.clientIp,
 }))
-vi.mock("@/app/lib/createSession", () => ({ createSession: mocks.createSession }))
 vi.mock("@/app/lib/services/auth.service", () => ({ authenticate: mocks.authenticate }))
 vi.mock("@/app/lib/getPrisma", () => ({ getPrisma: mocks.getPrisma }))
 vi.mock("@/app/lib/services/userActivity.service", () => ({
@@ -33,23 +38,114 @@ vi.mock("@/app/lib/services/productEvent.service", () => ({
 }))
 // Cloudflare Turnstile: بدون mock، verifyTurnstile تماس واقعی با Cloudflare می‌زند.
 vi.mock("@/app/lib/turnstile", () => ({ verifyTurnstile: mocks.verifyTurnstile }))
+// OTP: چالش و ارسال ایمیل در این تست‌ها شبیه‌سازی می‌شوند
+vi.mock("@/app/lib/services/otp.service", () => ({
+    createOtpChallenge: mocks.createOtpChallenge,
+    sendOtpEmail: mocks.sendOtpEmail,
+    OTP_TTL_MS: 600000,
+    OTP_MAX_ATTEMPTS: 5,
+}))
 
 import { POST } from "./route"
 
-describe("POST /api/auth/login — X-Request-ID (فاز صفر §7/§25)", () => {
+const USER = { id: 1, username: "test", email: "test@example.com" }
+const CHALLENGE = { challengeId: "ch_1", code: "123456", expiresAt: new Date() }
+
+const VALID_BODY = {
+    email: "test@example.com",
+    password: "secret123",
+    turnstileToken: "test-token",
+}
+
+const callPOST = (body: unknown) =>
+    POST(
+        new NextRequest("http://localhost/api/auth/login", {
+            method: "POST",
+            body: JSON.stringify(body),
+        }),
+    )
+
+describe("POST /api/auth/login", () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mocks.clientIp.mockReturnValue("1.2.3.4")
         mocks.isRateLimited.mockReturnValue(false)
         mocks.verifyTurnstile.mockResolvedValue(true)
         mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
-        mocks.recordProductEvent.mockResolvedValue({ recorded: true, eventName: "auth.login_succeeded" })
+        mocks.recordProductEvent.mockResolvedValue({
+            recorded: true,
+            eventName: "auth.login_succeeded",
+        })
         mocks.getPrisma.mockReturnValue({})
-        mocks.createSession.mockImplementation((_user: unknown, response: unknown) => response)
         mocks.authenticate.mockResolvedValue(USER)
+        mocks.createOtpChallenge.mockResolvedValue(CHALLENGE)
+        mocks.sendOtpEmail.mockResolvedValue({ sent: true, id: "email_1" })
     })
 
-    it("200 success (with session) carries X-Request-ID", async () => {
+    /* -------------------------------------------------------------- */
+    /* ورود دو مرحله‌ای — مرحلهٔ اول                                     */
+    /* -------------------------------------------------------------- */
+
+    it("returns 200 with { ok: true, data: { nextStep: OTP, challengeId, email } }", async () => {
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(200)
+        await expect(res.json()).resolves.toEqual({
+            ok: true,
+            data: { nextStep: "OTP", challengeId: "ch_1", email: "test@example.com" },
+        })
+        expect(mocks.authenticate).toHaveBeenCalledWith("test@example.com", "secret123")
+        expect(mocks.createOtpChallenge).toHaveBeenCalledWith("test@example.com")
+        expect(mocks.sendOtpEmail).toHaveBeenCalledWith("test@example.com", "123456")
+    })
+
+    it("never creates the final session before the OTP is confirmed (no cookie in step 1)", async () => {
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(200)
+        expect(res.cookies.get("token")).toBeUndefined()
+        expect(res.headers.get("set-cookie")).toBeNull()
+    })
+
+    it("returns 503 EMAIL_DELIVERY_FAILED when the email provider rejects the send (never silent)", async () => {
+        mocks.sendOtpEmail.mockResolvedValue({ sent: false, error: "domain not verified" })
+
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(503)
+        const parsed = await res.json()
+        expect(parsed.ok).toBe(false)
+        expect(parsed.error.code).toBe("EMAIL_DELIVERY_FAILED")
+        // هیچ سشنی حتی در مسیر شکست ارسال ساخته نمی‌شود
+        expect(res.cookies.get("token")).toBeUndefined()
+        // چالش ساخته شده بود ولی ارسال نشد — کاربر باید دوباره تلاش کند
+        expect(mocks.createOtpChallenge).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not create a challenge or send email when the password is wrong", async () => {
+        mocks.authenticate.mockRejectedValue(new InvalidCredentialsError())
+
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(401)
+        expect(mocks.createOtpChallenge).not.toHaveBeenCalled()
+        expect(mocks.sendOtpEmail).not.toHaveBeenCalled()
+    })
+
+    it("normalizes email before rate limiting and authentication", async () => {
+        const res = await callPOST({ email: "  TEST@Example.COM  ", password: "secret123" })
+
+        expect(res.status).toBe(200)
+        expect(mocks.isRateLimited).toHaveBeenCalledWith("login:email:test@example.com", 5)
+        expect(mocks.authenticate).toHaveBeenCalledWith("test@example.com", "secret123")
+        expect(mocks.createOtpChallenge).toHaveBeenCalledWith("test@example.com")
+    })
+
+    /* -------------------------------------------------------------- */
+    /* X-Request-ID (فاز صفر §7/§25)                                    */
+    /* -------------------------------------------------------------- */
+
+    it("200 step-1 response carries X-Request-ID", async () => {
         const res = await callPOST(VALID_BODY)
 
         expect(res.status).toBe(200)
@@ -73,79 +169,10 @@ describe("POST /api/auth/login — X-Request-ID (فاز صفر §7/§25)", () =>
         expect(res.status).toBe(429)
         expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
     })
-})
-import { InvalidCredentialsError } from "@/app/lib/services/errors"
 
-const USER = { id: 1, username: "test", email: "test@example.com" }
-const VALID_BODY = {
-    email: "test@example.com",
-    password: "secret123",
-    turnstileToken: "test-token",
-}
-
-const callPOST = (body: unknown) =>
-    POST(new NextRequest("http://localhost/api/auth/login", {
-        method: "POST",
-        body: JSON.stringify(body),
-    }))
-
-describe("POST /api/auth/login", () => {
-    beforeEach(() => {
-        vi.clearAllMocks()
-        mocks.clientIp.mockReturnValue("1.2.3.4")
-        mocks.isRateLimited.mockReturnValue(false)
-        mocks.verifyTurnstile.mockResolvedValue(true)
-        mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
-        mocks.recordProductEvent.mockResolvedValue({
-            recorded: true,
-            eventName: "auth.login_succeeded",
-        })
-        mocks.getPrisma.mockReturnValue({})
-        mocks.createSession.mockImplementation((_user: unknown, response: NextResponse) => {
-            response.cookies.set("token", "mocked-jwt", { httpOnly: true, path: "/" })
-            return response
-        })
-    })
-
-    it("returns 200 with { ok: true, data: { user } } and sets the session cookie via createSession", async () => {
-        mocks.authenticate.mockResolvedValue(USER)
-
-        const res = await callPOST(VALID_BODY)
-
-        expect(res.status).toBe(200)
-        await expect(res.json()).resolves.toEqual({
-            ok: true,
-            data: { user: { id: 1, username: "test", email: "test@example.com" } },
-        })
-        expect(mocks.authenticate).toHaveBeenCalledWith(
-            "test@example.com",
-            "secret123",
-        )
-        expect(mocks.createSession).toHaveBeenCalledWith(
-            expect.objectContaining({ id: 1, email: "test@example.com" }),
-            expect.anything(),
-        )
-        expect(res.cookies.get("token")?.value).toBe("mocked-jwt")
-    })
-
-    it("normalizes email before rate limiting and authentication", async () => {
-        mocks.authenticate.mockResolvedValue(USER)
-
-        const res = await callPOST({
-            email: "  TEST@Example.COM  ",
-            password: "secret123",
-        })
-
-        expect(res.status).toBe(200)
-        expect(mocks.isRateLimited).toHaveBeenCalledWith(
-            "login:email:test@example.com",
-            5,
-        )
-        expect(mocks.authenticate).toHaveBeenCalledWith(
-            "test@example.com",
-            "secret123",
-        )
-    })
+    /* -------------------------------------------------------------- */
+    /* Rate limit                                                      */
+    /* -------------------------------------------------------------- */
 
     it("returns 429 RATE_LIMITED when the IP bucket is exhausted (before body/validation)", async () => {
         mocks.isRateLimited.mockImplementation((key: string) => key.startsWith("login:ip:"))
@@ -170,11 +197,12 @@ describe("POST /api/auth/login", () => {
         expect(mocks.authenticate).not.toHaveBeenCalled()
     })
 
+    /* -------------------------------------------------------------- */
     /* فاز ۳ — گام ۷: integration analysis (touch + auth.login_succeeded) */
+    /* مرز احراز هویت = تأیید رمز عبور؛ رفتار دست‌نخورده مانده است.      */
+    /* -------------------------------------------------------------- */
 
     it("touches activity and records auth.login_succeeded without properties after real authentication", async () => {
-        mocks.authenticate.mockResolvedValue(USER)
-
         const res = await callPOST(VALID_BODY)
 
         expect(res.status).toBe(200)
@@ -207,16 +235,21 @@ describe("POST /api/auth/login", () => {
         expect(mocks.touchAuthenticatedActivity).not.toHaveBeenCalled()
     })
 
-    it("keeps the 200 login response unchanged when analytics fails (fail-open)", async () => {
-        mocks.authenticate.mockResolvedValue(USER)
+    it("keeps the step-1 response unchanged when analytics fails (fail-open)", async () => {
         mocks.touchAuthenticatedActivity.mockRejectedValue(new Error("analytics db down"))
 
         const res = await callPOST(VALID_BODY)
 
         expect(res.status).toBe(200)
-        expect(res.cookies.get("token")?.value).toBe("mocked-jwt")
+        const parsed = await res.json()
+        expect(parsed.data.nextStep).toBe("OTP")
+        expect(parsed.data.challengeId).toBe("ch_1")
         expect(mocks.recordProductEvent).not.toHaveBeenCalled()
     })
+
+    /* -------------------------------------------------------------- */
+    /* Turnstile (fail-closed)                                         */
+    /* -------------------------------------------------------------- */
 
     it("returns 400 CAPTCHA_FAILED (before authentication) when human verification fails", async () => {
         mocks.verifyTurnstile.mockResolvedValue(false)
@@ -232,9 +265,13 @@ describe("POST /api/auth/login", () => {
         expect(parsed.ok).toBe(false)
         expect(parsed.error.code).toBe("CAPTCHA_FAILED")
         expect(mocks.authenticate).not.toHaveBeenCalled()
-        expect(mocks.createSession).not.toHaveBeenCalled()
+        expect(mocks.createOtpChallenge).not.toHaveBeenCalled()
         expect(mocks.recordProductEvent).not.toHaveBeenCalled()
     })
+
+    /* -------------------------------------------------------------- */
+    /* خطاهای دامنه و بدنه                                              */
+    /* -------------------------------------------------------------- */
 
     it("propagates ServiceError INVALID_CREDENTIALS as 401", async () => {
         mocks.authenticate.mockRejectedValue(new InvalidCredentialsError())
@@ -245,7 +282,6 @@ describe("POST /api/auth/login", () => {
         const parsed = await res.json()
         expect(parsed.ok).toBe(false)
         expect(parsed.error.code).toBe("INVALID_CREDENTIALS")
-        expect(mocks.createSession).not.toHaveBeenCalled()
     })
 
     it.each([
@@ -255,7 +291,10 @@ describe("POST /api/auth/login", () => {
         "returns 400 VALIDATION_ERROR (not 500) for a %s body (M3)",
         async (_label, raw) => {
             const res = await POST(
-                new NextRequest("http://localhost/api/auth/login", { method: "POST", body: raw }),
+                new NextRequest("http://localhost/api/auth/login", {
+                    method: "POST",
+                    body: raw,
+                }),
             )
 
             expect(res.status).toBe(400)
@@ -263,7 +302,7 @@ describe("POST /api/auth/login", () => {
             expect(parsed.ok).toBe(false)
             expect(parsed.error.code).toBe("VALIDATION_ERROR")
             expect(mocks.authenticate).not.toHaveBeenCalled()
-            expect(mocks.createSession).not.toHaveBeenCalled()
+            expect(mocks.createOtpChallenge).not.toHaveBeenCalled()
         },
     )
 
@@ -275,6 +314,6 @@ describe("POST /api/auth/login", () => {
         expect(parsed.error.code).toBe("VALIDATION_ERROR")
         expect(parsed.error.errors).toBeDefined()
         expect(mocks.authenticate).not.toHaveBeenCalled()
-        expect(mocks.createSession).not.toHaveBeenCalled()
+        expect(mocks.createOtpChallenge).not.toHaveBeenCalled()
     })
 })

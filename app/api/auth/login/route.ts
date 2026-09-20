@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createSession } from "@/app/lib/createSession"
 import { loginSchema } from "@/app/schema/formSchema"
 import { isRateLimited, clientIp } from "@/app/lib/rateLimit"
 import { verifyTurnstile } from "@/app/lib/turnstile"
@@ -15,6 +14,8 @@ import { recordError } from "@/src/lib/observability/recordError"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
 import { recordProductEvent } from "@/app/lib/services/productEvent.service"
+import { createOtpChallenge, sendOtpEmail } from "@/app/lib/services/otp.service"
+import { EmailDeliveryFailedError } from "@/app/lib/services/errors"
 
 export async function POST(req: NextRequest) {
     const context = createObservabilityContext("/api/auth/login", "auth")
@@ -85,22 +86,32 @@ export async function POST(req: NextRequest) {
             // fail-open — analytics failure هرگز login را fail نمی‌کند
         }
 
+        // ورود دو مرحله‌ای (2FA): رمز عبور تأیید شد، اما **سشن نهایی اینجا ساخته
+        // نمی‌شود**. یک چالش OTP ساخته و ایمیل می‌شود؛ سشن فقط پس از تأیید کد در
+        // /api/auth/verify-otp صادر می‌شود.
+        const challenge = await createOtpChallenge(user.email)
+        const delivery = await sendOtpEmail(user.email, challenge.code)
+
+        // شکست ارسال ایمیل هرگز بی‌صدا رد نمی‌شود: بدون ایمیل، کد به کاربر نمی‌رسد
+        // و ادامه دادن یعنی پاسخ ۲۰۰ دروغین. خطای صریح + recordError در catch.
+        if (!delivery.sent) {
+            throw new EmailDeliveryFailedError()
+        }
+
         const response = NextResponse.json(
             {
                 ok: true,
                 data: {
-                    user: {
-                        id: user.id,
-                        username: user.username,
-                        email: user.email,
-                    },
+                    nextStep: "OTP",
+                    challengeId: challenge.challengeId,
+                    email: user.email,
                 },
             },
             { status: 200 },
         )
         response.headers.set("X-Request-ID", context.requestId)
 
-        return createSession(user, response)
+        return response
     } catch (error) {
         await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)

@@ -17,6 +17,13 @@ import { api } from "@/app/lib/api/client"
 
 export type LoginInput = z.infer<typeof loginSchema>
 
+/** بخش data پاسخ موفقیت‌آمیز /api/auth/login — قرارداد ورود دو مرحله‌ای. */
+type LoginResult = {
+    nextStep?: string
+    challengeId?: string
+    email?: string
+}
+
 const loginFields = [
     {
         name: "email",
@@ -56,19 +63,32 @@ export default function LoginForm() {
             return
         }
         try {
-            await api("/api/auth/login", {
+            const result = await api<LoginResult>("/api/auth/login", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ ...data, turnstileToken: token }),
             })
 
+            // ورود دو مرحله‌ای: سرور هنوز سشنی نساخته و منتظر تأیید کد ایمیل است.
+            // اینجا reset نمی‌کنیم: توکن مصرف شده و صفحه در حال ترک است.
+            if (result?.nextStep === "OTP" && result.challengeId) {
+                const params = new URLSearchParams({
+                    mode: "login",
+                    challengeId: result.challengeId,
+                    email: result.email ?? data.email,
+                })
+                router.push(`/auth/otp?${params.toString()}`)
+                return
+            }
+
+            // مسیر جایگزین (سازگاری): اگر پاسخ، مرحلهٔ OTP را اعلام نکند
             toast.success("ورود موفق بود")
             router.push("/dashboard")
             router.refresh()
         } catch (error) {
             toast.error(error instanceof Error ? error.message : "خطا در ارتباط با سرور")
-        } finally {
-            // توکن Turnstile یک‌بارمصرف است: پس از هر درخواست پاک و ویجت دوباره چالش می‌گیرد
+            // توکن Turnstile یک‌بارمصرف است و در درخواست ناموفق هم مصرف شده؛
+            // فقط در مسیر خطا چالش تازه می‌گیریم تا دکمه دوباره فعال شود.
             captchaRef.current?.reset()
         }
     }

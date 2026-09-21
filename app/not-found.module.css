@@ -1,0 +1,122 @@
+.page {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: var(--space-8) var(--space-5);
+}
+
+.card {
+    width: min(720px, 92%);
+    display: grid;
+    gap: var(--space-5);
+    padding: 40px 34px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    box-shadow: var(--shadow-md);
+    text-align: center;
+}
+
+.code {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 108px;
+    height: 108px;
+    border-radius: var(--radius-full);
+    background: var(--gradient);
+    color: #fff;
+    font-size: 2.5rem;
+    font-weight: 800;
+    letter-spacing: -1px;
+    box-shadow: var(--shadow-lg);
+}
+
+.title {
+    margin: 0;
+    font-size: clamp(1.5rem, 3.6vw, 2rem);
+    font-weight: 800;
+    color: var(--ink);
+    line-height: 1.25;
+}
+
+.lead {
+    margin: 0;
+    color: var(--muted);
+    font-size: 1rem;
+    line-height: 1.8;
+    max-width: 42ch;
+    margin-inline: auto;
+}
+
+.quickLinks {
+    display: grid;
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+    text-align: center;
+}
+
+.quickTitle {
+    margin: 0;
+    font-size: .9rem;
+    color: var(--muted-2);
+    font-weight: 800;
+    letter-spacing: .2px;
+}
+
+.row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-3);
+}
+
+.action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 14px;
+    border-radius: var(--radius-full);
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--ink-2);
+    font: 700 .85rem/1.35 var(--font-sans);
+    text-decoration: none;
+    transition: transform .2s ease, border-color .2s ease, color .2s ease, background-color .2s ease;
+}
+
+.action:hover {
+    border-color: var(--primary);
+    color: var(--primary-dark);
+    background: var(--primary-soft);
+    transform: translateY(-2px);
+}
+
+.action:focus-visible {
+    outline: 3px solid var(--primary);
+    outline-offset: 3px;
+}
+
+.action.primary {
+    background: var(--gradient);
+    border-color: transparent;
+    color: #fff;
+    box-shadow: var(--shadow-md);
+}
+
+.action.primary:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+/* direction helpers for three columns in an RTL layout */
+.row :global(*) {
+    direction: rtl;
+}
+
+/* responsive */
+@media (max-width: 640px) {
+    .row {
+        grid-template-columns: 1fr;
+    }
+}

@@ -26,7 +26,7 @@ const vazir = localFont({
 })
 
 export const metadata: Metadata = {
-  title: "31470106",
+  title: "روزساز",
   description: "سیستم هوشمند برنامه‌ریزی، مدیریت کارها و تقویم روزانه",
 }
 

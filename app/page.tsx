@@ -4,6 +4,7 @@ import DashboardPreview from "@/app/components/landing/DashboardPreview"
 import Features from "@/app/components/landing/Features"
 import DownloadSection from "@/app/components/landing/DownloadSection"
 import CTASection from "@/app/components/landing/CTASection"
+import Footer from "@/app/components/layout/Footer"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
 import type { AvatarUser } from "@/app/components/Avatar"
 import styles from "@/app/components/landing/landing.module.css"
@@ -30,6 +31,7 @@ export default async function Home() {
             <Features />
             <DownloadSection />
             <CTASection user={user} />
+            <Footer />
         </main>
     )
 }

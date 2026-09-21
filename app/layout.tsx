@@ -6,6 +6,8 @@ import { CalendarProvider } from "./contexts/CalenderContext"
 import { SettingsProvider } from "./contexts/SettingsContext"
 import PwaRegister from "./components/PwaRegister"
 import OfflineIndicator from "./components/OfflineIndicator"
+// «تنظیم زمان» — یادآوری تسک + آلارم صوتی (کاملاً additive؛ فقط localStorage)
+import { ReminderProvider } from "./hooks/useTaskReminder"
 import Splash from "./components/Splash"
 import { ToastContainer } from "react-toastify"
 
@@ -65,10 +67,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Splash />
         <CalendarProvider>
           <SettingsProvider>
-            {children}
-            <OfflineIndicator />
-            <ToastContainer position="bottom-left" rtl closeOnClick pauseOnHover />
-            <PwaRegister />
+            <ReminderProvider>
+              {children}
+              <OfflineIndicator />
+              <ToastContainer position="bottom-left" rtl closeOnClick pauseOnHover />
+              <PwaRegister />
+            </ReminderProvider>
           </SettingsProvider>
         </CalendarProvider>
       </body>

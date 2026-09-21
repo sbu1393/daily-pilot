@@ -27,6 +27,8 @@ import CompleteTaskModal from "./CompleteTaskModal"
 import RolloverDialog from "./RolloverDialog"
 import styles from "./task.module.css"
 import ReanalyzeModal from "./ReanalyzeModal"
+// «تنظیم زمان» — مودال یادآوری (additive؛ هیچ جریان موجودی را تغییر نمی‌دهد)
+import ReminderModal from "./ReminderModal"
 import SuggestionModal from "./SuggestionModal"
 import AdvisorCard from "./AdvisorCard"
 import { useDaySuggestion } from "@/app/hooks/useDaySuggestion"
@@ -61,6 +63,8 @@ export default function DailyTaskList() {
     const [rolloverOpen, setRolloverOpen] = useState(false)
     const [deleteTask, setDeleteTask] = useState<TaskItem | null>(null)
     const [reanalyzeTask, setReanalyzeTask] = useState<TaskItem | null>(null)
+    // «تنظیم زمان»: تنها یک state نمایشی برای مودال یادآوری
+    const [remindTask, setRemindTask] = useState<TaskItem | null>(null)
 
     // استیت‌های مربوط به هوش مصنوعی
     const [suggestionOpen, setSuggestionOpen] = useState(false)
@@ -336,6 +340,7 @@ export default function DailyTaskList() {
                                 onComplete={setCompleteTask}
                                 onDelete={setDeleteTask}
                                 onReanalyze={setReanalyzeTask}
+                                onRemind={setRemindTask}
                             />
                         ))}
                         {visibleQueued.map((q) => (
@@ -433,6 +438,13 @@ export default function DailyTaskList() {
                 task={reanalyzeTask}
                 onClose={() => setReanalyzeTask(null)}
                 onDone={() => afterMutation()}
+            />
+
+            {/* مودال «تنظیم زمان» — کارِ یادآوری کاملاً محلی است و هیچ درخواستی به سرور نمی‌زند */}
+            <ReminderModal
+                task={remindTask}
+                open={remindTask !== null}
+                onClose={() => setRemindTask(null)}
             />
         </section>
     )

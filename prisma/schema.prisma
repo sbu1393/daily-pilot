@@ -99,6 +99,12 @@ model User {
   productEvents ProductEvent[] // فاز ۳ — رویدادهای تحلیلی محصول
   paymentOrders PaymentOrder[] // فاز ۵ — تاریخچه‌ی تلاش‌های پرداخت
   entitlement   Entitlement? // فاز ۵ — دوره‌ی دسترسی فعلی (یکتا per user)
+  // یادآورها — آینه‌ی سرور برنامه‌ی یادآور کاربر (تنظیمات UI در localStorage
+  // است، ولی برای ارسال Push در زمان مقرر سرور باید زمان‌بندی را بداند)
+  reminderEnabled Boolean @default(false) // آیا یادآور فعال است؟
+  reminderTime    String  @default("09:00") // "HH:MM" به وقت محلی کاربر
+  reminderSentOn  String? // dayKey محلیِ آخرین ارسال موفق (ضد ارسال تکراری)
+  pushSubscriptions PushSubscription[] // یادآورها — اشتراک‌های Web Push این کاربر
 }
 
 model Task {
@@ -261,6 +267,26 @@ model PaymentOrder {
   @@unique([provider, providerReference])
   @@index([userId, createdAt])
   @@index([status, expiresAt])
+}
+
+// یادآورها — Web Push (VAPID): زیرساخت ارسال یادآور در حالت بسته بودن اپ/Doze.
+// یک ردیف = یک endpoint مرورگر (کلید یکتای واقعی endpoint است، نه کاربر)؛
+// `p256dh`/`auth` فقط برای رمزنگاری payload استفاده می‌شوند و هیچ داده‌ی هویتی
+// یا محتوای تسک اینجا ذخیره نمی‌شود. جدول کاملاً additive است و هیچ ستونی از
+// جدول‌های موجود را تغییر نمی‌دهد.
+// توجه: `userId` مثل بقیه‌ی روابط این پروژه `Int` است (نه String) و با
+// onDelete: Cascade به User وصل می‌شود تا حذف حساب، اشتراک‌های دستگاه را پاک کند.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    Int
+  endpoint  String   @unique // PushSubscription.endpoint — فقط همین یکتا است
+  p256dh    String // کلید عمومی کلاینت (Base64URL)
+  auth      String // راز احراز‌هویت کلاینت (Base64URL)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt // آخرین (re)subscribe — مبنای prune سقف per user
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 // فاز ۵ — Entitlement: source of truth «دوره‌ی دسترسی فعلی پرداخت‌شده» (سند §2/§3.5)

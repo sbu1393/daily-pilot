@@ -1,5 +1,6 @@
 "use client"
 
+import { clearLegacySettingsKeys } from "@/app/lib/reminder"
 import type { TaskItem } from "@/app/components/task/taskTypes"
 import type { DaySummary } from "@/app/hooks/useDaySummary"
 
@@ -20,6 +21,12 @@ import type { DaySummary } from "@/app/hooks/useDaySummary"
  * - `ensureOfflineScope()` کاربر نشست را یک‌بار (وقتی آنلاین هستیم) از `/api/auth/profile`
  *   می‌خواند و در localStorage نگه می‌دارد؛ بنابراین در آفلاین بعدی هم scope شناخته است.
  * - `clearOfflineForLogout()` صف را (بهترین تلاش) سینک و داده‌ی محلی دستگاه را پاک می‌کند.
+ * - کلیدهای **تنظیمات/یادآور** هم user-scoped شده‌اند (`dp:settings:u<id>` و
+ *   `dp:reminder-fired:u<id>` — `app/lib/reminder.ts`) و کلیدهای قدیمیِ بدون
+ *   scope همینجا (و هنگام برقراری نشست) پاک می‌شوند؛ پس تنظیمات یک حساب هرگز
+ *   برای حساب بعدی روی همان دستگاه خوانده نمی‌شود.
+ * - `setOfflineUserId()` رویداد `OFFLINE_SCOPE_EVENT` را روی `window` می‌فرستد تا
+ *   مصرف‌کننده‌های scope (مثل SettingsContext) بعد از ورود/خروج دوباره hydrate کنند.
  * - `syncQueue()` قفل in-flight دارد: تریگرهای موازی (mount / online / dp:synced) هرگز
  *   دو بار یک آیتم را POST نمی‌کنند.
  *
@@ -30,6 +37,21 @@ import type { DaySummary } from "@/app/hooks/useDaySummary"
 const CACHE_PREFIX = "dp:offline:v3:day" // v3: کلیدها user-scoped شدند (قبلاً v2 بدون scope)
 const QUEUE_PREFIX = "dp:offline:v3:queue" // + :<userId>
 const SCOPE_KEY = "dp:offline:v3:user"
+
+/**
+ * رویداد تغییر scope نشست. payload ندارد — مصرف‌کننده با `getOfflineUserId()`
+ * مقدار مرجع را دوباره می‌خواند (تا نیاز به CustomEvent و DOM کامل نباشد).
+ */
+export const OFFLINE_SCOPE_EVENT = "dp:scope"
+
+function emitScopeChange() {
+    if (typeof window === "undefined") return
+    try {
+        window.dispatchEvent(new Event(OFFLINE_SCOPE_EVENT))
+    } catch {
+        /* محیط بدون DOM */
+    }
+}
 // کلیدهای نسخه‌های بدون scope — دیگر هرگز خوانده نمی‌شوند و هنگام برقراری نشست پاک می‌شوند
 const LEGACY_PREFIXES = ["dp:offline:v2:day:", "dp:offline:queue"]
 
@@ -122,10 +144,12 @@ export function setOfflineUserId(userId: number | null) {
     scopeUserId = userId
     if (userId == null) {
         safeRemove(SCOPE_KEY)
+        emitScopeChange() // پایان نشست → تنظیمات/یادآور به scope ناشناس برمی‌گردد
         return
     }
     safeSet(SCOPE_KEY, String(userId))
     clearLegacyKeys()
+    emitScopeChange()
 }
 
 /**
@@ -320,6 +344,11 @@ export async function clearOfflineForLogout(): Promise<LogoutFlushResult> {
     clearAllDayCaches()
     if (pending === 0) safeRemove(queueKey(userId))
     clearLegacyKeys()
+    /* کلیدهای بدون scope تنظیمات/یادآور (نسخه‌ی قبل از H2) — نه خوانده می‌شوند نه باقی می‌مانند.
+     * کلیدهای user-scopedِ خودِ کاربر (dp:settings:u<id>) حذف **نمی‌شوند** چون
+     * برای کاربر بعدی روی همان دستگاه قابل خواندن نیستند و حذفشان فقط
+     * تنظیمات شخصی خودِ کاربر را از بین می‌برد. */
+    clearLegacySettingsKeys()
     setOfflineUserId(null)
 
     return { synced, pending }

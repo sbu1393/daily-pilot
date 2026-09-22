@@ -307,6 +307,32 @@ export class EntitlementConflictError extends ServiceError {
 // و **منابع انسانی ندارند**: هیچ‌کدام retry خودکار provider را مجاز نمی‌کند (سند §7: هیچ retry کور).
 
 /** 503 — provider درخواست checkout را قطعی رد کرد (پاسخ معتبر ولی code ناموفق) */
+// ---------- یادآورها — Web Push (VAPID) ----------
+// فقط دو کد لازم است: نبودِ پیکربندی (سرور) و payload نامعتبر (client).
+// شکست ارسال به provider خطای دامنه **نیست** (fail-open) و در سرویس به‌صورت
+// شمارنده گزارش می‌شود تا یک دستگاه مرده مسیر سایر دستگاه‌ها را خراب نکند.
+
+/** 503 — کلیدهای VAPID روی سرور تنظیم نشده‌اند → اعلان غیرفعال است (نه 500) */
+export class PushNotConfiguredError extends ServiceError {
+    constructor() {
+        super(503, "PUSH_NOT_CONFIGURED", "اعلان‌های سیستمی روی این سرور فعال نیست", undefined, "EXTERNAL_SERVICE", "CRITICAL")
+    }
+}
+
+/** 503 — راز تریگر زمان‌بندی‌شده (CRON_SECRET) تنظیم نشده است → fail-closed */
+export class CronNotConfiguredError extends ServiceError {
+    constructor() {
+        super(503, "CRON_NOT_CONFIGURED", "تریگر زمان‌بندی‌شده روی این سرور فعال نیست", undefined, "INTERNAL", "CRITICAL")
+    }
+}
+
+/** 400 — بدنه‌ی اشتراک (endpoint/keys) ناقص یا نامعتبر */
+export class PushSubscriptionInvalidError extends ServiceError {
+    constructor() {
+        super(400, "PUSH_SUBSCRIPTION_INVALID", "اطلاعات اشتراک اعلان نامعتبر است", undefined, "VALIDATION", "WARNING")
+    }
+}
+
 export class PaymentProviderRejectedError extends ServiceError {
     constructor() {
         super(503, "PAYMENT_PROVIDER_REJECTED", "درخواست پرداخت توسط سرویس پرداخت پذیرفته نشد؛ بعداً تلاش کن", undefined, "EXTERNAL_SERVICE", "ERROR")

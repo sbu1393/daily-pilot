@@ -2388,7 +2388,8 @@ same-origin (بدون open-redirect) صدا می‌زند.
 userId فقط از نشست (بدون IDOR)، rate limit با کلید user-scoped.
 تریگر زمان‌بندی: GET|POST /api/cron/reminders با Authorization: Bearer $CRON_SECRET
 (نبودِ CRON_SECRET → 503 fail-closed؛ هدر x-vercel-cron به‌تنهایی مجوز **نیست** چون قابل جعل است).
-زمان‌بندی: vercel.json → */10 * * * *، پنجره‌ی سررسید ۱۵ دقیقه، ضد-تکرار روزانه با reminderSentOn،
+زمان‌بندی: GitHub Actions (.github/workflows/reminder-cron.yml → */10 * * * *) — جایگزین Vercel Cron چون پلن
+Hobby فاصلهی کوتاهتر از روزانه را مجاز نمیداند؛ رازها از GitHub Secrets میآیند (CRON_SECRET/PROD_URL) و هرگز وارد گیت نمیشوند. پنجره‌ی سررسید ۱۵ دقیقه، ضد-تکرار روزانه با reminderSentOn،
 و ساعت هر کاربر با timezone خودش (_Asia/Tehran_ پیش‌فرض) سنجیده می‌شود.
 ارسال fail-open است: اشتراک مرده (404/410) پاک می‌شود و خطای یک دستگاه بقیه را متوقف نمی‌کند.
 

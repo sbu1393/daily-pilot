@@ -1,9 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "crons": [
-    {
-      "path": "/api/cron/reminders",
-      "schedule": "*/10 * * * *"
-    }
-  ]
+  "comment": "Cron به GitHub Actions منتقل شد (.github/workflows/reminder-cron.yml) — پلن Hobby فاصلهی کوتاهتر از روزانه را اجازه نمیدهد. مسیر تریگر: POST /api/cron/reminders با Bearer CRON_SECRET.",
+  "crons": []
 }

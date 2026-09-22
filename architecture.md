@@ -1788,7 +1788,7 @@ Time Tracking در V1 یک قابلیت قطعی و فعال است.
 
 در آینده، اگر session history، timer، pause/resume یا چند بازه زمانی برای یک Task لازم شد، TimeEntry می‌تواند به عنوان Entity مستقل اضافه شود.
 
-Domainهای Habits و Notifications فعلاً Deferred هستند.
+Domainهای Habits و Notifications فعلاً Deferred نیستند: Notifications (Web Push / یادآور روزانه) اکنون فعال است؛ Habits همچنان Deferred باقی می‌ماند.
 
 5.1 Domain Dependency Overview
 
@@ -2368,9 +2368,35 @@ Atomic Habits concepts
 
 وجود migration یا preparation احتمالی در database به معنی فعال بودن این Domain نیست.
 
-5.10 Notifications — Deferred
+5.10 Notifications — ACTIVE (Web Push / Reminder)
 
-Notifications فعلاً Domain فعال نیست.
+وضعیت: پیاده‌سازی شد (MVP) — این بخش دیگر Deferred نیست.
+
+لایه‌ی کلاینت (بدون سرویس ثالث): یادآور روزانه در SettingsContext با منطق آستانه‌ای +
+پنجره‌ی جبران (app/lib/reminder.ts)؛ کلیدهای تنظیمات/fired به‌صورت user-scoped ذخیره می‌شوند
+(dp:settings:u<id>) و کلیدهای بدون scope قدیمی هنگام برقراری نشست پاک می‌شوند.
+نمایش اعلان فقط از مسیر Service Worker (registration.showNotification) انجام می‌شود —
+new Notification() روی Chrome اندروید پشتیبانی نمی‌شود. کلیک روی اعلان (notificationclick)
+پنجره‌ی باز را focus/navigate می‌کند و در غیر این صورت clients.openWindow را با گارد
+same-origin (بدون open-redirect) صدا می‌زند.
+
+لایه‌ی سرور (Web Push): پکیج web-push + سه متغیر محیطی VAPID
+(NEXT_PUBLIC_VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT؛ تولید با npm run vapid:keys).
+مدل داده: PushSubscription (endpoint یکتا، p256dh، auth، Cascade به User، سقف ۱۰ اشتراک per user)
+و آینه‌ی برنامه‌ی یادآور روی User (reminderEnabled / reminderTime / reminderSentOn).
+اندپوینت‌ها: POST /api/notifications/subscribe | unsubscribe | reminder | test — همه session-scoped،
+userId فقط از نشست (بدون IDOR)، rate limit با کلید user-scoped.
+تریگر زمان‌بندی: GET|POST /api/cron/reminders با Authorization: Bearer $CRON_SECRET
+(نبودِ CRON_SECRET → 503 fail-closed؛ هدر x-vercel-cron به‌تنهایی مجوز **نیست** چون قابل جعل است).
+زمان‌بندی: vercel.json → */10 * * * *، پنجره‌ی سررسید ۱۵ دقیقه، ضد-تکرار روزانه با reminderSentOn،
+و ساعت هر کاربر با timezone خودش (_Asia/Tehran_ پیش‌فرض) سنجیده می‌شود.
+ارسال fail-open است: اشتراک مرده (404/410) پاک می‌شود و خطای یک دستگاه بقیه را متوقف نمی‌کند.
+
+محدودیت‌های باقی‌مانده (ثبت‌شده، نه Deferred): iOS فقط در حالت PWA نصب‌شده و با Push اعلان
+می‌دهد؛ یادآور درون‌تسک (per-task reminder) ستون جداگانه‌ای روی Task ندارد؛
+Overdue notifications و Email notifications همچنان پیاده نشده‌اند.
+
+قابلیت‌های آینده‌ی همین Domain (به‌روزرسانی: موارد یادآور و Push پیاده شده‌اند):
 
 در آینده ممکن است شامل موارد زیر باشد:
 
@@ -2434,7 +2460,7 @@ Entitlement/Quota فعلاً Domain جدا نیست.
 
 Habits فعلاً Deferred است.
 
-Notifications فعلاً Deferred است.
+Notifications اکنون فعال است (Web Push / یادآور روزانه).
 
 Domain Logic نباید در UI، Route Handler یا AI Provider قرار بگیرد.
 
@@ -2482,7 +2508,7 @@ Rebalance در V1 Lazy / On-Demand است.
 TimeEntry در V1 وجود ندارد.
 Time Tracking فعال است، اما actual duration روی خود Task.spentMinutes ذخیره می‌شود.
 
-Habit و Notification در V1 وجود ندارند و مدل داده‌ای برای آنها ساخته نمی‌شود.
+Habit در V1 وجود ندارد و مدل داده‌ای برای آن ساخته نمی‌شود؛ Notification (Web Push) پیاده شده و مدل PushSubscription + ستون‌های User.reminder* را دارد.
 
 TaskEvent زیرمجموعه‌ی Tasks است و برای ثبت تاریخچه‌ی چرخه‌ی عمر Task استفاده می‌شود.
 
@@ -3298,7 +3324,7 @@ Deferred feature.
 
 Notification
 
-Deferred feature.
+✅ Active — Web Push (VAPID) + یادآور روزانه.
 
 این تصمیم‌ها جلوی premature modeling را می‌گیرند.
 
@@ -5476,7 +5502,7 @@ Product Need → Architecture Impact → Security/Data Impact → Decision → A
 
 Habit System (Deferred در 5/6)
 
-Notifications / Task Reminders (Deferred)
+Notifications / Task Reminders ✅ (پیاده شد — Web Push + یادآور روزانه)
 
 External Calendar Integration
 
@@ -5508,7 +5534,7 @@ Native Android/iOS (V1 = Web + PWA — Section 4)
 
 تعمیم Offline Queue به General Sync (سایر mutationها، Conflict Resolution، Background Sync) — Queue فعلی فقط Create Task است (Section 9)
 
-Push Notifications
+Push Notifications ✅ (پیاده شد — Web Push/VAPID + تریگر /api/cron/reminders)
 
 Advanced Offline
 
@@ -5648,7 +5674,7 @@ Entitlement / Quota | Deferred
 
 Habits | Deferred
 
-Notifications | Deferred
+Notifications | ✅ Active (Web Push)
 
 Model | Current Fields / State | Notes
 
@@ -5720,7 +5746,7 @@ spentMinutes | Stored on Task
 
 Habit | ❌ Deferred
 
-Notification | ❌ Deferred
+Notification | ✅ Active (Web Push / Reminder)
 
 User default timezone | Asia/Tehran
 

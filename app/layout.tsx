@@ -33,7 +33,12 @@ export const metadata: Metadata = {
 const themeScript = `
 (function () {
   try {
-    var raw = localStorage.getItem("dp:settings");
+    // تنظیمات user-scoped هستند (dp:settings:u<id> | dp:settings:anon) و
+    // scope از کلید نشستِ لایه‌ی آفلاین خوانده می‌شود — همان قاعده‌ی
+    // scopeToken() در app/lib/reminder.ts.
+    var uid = localStorage.getItem("dp:offline:v3:user");
+    var scope = uid && /^[0-9]+$/.test(uid) ? "u" + uid : "anon";
+    var raw = localStorage.getItem("dp:settings:" + scope);
     var theme = "system";
     if (raw) { theme = JSON.parse(raw).theme || "system"; }
     var dark = theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);

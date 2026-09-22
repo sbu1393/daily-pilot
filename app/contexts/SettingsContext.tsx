@@ -5,28 +5,43 @@ import {
     useCallback,
     useContext,
     useEffect,
+    useMemo,
     useRef,
     useState,
 } from "react"
+import { getOfflineUserId, OFFLINE_SCOPE_EVENT } from "@/app/lib/offline"
+import {
+    DEFAULT_SETTINGS,
+    REMINDER_CHECK_INTERVAL_MS,
+    REMINDER_TARGET_URL,
+    clearLegacySettingsKeys,
+    isReminderDue,
+    readFiredKey,
+    readStoredSettings,
+    reminderFireKey,
+    saveStoredSettings,
+    scopeToken,
+    showSystemNotification,
+    writeFiredKey,
+    type Settings,
+    type ThemePreference,
+} from "@/app/lib/reminder"
 
-export type ThemePreference = "light" | "dark" | "system"
+/*
+ * تنظیمات کاربر + یادآور روزانه
+ * ---------------------------------------------------------------
+ * - تنظیمات و کلید `fired` الان user-scoped هستند (`dp:settings:u<id>` /
+ *   `dp:reminder-fired:u<id>`، و `:anon` برای بازدیدکننده‌ی ناشناس). کلیدهای
+ *   بدون scope (سازگاری قدیمی) هرگز خوانده نمی‌شوند و هنگام برقراری نشست
+ *   پاک می‌شوند — همان تصمیم H2 لایه‌ی آفلاین.
+ * - یادآور با منطق آستانه‌ای کار می‌کند (نه تطابق دقیق دقیقه) و کلید fired
+ *   فقط پس از **نمایش موفق** اعلان ثبت می‌شود.
+ * - اعلان با `registration.showNotification` (Service Worker) نمایش داده
+ *   می‌شود؛ `new Notification()` روی اندروید پشتیبانی نمی‌شود و حذف شده است.
+ */
 
-export type Settings = {
-    theme: ThemePreference
-    sound: boolean
-    reminderEnabled: boolean
-    reminderTime: string
-}
-
-export const DEFAULT_SETTINGS: Settings = {
-    theme: "system",
-    sound: true,
-    reminderEnabled: false,
-    reminderTime: "09:00",
-}
-
-const STORAGE_KEY = "dp:settings"
-const REMINDER_KEYS_FIRED = "dp:reminder-fired"
+export type { Settings, ThemePreference }
+export { DEFAULT_SETTINGS }
 
 type SettingsContextType = {
     settings: Settings
@@ -36,25 +51,6 @@ type SettingsContextType = {
 }
 
 const SettingsContext = createContext<SettingsContextType | null>(null)
-
-function loadSettings(): Settings {
-    try {
-        const raw = window.localStorage.getItem(STORAGE_KEY)
-
-        if (!raw) {
-            return DEFAULT_SETTINGS
-        }
-
-        const saved = JSON.parse(raw) as Partial<Settings>
-
-        return {
-            ...DEFAULT_SETTINGS,
-            ...saved,
-        }
-    } catch {
-        return DEFAULT_SETTINGS
-    }
-}
 
 function resolveTheme(pref: ThemePreference): "light" | "dark" {
     if (pref === "system") {
@@ -123,49 +119,66 @@ export function SettingsProvider({
     children: React.ReactNode
 }) {
     /*
-     * سرور و اولین رندر مرورگر باید دقیقاً مقدار یکسانی داشته باشند.
-     * بنابراین اینجا مستقیماً localStorage را نمی‌خوانیم.
+     * سرور و اولین رندر مرورگر باید دقیقاً مقدار یکسانی داشته باشند، بنابراین
+     * نه اینجا و نه در رندر اول localStorage خوانده نمی‌شود: scope و تنظیمات
+     * فقط پس از mount (و تغییر نشست) خوانده می‌شوند.
      */
-    const [settings, setSettings] =
-        useState<Settings>(DEFAULT_SETTINGS)
+    const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
+    const [scopeUserId, setScopeUserId] = useState<number | null>(null)
 
     /*
-     * مشخص می‌کند خواندن localStorage تمام شده است.
-     * این متغیر مانع بازنویسی زودهنگام تنظیمات ذخیره‌شده می‌شود.
+     * scopeای که `settings` فعلی برای آن خوانده شده است. تا وقتی با scope
+     * جاری یکی نشود، نه تم اعمال می‌شود و نه چیزی ذخیره — تا تنظیماتِ یک
+     * حساب هرگز زیر کلید حساب دیگر نوشته نشود.
      */
-    const [settingsLoaded, setSettingsLoaded] = useState(false)
+    const [hydratedScope, setHydratedScope] = useState<string | null>(null)
 
+    const scope = scopeToken(scopeUserId)
+
+    /* کلید fired که واقعاً «نمایش داده شد» را ثبت می‌کند */
     const firedRef = useRef<string | null>(null)
+    /* تلاش نمایش در همین نشست (جلوگیری از حلقه‌ی ۲۰ ثانیه‌ای) */
+    const attemptedRef = useRef<string | null>(null)
+    /* بوق fallback — حداکثر یک‌بار در هر (روز|زمان) در همین نشست */
+    const beepedRef = useRef<string | null>(null)
 
-    // تنظیمات فقط پس از mount از localStorage خوانده می‌شوند.
+    // scope نشست + پاک‌سازی کلیدهای قدیمیِ بدون scope (H2)
     useEffect(() => {
-        const savedSettings = loadSettings()
+        const userId = getOfflineUserId()
+        if (userId != null) {
+            // کلیدهای بدون scope ممکن است داده‌ی حساب قبلی باشند → فقط پاک می‌شوند
+            clearLegacySettingsKeys()
+        }
+        setScopeUserId(userId)
 
-        setSettings(savedSettings)
-        setSettingsLoaded(true)
+        // نشست عوض شد (ورود/خروج) → دوباره از localStorage خوانده می‌شود
+        const onScopeChange = () => setScopeUserId(getOfflineUserId())
+        window.addEventListener(OFFLINE_SCOPE_EVENT, onScopeChange)
+
+        return () => {
+            window.removeEventListener(OFFLINE_SCOPE_EVENT, onScopeChange)
+        }
     }, [])
 
-    // پس از بارگذاری تنظیمات، تم را اعمال و تغییرات را ذخیره می‌کنیم.
+    // خواندن تنظیمات همان scope
     useEffect(() => {
-        if (!settingsLoaded) {
+        setSettings(readStoredSettings(scopeUserId))
+        setHydratedScope(scopeToken(scopeUserId))
+    }, [scopeUserId])
+
+    // اعمال تم + ذخیره — فقط وقتی تنظیمات به scope جاری تعلق دارند
+    useEffect(() => {
+        if (hydratedScope !== scope) {
             return
         }
 
         applyTheme(settings.theme)
-
-        try {
-            window.localStorage.setItem(
-                STORAGE_KEY,
-                JSON.stringify(settings),
-            )
-        } catch {
-            // localStorage در دسترس نیست.
-        }
-    }, [settings, settingsLoaded])
+        saveStoredSettings(scopeUserId, settings)
+    }, [settings, scope, scopeUserId, hydratedScope])
 
     // دنبال کردن تغییر تم سیستم در حالت system
     useEffect(() => {
-        if (!settingsLoaded || settings.theme !== "system") {
+        if (hydratedScope !== scope || settings.theme !== "system") {
             return
         }
 
@@ -182,74 +195,94 @@ export function SettingsProvider({
         return () => {
             mediaQuery.removeEventListener("change", handleChange)
         }
-    }, [settings.theme, settingsLoaded])
+    }, [settings.theme, scope, hydratedScope])
 
-    // یادآور
+    // یادآور روزانه
     useEffect(() => {
-        if (!settingsLoaded || !settings.reminderEnabled) {
+        if (hydratedScope !== scope) {
+            return
+        }
+        if (!settings.reminderEnabled) {
             return
         }
 
-        const check = () => {
+        firedRef.current = readFiredKey(scopeUserId)
+        attemptedRef.current = null
+        beepedRef.current = null
+
+        let disposed = false
+
+        const check = async () => {
             const now = new Date()
-            const hours = String(now.getHours()).padStart(2, "0")
-            const minutes = String(now.getMinutes()).padStart(2, "0")
-            const timeKey = `${hours}:${minutes}`
-
-            if (timeKey !== settings.reminderTime) {
-                return
-            }
-
-            const dateStamp = now.toDateString()
-            const firedKey = `${dateStamp}|${timeKey}`
-
-            if (firedRef.current === firedKey) {
-                return
-            }
-
-            firedRef.current = firedKey
-
-            try {
-                window.localStorage.setItem(
-                    REMINDER_KEYS_FIRED,
-                    firedKey,
-                )
-            } catch {
-                // localStorage در دسترس نیست.
-            }
-
-            if (settings.sound) {
-                beep()
-            }
 
             if (
-                "Notification" in window &&
-                Notification.permission === "granted"
-            ) {
-                new Notification("یادآور روزچین", {
-                    body: "وقت برنامه‌ریزی روزت رسیده است ✨",
+                !isReminderDue({
+                    now,
+                    reminderTime: settings.reminderTime,
+                    firedKey: firedRef.current,
                 })
+            ) {
+                return
+            }
+
+            const fireKey = reminderFireKey(now, settings.reminderTime)
+
+            // بوق fallback (وقتی اعلان ممکن نیست) — یک‌بار در هر (روز|زمان)
+            if (beepedRef.current !== fireKey) {
+                beepedRef.current = fireKey
+                if (settings.sound) {
+                    beep()
+                }
+            }
+
+            if (attemptedRef.current === fireKey) {
+                return
+            }
+            attemptedRef.current = fireKey
+
+            const shown = await showSystemNotification({
+                title: "یادآور روزچین",
+                body: "وقت برنامه‌ریزی روزت رسیده است ✨",
+                url: REMINDER_TARGET_URL,
+                tag: `dp-reminder-${fireKey}`,
+            })
+
+            /*
+             * کلید fired فقط پس از نمایش موفق اعلان ثبت می‌شود. اگر نمایش
+             * شکست بخورد، چیزی «نمی‌سوزد» و در visibilitychange بعدی
+             * (بیدار شدن دستگاه) دوباره تلاش می‌شود.
+             */
+            if (!disposed && shown) {
+                firedRef.current = fireKey
+                writeFiredKey(scopeUserId, fireKey)
             }
         }
 
-        try {
-            firedRef.current = window.localStorage.getItem(
-                REMINDER_KEYS_FIRED,
-            )
-        } catch {
-            // localStorage در دسترس نیست.
+        // همان ابتدا نیز بررسی شود (جبران یادآور ازدست‌رفته‌ی همین امروز).
+        void check()
+
+        const intervalId = window.setInterval(() => void check(), REMINDER_CHECK_INTERVAL_MS)
+
+        // بیدار شدن تب/دستگاه → یک تلاش دوباره برای یادآورِ جبران‌نشده
+        const onVisibilityChange = () => {
+            if (document.visibilityState !== "visible") {
+                return
+            }
+
+            attemptedRef.current = null
+            void check()
         }
-
-        // همان ابتدا نیز بررسی شود؛ لازم نیست ۲۰ ثانیه صبر کند.
-        check()
-
-        const intervalId = window.setInterval(check, 20_000)
+        document.addEventListener("visibilitychange", onVisibilityChange)
 
         return () => {
+            disposed = true
             window.clearInterval(intervalId)
+            document.removeEventListener("visibilitychange", onVisibilityChange)
         }
     }, [
-        settingsLoaded,
+        hydratedScope,
+        scope,
+        scopeUserId,
         settings.reminderEnabled,
         settings.reminderTime,
         settings.sound,
@@ -284,15 +317,18 @@ export function SettingsProvider({
             return result === "granted"
         }, [])
 
+    const value = useMemo(
+        () => ({
+            settings,
+            update,
+            playBeep,
+            requestNotificationPermission,
+        }),
+        [settings, update, playBeep, requestNotificationPermission],
+    )
+
     return (
-        <SettingsContext.Provider
-            value={{
-                settings,
-                update,
-                playBeep,
-                requestNotificationPermission,
-            }}
-        >
+        <SettingsContext.Provider value={value}>
             {children}
         </SettingsContext.Provider>
     )

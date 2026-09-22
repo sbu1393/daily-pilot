@@ -4,6 +4,8 @@ import { useEffect, useState } from "react"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import { enqueueTask, isOffline } from "@/app/lib/offline"
 import { canonicalKeyToLocalMidnight } from "@/app/lib/canonicalDay"
+import { reminderInstantFromLocal } from "@/app/lib/reminder"
+import TaskReminderField, { defaultReminderDraft, type ReminderDraft } from "./TaskReminderField"
 import { api } from "@/app/lib/api/client"
 import { toast } from "react-toastify"
 import AnimatedModal from "../motion/AnimatedModal"
@@ -23,6 +25,13 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
     const [text, setText] = useState("")
     const [loading, setLoading] = useState(false)
     const [offline, setOffline] = useState(false)
+    const [reminder, setReminder] = useState<ReminderDraft>(() => defaultReminderDraft(selectedDate))
+
+    // با هر باز شدن مودال، فیلد یادآوری به حالت پیش‌فرض روزِ انتخاب‌شده برمی‌گردد
+    useEffect(() => {
+        if (!open) return
+        setReminder(defaultReminderDraft(selectedDate))
+    }, [open, selectedDate])
 
     useEffect(() => {
         if (!open) return
@@ -48,12 +57,16 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
 
     /* ذخیره در صف آفلاین — تحلیل AI بعد از سینک انجام می‌شود */
     // C1: قرارداد ساخت = title + scheduledDate (ISO نیمه‌شب محلی روز انتخابی)؛ dayKey سمت سرور ساخته می‌شود (§6.2.2.1)
+    // قرارداد صف آفلاین V1 تغییر نمی‌کند: فقط {title, scheduledDate}. یادآوری در آفلاین ذخیره نمی‌شود.
     const saveOffline = (value: string) => {
         enqueueTask({
             title: value,
             dayKey: selectedDate,
             scheduledDate: canonicalKeyToLocalMidnight(selectedDate, timezone).toISOString(),
         })
+        if (reminder.enabled) {
+            toast.info("در حالت آفلاین یادآوری ذخیره نمی‌شود؛ بعد از اتصال دوباره تنظیمش کن")
+        }
         toast.info(`${<Unplug />} آفلاین هستی — کار ذخیره شد و بعد از اتصال سینک می‌شود`)
         setText("")
         onClose()
@@ -80,6 +93,10 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
                 body: JSON.stringify({
                     title: value,
                     scheduledDate: canonicalKeyToLocalMidnight(selectedDate, timezone).toISOString(),
+                    // instant مطلق یادآوری (null = بدون یادآوری) — تبدیل در همین‌جا با timezone کاربر
+                    reminderAt: reminder.enabled
+                        ? reminderInstantFromLocal(reminder.canonicalKey, reminder.hour, reminder.minute, timezone).toISOString()
+                        : null,
                 }),
             })
 
@@ -128,6 +145,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
                     if (e.key === "Enter" && !loading) submit()
                 }}
             />
+            <TaskReminderField value={reminder} onChange={setReminder} disabled={loading} />
             <div className={styles.modalActions}>
                 <button className={styles.btnPrimary} onClick={submit} disabled={loading}>
                     {loading ? "⏳ در حال ساخت…" : "ایجاد کار"}

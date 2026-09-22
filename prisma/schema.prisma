@@ -75,6 +75,14 @@ enum EntitlementStatus {
   EXPIRED
 }
 
+// ADR-07 فاز ۳-B — وضعیت تحویل یک Reminder به یک subscription (idempotency)
+enum ReminderDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  GONE // subscription منقضی/نامعتبر (404/410) — دیگر استفاده نمی‌شود
+}
+
 model User {
   id            Int            @id @default(autoincrement())
   username      String         @unique
@@ -99,6 +107,7 @@ model User {
   productEvents ProductEvent[] // فاز ۳ — رویدادهای تحلیلی محصول
   paymentOrders PaymentOrder[] // فاز ۵ — تاریخچه‌ی تلاش‌های پرداخت
   entitlement   Entitlement? // فاز ۵ — دوره‌ی دسترسی فعلی (یکتا per user)
+  pushSubscriptions PushSubscription[] // ADR-007 — اشتراک‌های Web Push کاربر (موبایل/تبلت/دسکتاپ)
 }
 
 model Task {
@@ -117,15 +126,18 @@ model Task {
   status                TaskStatus    @default(TODO)
   completedAt           DateTime? // لحظه‌ی اتمام
   completedOn           String? // کلید جلالی روز اتمام → تاریخچه
+  reminderAt            DateTime? // یادآوری اختصاصی هر Task — instant مطلق؛ null = بدون یادآوری
   createdAt             DateTime      @default(now())
   updatedAt             DateTime      @updatedAt
   userId                Int
   user                  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   events                TaskEvent[]
+  reminderDeliveries    TaskReminderDelivery[] // ADR-07 فاز ۳-B — تحویل‌های Push این Task
 
   @@index([userId, dayKey])
   @@index([userId, status])
   @@index([userId, completedOn])
+  @@index([userId, reminderAt])
 }
 
 model DailyPlan {
@@ -280,6 +292,45 @@ model Entitlement {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([status, currentPeriodEnd])
+}
+
+// ADR-007 — اشتراک Web Push هر دستگاه کاربر (User 1—N). فقط data لازم برای ارسال Push؛
+// هیچ داده‌ی کارت/کاربر اضافه‌ای این‌جا نیست. endpoint یکتا و با حذف User cascade می‌شود.
+model PushSubscription {
+  id         String   @id @default(cuid())
+  userId     Int
+  endpoint   String   @unique // URL مربوط به Push سرویس مرورگر
+  p256dh     String // کلید عمومی مشتری (base64url)
+  auth       String // راز احراز هویت (base64url)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  lastSeenAt DateTime @default(now()) // آخرین ثبت/به‌روزرسانی اشتراک
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reminderDeliveries TaskReminderDelivery[] // ADR-07 فاز ۳-B
+
+  @@index([userId])
+}
+
+// ADR-07 فاز ۳-B — idempotency تحویل Reminder.
+// کلید یکتای (taskId, subscriptionId, reminderAt) تضمین می‌کند «Task X + Subscription Y + یک
+// زمان Reminder» حداکثر یک logical delivery داشته باشد — مستقل از اینکه scheduler دوبار/هم‌زمان
+// اجرا شود. تغییر reminderAt یک کلید جدید می‌سازد (یادآوری جدید یک‌بار ارسال می‌شود) و کلید
+// قدیمی دیگر تکرار نمی‌شود. بدون هیچ secret/key حساس در این جدول.
+model TaskReminderDelivery {
+  id             String                 @id @default(cuid())
+  taskId         Int
+  subscriptionId String
+  reminderAt     DateTime // snapshot زمان reminder در لحظه‌ی claim
+  status         ReminderDeliveryStatus @default(PENDING)
+  attempts       Int                    @default(0)
+  failureCode    String?
+  createdAt      DateTime               @default(now())
+  sentAt         DateTime?
+  task           Task                   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  subscription   PushSubscription       @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, subscriptionId, reminderAt])
+  @@index([status, createdAt])
 }
 
 model OtpCode {

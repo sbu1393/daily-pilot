@@ -88,6 +88,7 @@ const TASK: TaskItem = {
     allocatedMinutes: null,
     spentMinutes: null,
     completedOn: null,
+    reminderAt: null,
     createdAt: "2026-03-05T06:00:00.000Z",
     updatedAt: "2026-03-05T06:00:00.000Z",
 }

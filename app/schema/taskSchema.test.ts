@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { canonicalKeyToLocalMidnight, getCanonicalDayKey } from "@/app/lib/canonicalDay"
-import { makeCreateTaskSchema } from "./taskSchema"
+import { makeCreateTaskSchema, makeUpdateTaskSchema } from "./taskSchema"
 
 const title = "تسک آزمایشی"
 
@@ -43,6 +43,66 @@ describe("taskSchema scheduledDate", () => {
 
     it.each(["2026-02-30", "2026-1-1"])("rejects invalid date-only input %s", (value) => {
         const parsed = makeCreateTaskSchema("America/New_York").safeParse({ title, scheduledDate: value })
+
+        expect(parsed.success).toBe(false)
+    })
+})
+
+describe("taskSchema reminderAt", () => {
+    const timezone = "Asia/Tehran"
+    const scheduledDate = "2026-01-01"
+
+    it("accepts a task without a reminder", () => {
+        const parsed = makeCreateTaskSchema(timezone).safeParse({ title, scheduledDate })
+
+        expect(parsed.success).toBe(true)
+        if (parsed.success) expect(parsed.data.reminderAt).toBeUndefined()
+    })
+
+    it("accepts an explicit null reminder (no reminder / cleared)", () => {
+        const parsed = makeCreateTaskSchema(timezone).safeParse({ title, scheduledDate, reminderAt: null })
+
+        expect(parsed.success).toBe(true)
+        if (parsed.success) expect(parsed.data.reminderAt).toBeNull()
+    })
+
+    it("converts an ISO instant with offset into a Date", () => {
+        const value = "2026-01-01T14:30:00+03:30"
+        const parsed = makeCreateTaskSchema(timezone).safeParse({ title, scheduledDate, reminderAt: value })
+
+        expect(parsed.success).toBe(true)
+        if (parsed.success) expect(parsed.data.reminderAt).toEqual(new Date(value))
+    })
+
+    it("converts a numeric timestamp into a Date", () => {
+        const timestamp = Date.parse("2026-01-01T10:00:00.000Z")
+        const parsed = makeCreateTaskSchema(timezone).safeParse({ title, scheduledDate, reminderAt: timestamp })
+
+        expect(parsed.success).toBe(true)
+        if (parsed.success) expect(parsed.data.reminderAt).toEqual(new Date(timestamp))
+    })
+
+    it.each(["not-a-date", "2026-01-01", "۱۴۰۵/۰۶/۳۱"])("rejects invalid reminder input %s", (value) => {
+        const parsed = makeCreateTaskSchema(timezone).safeParse({ title, scheduledDate, reminderAt: value })
+
+        expect(parsed.success).toBe(false)
+    })
+
+    it("allows a reminder-only update (no other field required)", () => {
+        const parsed = makeUpdateTaskSchema(timezone).safeParse({ reminderAt: "2026-01-01T14:30:00+03:30" })
+
+        expect(parsed.success).toBe(true)
+    })
+
+    it("allows clearing the reminder via null on update", () => {
+        const parsed = makeUpdateTaskSchema(timezone).safeParse({ reminderAt: null })
+
+        expect(parsed.success).toBe(true)
+        if (parsed.success) expect(parsed.data.reminderAt).toBeNull()
+    })
+
+    it("still rejects an empty update object", () => {
+        const parsed = makeUpdateTaskSchema(timezone).safeParse({})
 
         expect(parsed.success).toBe(false)
     })

@@ -90,3 +90,87 @@ self.addEventListener("fetch", (event) => {
 
   event.respondWith(staleWhileRevalidate(request))
 })
+
+/* ============================================================
+   ADR-07 / Phase 3-A — دریافت Web Push و نمایش Notification
+   - فقط «دریافت»؛ هیچ ارسال/Scheduler در SW نیست.
+   - payload نامعتبر هرگز باعث crash نمی‌شود (fail-safe).
+   ============================================================ */
+
+const PUSH_ICON = "/icons/icon-192.png"
+const PUSH_BADGE = "/icons/maskable-192.png"
+const PUSH_DEFAULT_URL = "/dashboard"
+
+/** فقط مسیر داخلی اپ قابل استفاده است (جلوگیری از open redirect). */
+function safeInternalPath(value) {
+  return typeof value === "string" && value.charAt(0) === "/" ? value : PUSH_DEFAULT_URL
+}
+
+self.addEventListener("push", (event) => {
+  event.waitUntil(
+    (async () => {
+      let payload = null
+      try {
+        payload = event.data ? event.data.json() : null
+      } catch {
+        payload = null // بدنه‌ی خراب/غیر-JSON → بی‌صدا رد می‌شود
+      }
+
+      // اعتبارسنجی حداقلی و fail-safe: payload ناشناخته هرگز notification نمی‌سازد
+      if (!payload || typeof payload !== "object") return
+      if (payload.type !== "task-reminder" || typeof payload.title !== "string" || payload.title.length === 0) {
+        return
+      }
+
+      const options = {
+        body: typeof payload.body === "string" ? payload.body : "",
+        icon: PUSH_ICON,
+        badge: PUSH_BADGE,
+        data: {
+          taskId: payload.taskId != null ? payload.taskId : null,
+          url: safeInternalPath(payload.url),
+        },
+      }
+      if (payload.taskId != null) options.tag = `task-reminder-${payload.taskId}`
+
+      await self.registration.showNotification(payload.title, options)
+    })(),
+  )
+})
+
+/* ---------- کلیک روی Notification ---------- */
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close()
+
+  const data = (event.notification && event.notification.data) || {}
+  const targetUrl = new URL(safeInternalPath(data.url), self.location.origin).href
+
+  event.waitUntil(
+    (async () => {
+      // ۱) اگر پنجره‌ای از همین اپ باز است → همان را focus کن و به مسیر Task برو
+      const clientList = await self.clients.matchAll({ type: "window", includeUncontrolled: true })
+      for (const client of clientList) {
+        let sameOrigin = false
+        try {
+          sameOrigin = new URL(client.url).origin === self.location.origin
+        } catch {
+          sameOrigin = false
+        }
+        if (!sameOrigin) continue
+
+        try {
+          await client.focus()
+          if (typeof client.navigate === "function" && client.url !== targetUrl) {
+            await client.navigate(targetUrl)
+          }
+        } catch {
+          /* focus/navigate ناموفق → پنجره‌ی جدید باز نمی‌کنیم (بدون پنجره‌ی اضافه) */
+        }
+        return
+      }
+
+      // ۲) هیچ پنجره‌ای باز نیست → یک پنجره‌ی جدید باز کن
+      await self.clients.openWindow(targetUrl)
+    })(),
+  )
+})

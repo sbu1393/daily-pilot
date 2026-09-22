@@ -22,6 +22,19 @@ const dateOnlyString = z.string().refine((s) => {
     return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day
 }, "تاریخ نامعتبر است")
 
+// یادآوری per-task: instant مطلق (ISO با offset) یا timestamp عددی → Date معتبر.
+// `null` صریح = پاک‌کردن یادآوری؛ نبود کلید = بدون تغییر.
+// تاریخ شمسی هرگز به‌صورت String ذخیره نمی‌شود — تبدیل در UI انجام و instant استاندارد ارسال می‌شود.
+function makeReminderAtField() {
+    return z
+        .union([
+            z.string().datetime({ offset: true, message: "زمان یادآوری نامعتبر است" }),
+            z.number(),
+        ])
+        .transform((v) => new Date(v))
+        .refine((d) => !Number.isNaN(d.getTime()), "زمان یادآوری نامعتبر است")
+}
+
 function makeScheduledDateField(timezone: string) {
     return z
         .union([
@@ -43,6 +56,8 @@ export function makeCreateTaskSchema(timezone: string) {
             .min(1, "عنوان نمی‌تواند خالی باشد")
             .max(200, "عنوان خیلی طولانی است"),
         scheduledDate: makeScheduledDateField(timezone),
+        // یادآوری اختیاری — Task بدون یادآوری کاملاً معتبر است
+        reminderAt: makeReminderAtField().nullable().optional(),
     })
 }
 
@@ -59,6 +74,7 @@ export function makeUpdateTaskSchema(timezone: string) {
                 .optional(),
             status: z.enum(["TODO", "IN_PROGRESS"]).optional(),
             scheduledDate: makeScheduledDateField(timezone).optional(),
+            reminderAt: makeReminderAtField().nullable().optional(),
             category: z
                 .string()
                 .trim()
@@ -72,7 +88,8 @@ export function makeUpdateTaskSchema(timezone: string) {
                 d.title !== undefined ||
                 d.status !== undefined ||
                 d.scheduledDate !== undefined ||
-                d.category !== undefined,
+                d.category !== undefined ||
+                d.reminderAt !== undefined,
             { message: "هیچ تغییری ارسال نشده است" },
         )
 }

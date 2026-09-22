@@ -183,6 +183,36 @@ export function readCachedDay(dayKey: string): CachedDay | null {
     }
 }
 
+/**
+ * ADR-07 فاز ۴-A — خواندن **همه‌ی** کش‌های روز همین کاربر (فقط خواندن).
+ *
+ * برای Missed-Reminder Reconciler لازم است: یادآوری ازدست‌رفته ممکن است در کش روزی
+ * باشد که کاربر الان روی آن نیست. این تابع هیچ چیزی نمی‌نویسد و صف Create را
+ * دست نمی‌زند؛ فقط کش‌های user-scoped همین کاربر را برمی‌گرداند (بدون scope → []).
+ * کش خراب/غیرمعتبر نادیده گرفته می‌شود (بدون حدس زدن).
+ */
+export function readAllCachedDays(): CachedDay[] {
+    const userId = getOfflineUserId()
+    if (userId == null) return [] // کاربر ناشناس → هیچ داده‌ای خوانده نمی‌شود
+
+    const prefix = dayCacheKey(userId, "")
+    const days: CachedDay[] = []
+
+    for (const key of safeKeys()) {
+        if (!key.startsWith(prefix)) continue
+        const raw = safeGet(key)
+        if (!raw) continue
+        try {
+            const parsed = JSON.parse(raw) as CachedDay
+            if (parsed && Array.isArray(parsed.tasks)) days.push(parsed)
+        } catch {
+            /* کش خراب → نادیده */
+        }
+    }
+
+    return days
+}
+
 /* ---------------- صف تسک‌های آفلاین ---------------- */
 
 export function readQueue(): QueuedTask[] {

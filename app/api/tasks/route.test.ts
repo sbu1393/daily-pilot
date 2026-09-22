@@ -82,6 +82,25 @@ describe("POST /api/tasks", () => {
         })
     })
 
+    it("forwards an optional reminderAt instant to the service (per-task reminder)", async () => {
+        mocks.createTask.mockResolvedValue({ task: TASK })
+        const reminderAt = "2026-01-01T14:30:00+03:30"
+
+        const res = await POST(
+            new NextRequest("http://localhost/api/tasks", {
+                method: "POST",
+                body: JSON.stringify({ title: TASK.title, scheduledDate: SCHEDULED_DATE, reminderAt }),
+            }),
+        )
+
+        expect(res.status).toBe(201)
+        expect(mocks.createTask).toHaveBeenCalledWith(1, "Asia/Tehran", {
+            title: TASK.title,
+            scheduledDate: new Date(SCHEDULED_DATE),
+            reminderAt: new Date(reminderAt),
+        })
+    })
+
     it("returns 400 VALIDATION_ERROR for an invalid body and never calls the service", async () => {
         const res = await POST(
             new NextRequest("http://localhost/api/tasks", {

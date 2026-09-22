@@ -14,6 +14,7 @@ export type TaskItem = {
     allocatedMinutes: number | null
     spentMinutes: number | null
     completedOn: string | null
+    reminderAt: string | null // instant مطلق یادآوری — null = بدون یادآوری
     createdAt: string
     updatedAt: string
 }

@@ -5,6 +5,7 @@ import { motion } from "framer-motion"
 import { fmtMinutes, faDigits } from "@/app/lib/time"
 import TimeAgo from "../TimeAgo"
 import { getCanonicalToday } from "@/app/lib/canonicalDay"
+import { formatReminderLabel } from "@/app/lib/reminder"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import { categoryInfo, priorityMeta, priorityMissingMeta, type TaskItem } from "./taskTypes"
 import styles from "./task.module.css"
@@ -30,6 +31,7 @@ type Props = {
     onComplete: (t: TaskItem) => void
     onDelete: (t: TaskItem) => void
     onReanalyze?: (task: TaskItem) => void
+    onEditReminder?: (task: TaskItem) => void
 }
 
 /**
@@ -45,7 +47,7 @@ type Props = {
  * به همین دلیل پنل همیشه در DOM می‌ماند و با `visibility` از ناظر پنهان می‌شود.
  * کارتِ DONE خودش جمع می‌شود؛ کارتِ DONE بدون دلیل، چیزی برای باز‌کردن ندارد.
  */
-function TaskCard({ task, onComplete, onDelete, onReanalyze }: Props) {
+function TaskCard({ task, onComplete, onDelete, onReanalyze, onEditReminder }: Props) {
     const { timezone } = useCalendar()
     const [open, setOpen] = useState(false)
     const uid = useId()
@@ -143,6 +145,11 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze }: Props) {
                 <span className={styles.chipTime} title="زمان ایجاد">
                     🕐 <TimeAgo date={task.createdAt} />
                 </span>
+                {!done && task.reminderAt && (
+                    <span className={styles.chipTime} title="یادآوری تسک">
+                        ⏰ {formatReminderLabel(task.reminderAt, timezone)}
+                    </span>
+                )}
             </div>
 
             {/* خلاصه‌ی کارِ انجام‌شده در نمای بسته می‌ماند — نگاه‌کردنی است */}
@@ -204,6 +211,14 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze }: Props) {
                                     title="حذف کار"
                                 >
                                     حذف
+                                </button>
+                                <button
+                                    type="button"
+                                    className={styles.btnGhost}
+                                    onClick={() => onEditReminder?.(task)}
+                                    title="تنظیم یادآوری این تسک"
+                                >
+                                    ⏰ یادآوری
                                 </button>
                                 {task.status === "TODO" && task.dayKey >= getCanonicalToday(timezone) && (
                                     <button

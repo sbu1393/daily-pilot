@@ -34,8 +34,13 @@ export async function POST(req: NextRequest) {
             return validationErrorResponse(parsed.error.flatten(), undefined, context.requestId)
         }
 
-        const { title, scheduledDate } = parsed.data
-        const { task } = await createTask(user.id, user.timezone, { title, scheduledDate })
+        const { title, scheduledDate, reminderAt } = parsed.data
+        const { task } = await createTask(user.id, user.timezone, {
+            title,
+            scheduledDate,
+            // فقط وقتی ارسال شده باشد فوروارد می‌شود (بدون کلید اضافه در نبود مقدار)
+            ...(reminderAt !== undefined ? { reminderAt } : {}),
+        })
 
         // فاز ۳ — گام ۷: تحلیل‌های موفقیت فقط بعد از verified success (ساخت تسک)،
         // خارج از business transaction؛ fail-open — هرگز response را تغییر نمی‌دهند (§17).

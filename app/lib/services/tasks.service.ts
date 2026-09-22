@@ -30,9 +30,9 @@ import {
 export async function createTask(
     userId: number,
     timezone: string,
-    input: { title: string; scheduledDate: Date },
+    input: { title: string; scheduledDate: Date; reminderAt?: Date | null },
 ): Promise<{ task: Task }> {
-    const { title, scheduledDate } = input
+    const { title, scheduledDate, reminderAt } = input
     const prisma = getPrisma()
 
     const dayKey = getCanonicalDayKey(scheduledDate, timezone)
@@ -45,6 +45,8 @@ export async function createTask(
                 dayKey,
                 scheduledDate: localMidnight,
                 userId,
+                // یادآوری فقط وقتی ارسال شده باشد نوشته می‌شود (بدون کلید اضافه در نبود مقدار)
+                ...(reminderAt !== undefined ? { reminderAt } : {}),
             },
         })
 
@@ -93,6 +95,29 @@ export async function getDayTasks(
     const summary = await getDaySummary(userId, dayKey)
 
     return { tasks, summary }
+}
+
+// ---------- یادآوری‌های due برای Taskهای باز (پایش سمت کلاینت) ----------
+// یادآوری per-task است (نه سراسری). فقط Taskهای بازِ همان کاربر با reminderAt در بازه‌ی
+// [now - grace, now] برگردانده می‌شوند؛ یادآوری‌های بسیار کهنه (بیش از grace) عمداً رد
+// می‌شوند تا با باز شدن دیرهنگام tab، اعلان اشتباهی/فوری نمایش داده نشود (§12).
+const REMINDER_GRACE_MINUTES = 5
+
+export async function getDueReminders(
+    userId: number,
+    now: Date = new Date(),
+    graceMinutes: number = REMINDER_GRACE_MINUTES,
+): Promise<Task[]> {
+    const since = new Date(now.getTime() - graceMinutes * 60_000)
+    return getPrisma().task.findMany({
+        where: {
+            userId,
+            status: { not: "DONE" },
+            reminderAt: { not: null, lte: now, gte: since },
+        },
+        orderBy: { reminderAt: "asc" },
+        take: 50,
+    })
 }
 
 // ---------- تسک‌های بازِ روزهای گذشته (کاندیدای rollover) ----------
@@ -386,6 +411,7 @@ export async function updateTask(
         status?: "TODO" | "IN_PROGRESS"
         scheduledDate?: Date
         category?: string | null
+        reminderAt?: Date | null
     },
 ): Promise<{ task: Task; changed: boolean; changedFields: string[] }> {
     const prisma = getPrisma()
@@ -393,6 +419,10 @@ export async function updateTask(
     if (!task) throw new TaskNotFoundError()
 
     const categoryChanged = input.category !== undefined && input.category !== task.category
+    // یادآوری فراداده‌ی Task است (مثل category): نه برنامه را تغییر می‌دهد و نه EDITED
+    const reminderChanged =
+        input.reminderAt !== undefined &&
+        (task.reminderAt?.getTime() ?? null) !== (input.reminderAt?.getTime() ?? null)
 
     const data: Prisma.TaskUpdateInput = {}
     let titleChanged = false
@@ -422,9 +452,12 @@ export async function updateTask(
     if (categoryChanged) {
         data.category = input.category
     }
+    if (reminderChanged) {
+        data.reminderAt = input.reminderAt
+    }
 
     const isContent = titleChanged // §6.3.5: تغییر متن = Content Mutation
-    if (!titleChanged && !dayChanged && !statusChanged && !categoryChanged) {
+    if (!titleChanged && !dayChanged && !statusChanged && !categoryChanged && !reminderChanged) {
         // درخواست بدون تغییر واقعی → no-op؛ گام ۸: changed=false صریح در قرارداد بازگشتی
         return { task, changed: false, changedFields: [] }
     }
@@ -435,6 +468,7 @@ export async function updateTask(
     if (dayChanged) changedFields.push("day")
     if (statusChanged) changedFields.push("status")
     if (categoryChanged) changedFields.push("category")
+    if (reminderChanged) changedFields.push("reminder")
 
     if (isContent) {
         // §6.3.5/§7.6: فقط گروه AI null می‌شود؛ category و allocatedMinutes untouched می‌مانند.

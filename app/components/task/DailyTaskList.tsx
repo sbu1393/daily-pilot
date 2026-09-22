@@ -27,6 +27,7 @@ import CompleteTaskModal from "./CompleteTaskModal"
 import RolloverDialog from "./RolloverDialog"
 import styles from "./task.module.css"
 import ReanalyzeModal from "./ReanalyzeModal"
+import EditTaskModal from "./EditTaskModal"
 import SuggestionModal from "./SuggestionModal"
 import AdvisorCard from "./AdvisorCard"
 import { useDaySuggestion } from "@/app/hooks/useDaySuggestion"
@@ -61,6 +62,7 @@ export default function DailyTaskList() {
     const [rolloverOpen, setRolloverOpen] = useState(false)
     const [deleteTask, setDeleteTask] = useState<TaskItem | null>(null)
     const [reanalyzeTask, setReanalyzeTask] = useState<TaskItem | null>(null)
+    const [editReminderTask, setEditReminderTask] = useState<TaskItem | null>(null)
 
     // استیت‌های مربوط به هوش مصنوعی
     const [suggestionOpen, setSuggestionOpen] = useState(false)
@@ -336,6 +338,7 @@ export default function DailyTaskList() {
                                 onComplete={setCompleteTask}
                                 onDelete={setDeleteTask}
                                 onReanalyze={setReanalyzeTask}
+                                onEditReminder={setEditReminderTask}
                             />
                         ))}
                         {visibleQueued.map((q) => (
@@ -432,6 +435,12 @@ export default function DailyTaskList() {
                 key={reanalyzeTask?.id ?? "none"}
                 task={reanalyzeTask}
                 onClose={() => setReanalyzeTask(null)}
+                onDone={() => afterMutation()}
+            />
+            <EditTaskModal
+                key={editReminderTask?.id ?? "none"}
+                task={editReminderTask}
+                onClose={() => setEditReminderTask(null)}
                 onDone={() => afterMutation()}
             />
         </section>

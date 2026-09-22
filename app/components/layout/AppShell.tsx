@@ -1,6 +1,8 @@
 import Header from "../Header"
 import Link from "next/link"
 import type { AvatarUser } from "../Avatar"
+import TaskReminderWatcher from "../task/TaskReminderWatcher"
+import MissedReminderReconciler from "../task/MissedReminderReconciler"
 
 function AppShell({
     children,
@@ -11,6 +13,8 @@ function AppShell({
 }) {
     return (
         <div className="app-bg">
+            <TaskReminderWatcher />
+            <MissedReminderReconciler />
             <Header user={user} />
             {/* نوار اشتراک: دقیقاً زیر هدر و بالای محتوا (تقویم) */}
             <Link

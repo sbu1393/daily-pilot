@@ -35,7 +35,7 @@ const TARGET: PushTarget = {
 }
 
 const PAYLOAD = {
-    title: "یادآور روزچین",
+    title: "یادآور روزساز",
     body: "وقت برنامه‌ریزی روزت رسیده است ✨",
     url: "/dashboard",
     tag: "dp-reminder-2026-09-22|09:00",

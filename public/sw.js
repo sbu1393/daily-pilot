@@ -82,7 +82,7 @@ async function staleWhileRevalidate(request) {
  */
 function readPushPayload(event) {
   const fallback = {
-    title: "یادآور روزچین",
+    title: "یادآور روزساز",
     body: "وقت برنامه‌ریزی روزت رسیده است ✨",
     url: "/dashboard",
     tag: "dp-reminder",

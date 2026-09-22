@@ -275,7 +275,7 @@ describe("reminder — نمایش اعلان از مسیر Service Worker", () =
         stubServiceWorker({ registration: { showNotification } })
 
         const shown = await showSystemNotification({
-            title: "یادآور روزچین",
+            title: "یادآور روزساز",
             body: "وقت برنامه‌ریزی روزت رسیده است ✨",
             url: "/dashboard",
             tag: "dp-reminder-2026-05-12|09:00",
@@ -284,7 +284,7 @@ describe("reminder — نمایش اعلان از مسیر Service Worker", () =
         expect(shown).toBe(true)
         expect(showNotification).toHaveBeenCalledTimes(1)
         expect(showNotification).toHaveBeenCalledWith(
-            "یادآور روزچین",
+            "یادآور روزساز",
             expect.objectContaining({
                 body: "وقت برنامه‌ریزی روزت رسیده است ✨",
                 dir: "rtl",

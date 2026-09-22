@@ -133,7 +133,7 @@ describe("public/sw.js — رویداد push", () => {
 
     it("payload قراردادی را با همان deep link کلیک نمایش می‌دهد", async () => {
         const { event, settle } = pushEvent({
-            title: "یادآور روزچین",
+            title: "یادآور روزساز",
             body: "وقت برنامه‌ریزی روزت رسیده است ✨",
             url: "/dashboard/today",
             tag: "dp-reminder-2026-09-22|09:00",
@@ -148,7 +148,7 @@ describe("public/sw.js — رویداد push", () => {
             string,
             Record<string, unknown>,
         ]
-        expect(title).toBe("یادآور روزچین")
+        expect(title).toBe("یادآور روزساز")
         expect(options).toMatchObject({
             body: "وقت برنامه‌ریزی روزت رسیده است ✨",
             tag: "dp-reminder-2026-09-22|09:00",
@@ -169,7 +169,7 @@ describe("public/sw.js — رویداد push", () => {
             string,
             Record<string, unknown>,
         ]
-        expect(title).toBe("یادآور روزچین")
+        expect(title).toBe("یادآور روزساز")
         expect(options.data).toEqual({ url: "/dashboard" })
         expect(typeof options.body).toBe("string")
     })
@@ -184,7 +184,7 @@ describe("public/sw.js — رویداد push", () => {
             string,
             Record<string, unknown>,
         ]
-        expect(title).toBe("یادآور روزچین")
+        expect(title).toBe("یادآور روزساز")
         expect(options.data).toEqual({ url: "/dashboard" })
         expect(options.tag).toBe("dp-reminder")
         expect(options.icon).toBe("/icons/icon-192.png")

@@ -67,7 +67,7 @@ export function buildReminderPayload(args: {
     now: Date
 }): PushPayload {
     return {
-        title: "یادآور روزچین",
+        title: "یادآور روزساز",
         body: "وقت برنامه‌ریزی روزت رسیده است ✨",
         url: REMINDER_TARGET_URL,
         tag: `dp-reminder-${localDayKey(args.now, args.timezone)}|${args.reminderTime}`,

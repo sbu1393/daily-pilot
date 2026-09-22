@@ -42,7 +42,7 @@ export async function POST(_req: NextRequest) {
         if (!isPushConfigured()) throw new PushNotConfiguredError()
 
         const summary = await sendPushToUser(user.id, {
-            title: "آزمایش اعلان روزچین",
+            title: "آزمایش اعلان روزساز",
             body: "اگر این پیام را می‌بینی، اعلان‌ها درست کار می‌کنند ✅",
             url: "/dashboard",
             tag: "dp-test",

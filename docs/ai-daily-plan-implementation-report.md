@@ -12,8 +12,11 @@ the gap-closing audit pass, and the explicit decisions that remain open.
 
 ## 1. Files changed by the audit pass
 
-Changes made after the feature commits (`cb75bcc`, `e0ff6f1`, `8933a2b`) to close the
+Changes made after the feature commits `e0ff6f1` and `8933a2b` to close the
 remaining spec gaps. No architecture was redesigned.
+
+(The branch also carried commit `cb75bcc`, a separate per-task reminder feature. It is **not**
+part of this feature's implementation — see §19.)
 
 | File | Change |
 |---|---|
@@ -327,23 +330,49 @@ Per instruction, no scheduler, no `startTime`/`endTime` in the AI contract, and 
 clock time were introduced. This needs an explicit product/architecture decision (and its own ADR)
 before any implementation.
 
-### Reminder commit on this branch — merge/scope risk (not a feature bug)
+### Reminder scope — resolved: `main`'s reminder is the only reminder in the final result
 
-Commit `cb75bcc feat(reminders): add DB-backed per-task reminders with web push and offline recovery`
-sits on this branch, directly on top of the merge-base with `main` (`6a87c9c`). Findings:
+**This section is about a decision that was made *outside* the AI Daily Plan. The per-task
+reminder below is NOT part of this feature's implementation.**
 
-- **introduced by this branch: YES** — it is the first commit after the merge-base and exists on
-  no other remote branch; it is not an ancestor of `origin/main`.
-- **required by AI Daily Plan: NO** — no file in the AI Daily Plan surface imports any reminder or
-  push module (the only occurrence is a comment in `app/api/planner/plan/route.ts`).
-- **conflicts with main: YES** — `main` carries its own separate notifications implementation
-  (`f5f182d`, merged via PR #8). Merging produces conflicts in 8 files: `AppShell.tsx`,
-  `DailyTaskList.tsx`, `TaskCard.tsx`, `offline.ts`, `services/errors.ts`, `package.json`,
-  `prisma/schema.prisma`, `public/sw.js`.
-- **action taken: none.** No history was rewritten. The AI plan and the reminder work share
-  several touched files (`DailyTaskList.tsx`, `AppShell.tsx`, `package.json`, `schema.prisma`),
-  so removing the commit is a scope decision for the owner, not a mechanical step. The feature
-  itself has no dependency on it.
+This branch originally carried commit `cb75bcc feat(reminders): add DB-backed per-task reminders
+with web push and offline recovery`, which introduced a *second*, different reminder feature.
+`main` independently ships its own reminder infrastructure (from `f5f182d`, merged via PR #8).
+
+**Final product decision: only the reminder that already exists in `main` remains.**
+
+- The per-task reminder from `cb75bcc` is **excluded from the final implementation**. It was
+  verified first to be exclusively per-task reminder work with zero coupling to AI Daily Plan in
+  either direction, so excluding it cost the feature nothing.
+- `cb75bcc` **remains in the branch's ancestry** (it is an ancestor of the audit commit
+  `f694d61`), but **none of its content entered the merge result**. No history was rewritten and
+  no commit was removed, cherry-picked, rebased or reset — this is purely about the content of
+  the final tree.
+- Everything the per-task reminder brought in was dropped from the merge result: `Task.reminderAt`,
+  the `TaskReminderDelivery` ledger and its enum, its three migrations, the `/api/push/*` and
+  `/api/tasks/reminders` endpoints, the `push/{client,sender,payload,cronAuth}` modules, the
+  `reminder{Fired,Missed,Notify}` modules, `reminder{Scheduler,Delivery}.service`,
+  `TaskReminderField`, `TaskReminderWatcher`, `MissedReminderReconciler`, `EditTaskModal`,
+  `ADR-07`, and the `onEditReminder` / `editReminderTask` UI.
+- **The reminder in `main` is preserved untouched.** No refactor, no unification, and no
+  architecture change was made to it for the sake of AI Daily Plan. `ReminderModal`,
+  `useTaskReminder`, `lib/reminder.ts`, `lib/taskReminder.ts`, `lib/push/{config,adapter}.ts`,
+  `lib/pushSubscription.ts`, `/api/notifications/*`, `/api/cron/reminders`, the GitHub Actions
+  cron trigger, `public/sw.js`, `scripts/generate-vapid-keys.ts` and the reminder columns on
+  `User` are byte-identical to `main`.
+- AI Daily Plan code is byte-identical to the audit commit. The single AI-plan file touched by
+  the merge is `planProposalView.test.ts`, where one `reminderAt: null` fixture line was removed
+  because that field is a `cb75bcc` artifact.
+
+Excluding the per-task reminder also removed three hazards that a plain auto-merge would have
+shipped: a second `CREATE TABLE "PushSubscription"` migration that would have failed on deploy, a
+duplicate `push` listener in `public/sw.js` that would have shown every notification twice, and a
+second VAPID configuration with a different environment contract.
+
+**Note for future readers:** if you are looking for per-task reminders (`Task.reminderAt`, a
+reminder attached to an individual task, delivered via a server-side push ledger), they are not
+here. The only reminder in this codebase is the daily, user-level one from `main`, configured via
+`User.reminderTime`.
 
 ## 20. Merge readiness
 
@@ -356,5 +385,6 @@ sits on this branch, directly on top of the merge-base with `main` (`6a87c9c`). 
 | Integration coverage of the spec §24 lifecycle | Implemented |
 | Browser E2E | Requires separate test-framework decision (none in repo) |
 | Time Slot (§12) | Requires product/spec decision |
-| Reminder commit scope on this branch | Requires separate branch cleanup (owner decision) |
+| Reminder commit scope on this branch | Resolved — per-task reminder excluded; `main`'s reminder kept untouched |
+| Reminder refactor / unification for AI Daily Plan | Not done, by decision (`main`'s reminder is an independent product feature) |
 | `REAL_POSTGRESQL_UNAVAILABLE` test failures | Known unrelated baseline failure |

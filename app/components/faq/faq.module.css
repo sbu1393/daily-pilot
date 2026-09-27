@@ -1,0 +1,187 @@
+/* ------------------------------------------------------------------
+   پرسش‌های متداول — آکاردئون
+   ------------------------------------------------------------------
+   همه‌ی رنگ‌ها/فاصله‌ها از توکن‌های `app/globals.css` می‌آیند تا با لندینگ و
+   بقیهٔ اپ یکدست بماند و تم روشن/تیره خودکار کار کند. Tailwind در این پروژه
+   نصب نیست، پس CSS Module حرف اول است.
+   ------------------------------------------------------------------ */
+
+/* نوار ابزار بالای فهرست — فقط یک کنترل کوچک «باز/بستن همه» */
+.toolbar {
+    display: flex;
+    justify-content: flex-start;
+}
+
+.toggleAll {
+    padding: 8px 18px;
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-full);
+    background: var(--input-bg);
+    color: var(--muted);
+    font: inherit;
+    font-size: .82rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: border-color .2s ease, color .2s ease, background .2s ease;
+}
+
+.toggleAll:hover {
+    border-color: var(--primary);
+    color: var(--primary-dark);
+    background: var(--primary-soft);
+}
+
+.toggleAll:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+/* ---------- فهرست ---------- */
+
+.list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.item {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    box-shadow: var(--shadow-xs);
+    overflow: hidden;
+    transition: border-color .2s ease, box-shadow .2s ease;
+}
+
+.item:has(.question[aria-expanded="true"]) {
+    border-color: var(--primary);
+    box-shadow: var(--shadow-sm);
+}
+
+.item:hover {
+    border-color: var(--primary);
+}
+
+/* ---------- سؤال ---------- */
+
+.questionHeading {
+    margin: 0;
+    font-size: inherit;
+    font-weight: inherit;
+}
+
+.question {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-5) var(--space-5);
+    border: 0;
+    background: transparent;
+    color: var(--ink);
+    font: inherit;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.8;
+    text-align: start;
+    cursor: pointer;
+}
+
+.question:hover {
+    color: var(--primary-dark);
+}
+
+.question:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+    border-radius: var(--radius-md);
+}
+
+.questionText {
+    flex: 1;
+}
+
+/* آیکن چرخشی — تزئینی است و aria-hidden دارد؛ وضعیت واقعی از
+   aria-expanded خوانده می‌شود. */
+.chevron {
+    flex-shrink: 0;
+    display: inline-flex;
+    color: var(--muted-2);
+    transform: rotate(0deg);
+    transition: transform .25s ease, color .2s ease;
+}
+
+.chevronOpen {
+    transform: rotate(180deg);
+    color: var(--primary);
+}
+
+.question:hover .chevron {
+    color: var(--primary);
+}
+
+/* ---------- پنل پاسخ ----------
+   انیمیشن ارتفاع با grid-template-rows انجام می‌شود، نه height — چون height
+   قابل انیمیشن نیست و تغییرش باعث پرش layout در محتوای بلند می‌شود. همین
+   تکنیک در پنل TaskCard هم استفاده شده است. */
+
+.panel {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows .28s ease;
+}
+
+.panelOpen {
+    grid-template-rows: 1fr;
+}
+
+.panelInner {
+    overflow: hidden;
+}
+
+/* پاسخ با کمی تاخیر ظاهر می‌شود تا حرکت نرم‌تر به نظر برسد */
+.panelInner > p {
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity .2s ease .04s, transform .2s ease .04s;
+}
+
+.panelOpen .panelInner > p {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.answer {
+    margin: 0;
+    padding: 0 var(--space-5) var(--space-5);
+    border-top: 1px solid var(--border-soft);
+    padding-top: var(--space-4);
+    font-size: .95rem;
+    line-height: 2.1;
+    color: var(--ink-2);
+}
+
+/* محتوای بسته نباید در جست‌وجوی صفحه و انتخاب‌کردن متن دیده شود */
+.panel:not(.panelOpen) {
+    visibility: hidden;
+}
+
+/* ---------- ریسپانسیو ---------- */
+
+@media (max-width: 640px) {
+    .question {
+        padding: var(--space-4);
+        font-size: .95rem;
+    }
+
+    .answer {
+        padding: var(--space-4);
+        padding-top: var(--space-3);
+        font-size: .92rem;
+        line-height: 2;
+    }
+}

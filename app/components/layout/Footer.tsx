@@ -88,6 +88,9 @@ export default function Footer() {
                 </div>
 
                 {/* ---------- ستون میانی: درباره روزساز ---------- */}
+                {/* هر دو مسیر (`/about`, `/faq`) صفحهٔ واقعی دارند: app/about و
+                    app/faq. برچسب‌ها با عنوان همان صفحه‌ها یکی نگه داشته شده‌اند تا
+                    کاربر بین فوتر و محتوای صفحه سردرگم نشود. */}
                 <nav className={styles.column} aria-labelledby="footer-about-title">
                     <h2 id="footer-about-title" className={styles.columnTitle}>
                         روزساز
@@ -95,12 +98,12 @@ export default function Footer() {
                     <ul className={styles.links}>
                         <li>
                             <Link href="/about" className={styles.link}>
-                                چرا روزساز
+                                چرا روزساز؟
                             </Link>
                         </li>
                         <li>
                             <Link href="/faq" className={styles.link}>
-                                پرسش‌های پرتکرار
+                                پرسش‌های متداول
                             </Link>
                         </li>
                     </ul>

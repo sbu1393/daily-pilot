@@ -62,6 +62,9 @@ export default function DailyTaskList() {
         generate: generatePlan,
         apply: applyPlan,
         clear: clearPlan,
+        invalidate: invalidatePlan,
+        isStale: isPlanStale,
+        staleMessage: planStaleMessage,
     } = usePlanProposal()
 
     const [tasks, setTasks] = useState<TaskItem[]>([])
@@ -218,11 +221,12 @@ export default function DailyTaskList() {
     }, [selectedDate])
 
     // Phase 4.4 (Step 12) — تعویض روز: proposalِ روزِ قبلی باید discard شود تا هرگز در روزِ
-    // دیگر نمایش داده/اعمال نشود. clear() هم‌زمان seq را جلو می‌برد، پس هر Generate در پرواز
-    // (برای روزی که دیگر انتخاب نشده) نمی‌تواند modal را برای روزِ اشتباه باز کند.
+    // دیگر نمایش داده/اعمال نشود. invalidate() (نه clear) استفاده می‌شود تا کاربر بداند چرا
+    // مودال بسته شد و CTA «ایجاد برنامه جدید» بگیرد؛ هم‌زمان seq جلو می‌رود، پس هر Generate
+    // در پرواز (برای روزی که دیگر انتخاب نشده) نمی‌تواند modal را برای روزِ اشتباه باز کند.
     useEffect(() => {
-        clearPlan()
-    }, [selectedDate, clearPlan])
+        invalidatePlan()
+    }, [selectedDate, invalidatePlan])
 
     // Phase 2 — و با هر جهش برنامه (افزودن/حذف/انتقال/تحلیل) از رویداد سراسری ریست می‌شود
     useEffect(() => {
@@ -333,6 +337,27 @@ export default function DailyTaskList() {
             {overCommitted && (
                 <div className={styles.warningBar}>
                     ⚠️ ظرفیت روز پر شده و زمان بعضی کارها کم شده. اگه کار جدید اضافه کنی، از کارهای کم‌اهمیت‌ تر کم میشه — یا «زمان آزاد» روز رو زیاد کن.
+                </div>
+            )}
+
+            {/* Phase 4.5 — invalidation سمت کلاینت: پیشنهادِ باز به‌دلیل یک mutation داخلی
+                (تعویض روز / افزودن یا حذف کار / تغییر ظرفیت) دور ریخته شد. این با 409
+                PLAN_STALE متفاوت است (آن مسیر پیام خطای خودش را در toast می‌دهد) — اینجا
+                فقط اطلاع‌رسانی + CTA است و هیچ mutation ای در کار نیست. */}
+            {isPlanStale && !planProposal && (
+                <div className={styles.warningBar} role="status">
+                    <div>ℹ️ {planStaleMessage}</div>
+                    <div style={{ marginTop: 8 }}>
+                        <button
+                            className={styles.btnGhost}
+                            onClick={handleGeneratePlan}
+                            disabled={isPlanGenerating}
+                            aria-disabled={isPlanGenerating}
+                        >
+                            <Sparkles />
+                            {isPlanGenerating ? "در حال ایجاد برنامه…" : "ایجاد برنامه جدید"}
+                        </button>
+                    </div>
                 </div>
             )}
 

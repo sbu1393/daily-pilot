@@ -4,6 +4,7 @@ import { useEffect, useMemo, useSyncExternalStore } from "react"
 
 import {
     createPlanProposalOrchestrator,
+    PLAN_PROPOSAL_STALE_MESSAGE,
     type ApplyPlanOutcome,
     type GeneratePlanOutcome,
     type PlanProposalFlowState,
@@ -20,8 +21,12 @@ export type UsePlanProposalResult = PlanProposalFlowState & {
     generate: (dayKey: string) => Promise<GeneratePlanOutcome>
     /** Apply: proposal فعلی را به روزِ خودش (basis.dayKey) به endpoint موجود Apply می‌فرستد. */
     apply: () => Promise<ApplyPlanOutcome>
-    /** Discard محلی proposal — هیچ mutation ای انجام نمی‌دهد. */
+    /** Discard محلی proposal — هیچ mutation ای انجام نمی‌دهد. (Reject/Close کاربر) */
     clear: () => void
+    /** پیشنهادِ باز به‌دلیل mutation داخلی بی‌اعتبار شد (تغییر روز/کار/ظرفیت). */
+    invalidate: () => void
+    /** متن آمادهٔ بنر stale (بدون متن hard-code در کامپوننت). */
+    staleMessage: string
 }
 
 /**
@@ -33,7 +38,10 @@ export type UsePlanProposalResult = PlanProposalFlowState & {
  * - Apply دقیقاً همان proposal برگشتی Generate را round-trip می‌کند.
  * - AI advisory است؛ این هوک هیچ allocation/status/task را تغییر نمی‌دهد.
  * - §15: هر mutation برنامه (`planner:mutated`) proposal باز را discard می‌کند تا هرگز proposal
- *   کهنه اعمال نشود (backend هم به‌هرحال با PLAN_STALE رد می‌کند).
+ *   کهنه اعمال نشود (backend هم به‌هرحال با PLAN_STALE رد می‌کند). این invalidation «بی‌صدا»
+ *   نیست: `isStale` روشن می‌شود تا UI به کاربر بگوید چرا مودال بسته شد و CTA بدهد.
+ * - تفکیک از رد بک‌اند: PLAN_STALE (409) همچنان outcome.status === "stale" می‌دهد و
+ *   `isStale` را روشن نمی‌کند — دو مسیر جدا، هر دو حفظ شده‌اند.
  * - بدون persistence: proposal فقط in-memory است.
  */
 export function usePlanProposal(): UsePlanProposalResult {
@@ -42,7 +50,7 @@ export function usePlanProposal(): UsePlanProposalResult {
 
     // mutation invalidation — فقط همان event سراسری موجود (بدون سیستم event دوم)
     useEffect(() => {
-        const onMutated = () => flow.clear()
+        const onMutated = () => flow.invalidate()
         window.addEventListener("planner:mutated", onMutated)
         return () => window.removeEventListener("planner:mutated", onMutated)
     }, [flow])
@@ -52,5 +60,7 @@ export function usePlanProposal(): UsePlanProposalResult {
         generate: flow.generate,
         apply: flow.apply,
         clear: flow.clear,
+        invalidate: flow.invalidate,
+        staleMessage: PLAN_PROPOSAL_STALE_MESSAGE,
     }
 }

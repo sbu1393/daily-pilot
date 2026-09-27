@@ -305,3 +305,137 @@ describe("POST /api/planner/plan", () => {
         expect(err.headers.get("X-Request-ID")).toEqual(expect.any(String))
     })
 })
+
+/* ------------------------------------------------------------------ */
+/* سند §۲۳ Test 10 — رفتار کنترل‌شده در برابر Generate همزمان          */
+/* ------------------------------------------------------------------ */
+/*                                                                       */
+/* پرسش: اگر دو درخواست Generate برای یک user/day همزمان برسند چه       */
+/* می‌شود؟ گزارش Audit قبلی این مسیر را پوشش نداده بود.                  */
+/*                                                                       */
+/* نتیجه‌ی رفتار فعلی (بدون تغییر در پیاده‌سازی):                        */
+/* - هر دو درخواست ۲۰۰ می‌گیرند (rate limit اینجا فعال نیست).          */
+/* - هر دو به AI می‌رسند: ۲ فراخوانی provider.                          */
+/* - هر دو دقیقاً یک واحد کووتا رزرو و مصرف می‌کنند — چون هر Generate    */
+/*   طبق سند §۱۹ یک AI request است و باید یک واحد مصرف کند.             */
+/* - هیچ تداخلی روی reserveQuota نیست: هر درخواست requestId مستقل     */
+/*   (randomUUID) دارد، پس idempotency key برخورد نمی‌کند و CAS هر      */
+/*   دو رزرو را جداگانه موفق می‌کند.                                    */
+/* - هیچ partial mutation رخ نمی‌دهد: proposal هرگز persist نمی‌شود.   */
+/*                                                                       */
+/* این رفتار «کنترل‌شده و قابل پیش‌بینی» است و با سند سازگار است، بنابراین */
+/* عمداً هیچ تغییری در پیاده‌سازی داده نشد (فقط پوشش تست).              */
+/* ------------------------------------------------------------------ */
+
+describe("POST /api/planner/plan — concurrent Generate", () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.getCurrentUser.mockResolvedValue(USER)
+        mocks.getPrisma.mockReturnValue(prismaMock)
+        mocks.isRateLimited.mockReturnValue(false)
+        mocks.getCanonicalToday.mockReturnValue(DAY_KEY)
+        mocks.getPlanGenerationContext.mockResolvedValue(CTX)
+        mocks.reserveQuota.mockResolvedValue(undefined)
+        mocks.completeQuota.mockResolvedValue(true)
+        mocks.releaseQuota.mockResolvedValue(true)
+        mocks.markReleaseFailed.mockResolvedValue(true)
+        mocks.recordError.mockResolvedValue(undefined)
+    })
+
+    it("handles two simultaneous Generate calls as two independent, fully-quota'd proposals", async () => {
+        // هر دو فراخوانی provider معلق می‌مانند تا واقعاً همزمان در جریان باشند
+        const gates: Array<() => void> = []
+        mocks.analyzeBatchPlan.mockImplementation(
+            async () =>
+                new Promise((resolve) => {
+                    gates.push(() => resolve({ source: "1xai", plan: AI_PLAN, attempts: 1 }))
+                }),
+        )
+
+        // هر دو درخواست همزمان شروع می‌شوند و داخل AI معلق می‌مانند
+        const pendingA = callPOST({ dayKey: DAY_KEY })
+        const pendingB = callPOST({ dayKey: DAY_KEY })
+
+        // فرصت می‌دهیم هر دو به فراخوانی provider برسند و همان‌جا معلق شوند
+        await new Promise((resolve) => setImmediate(resolve))
+        expect(gates).toHaveLength(2)
+        gates.forEach((open) => open())
+
+        const [resA, resB] = await Promise.all([pendingA, pendingB])
+
+        const [bodyA, bodyB] = [await resA.json(), await resB.json()]
+
+        // ۱) هر دو درخواست پاسخ معتبر و مستقل می‌گیرند
+        expect(resA.status).toBe(200)
+        expect(resB.status).toBe(200)
+        expect(bodyA.ok).toBe(true)
+        expect(bodyB.ok).toBe(true)
+        expect(bodyA.data.basis.dayKey).toBe(DAY_KEY)
+        expect(bodyB.data.basis.dayKey).toBe(DAY_KEY)
+        expect(bodyA.data.planned.map((p: any) => p.taskId).sort()).toEqual([1, 2])
+        expect(bodyB.data.planned.map((p: any) => p.taskId).sort()).toEqual([1, 2])
+
+        // ۲) دقیقاً یک AI call به ازای هر Generate (بدون تکرار/بی‌صدا شدن)
+        expect(mocks.analyzeBatchPlan).toHaveBeenCalledTimes(2)
+
+        // ۳) هر Generate یک واحد رزرو و یک واحد مصرف می‌کند
+        expect(mocks.reserveQuota).toHaveBeenCalledTimes(2)
+        expect(mocks.completeQuota).toHaveBeenCalledTimes(2)
+        expect(mocks.reserveQuota.mock.calls.every((c) => c[1].units === 1)).toBe(true)
+
+        // requestId ها مستقل‌اند → هیچ برخورد idempotency رخ نمی‌دهد
+        const requestIds = mocks.reserveQuota.mock.calls.map((c) => c[1].requestId)
+        expect(new Set(requestIds).size).toBe(2)
+        // امضا: completeQuota(prisma, requestId, ...) → requestId آرگومان دوم است
+        // ترتیبِ فراخوانی زیر همزمانی تضمین‌شده نیست، ولی هر رزرو دقیقاً یک complete
+        // روی همان requestId دارد (نه بیشتر، نه کمتر)
+        const completedIds = mocks.completeQuota.mock.calls.map((c) => c[1])
+        expect(completedIds.slice().sort()).toEqual(requestIds.slice().sort())
+
+        // ۴) هیچ رزرو معلقی رها نشده (نه release، نه markReleaseFailed)
+        expect(mocks.releaseQuota).not.toHaveBeenCalled()
+        expect(mocks.markReleaseFailed).not.toHaveBeenCalled()
+        expect(mocks.recordError).not.toHaveBeenCalled()
+
+        // ۵) هیچ mutation نیمه‌کاره: proposal گذراست
+        expect(prismaMock.dailyPlan.updateMany).not.toHaveBeenCalled()
+        expect(prismaMock.dailyPlan.update).not.toHaveBeenCalled()
+        expect(prismaMock.task.updateMany).not.toHaveBeenCalled()
+        expect(prismaMock.task.update).not.toHaveBeenCalled()
+    })
+
+    it("keeps quota accounting correct when the two calls are released independently", async () => {
+        // سناریوی سخت‌تر: یکی موفق، یکی شکست provider → فقط رزروِ شکست‌خورده آزاد می‌شود
+        let call = 0
+        mocks.analyzeBatchPlan.mockImplementation(async () => {
+            call += 1
+            if (call === 1) return { source: "1xai", plan: AI_PLAN, attempts: 1 }
+            throw new AiProviderUnavailableError()
+        })
+
+        const [resOk, resFail] = await Promise.all([
+            callPOST({ dayKey: DAY_KEY }),
+            callPOST({ dayKey: DAY_KEY }),
+        ])
+
+        expect(resOk.status).toBe(200)
+        expect(resFail.status).toBe(503)
+
+        // هر دو رزرو مجزا؛ فقط شکستی release می‌شود
+        expect(mocks.reserveQuota).toHaveBeenCalledTimes(2)
+        expect(mocks.completeQuota).toHaveBeenCalledTimes(1)
+        expect(mocks.releaseQuota).toHaveBeenCalledTimes(1)
+
+        // رزروِ آزادشده همان درخواستِ شکست‌خورده است و با درخواستِ موفق یکی نیست
+        // (امضا: releaseQuota(prisma, requestId, undefined, options))
+        const releasedRequestId = mocks.releaseQuota.mock.calls[0][1]
+        const completedRequestId = mocks.completeQuota.mock.calls[0][1]
+        const reservedIds: string[] = mocks.reserveQuota.mock.calls.map((c) => c[1].requestId)
+
+        expect(reservedIds).toContain(releasedRequestId)
+        expect(reservedIds).toContain(completedRequestId)
+        expect(releasedRequestId).not.toBe(completedRequestId)
+        // failureCode فقط روی release شکست — نه روی درخواست موفق
+        expect(mocks.releaseQuota.mock.calls[0][3].failureCode).toBe("AI_PROVIDER_UNAVAILABLE")
+    })
+})

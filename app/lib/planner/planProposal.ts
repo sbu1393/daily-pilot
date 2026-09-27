@@ -41,6 +41,13 @@ export type PlanProposalPlannedItem = {
     order: number
     /** ترتیب پیشنهادی AI — فقط advisory؛ null اگر AI آیتمی نداده باشد */
     aiOrder: number | null
+    /**
+     * دلیل کوتاه AI برای پیشنهادش — **فقط informational**.
+     * هرگز ورودی موتور/Scheduler نیست: suggestDay آن را نمی‌خواند و در وزن/تخصیص/ترتیب
+     * دخالتی ندارد. صرفاً برای شفافیت کاربر در مودال پیشنهاد حمل می‌شود؛ null اگر AI
+     * دلیلی نداده باشد (UI باید graceful رفتار کند).
+     */
+    reason: string | null
     priority: PlanPriority | null
     score: number | null
     weight: number
@@ -52,6 +59,8 @@ export type PlanProposalUnfittedItem = {
     estimatedMinutes: number
     weight: number
     aiOrder: number | null
+    /** دلیل کوتاه AI — فقط informational؛ همان semantics آیتم‌های planned */
+    reason: string | null
     /**
      * اولویت/امتیاز AI — همان semantics آیتم‌های planned.
      * Phase 4.2: بدون این دو فیلد، Apply نمی‌توانست metadata تسک‌های unfitted را persist کند
@@ -122,6 +131,8 @@ export function buildPlanProposal(args: PlanProposalArgs): PlanProposal {
             suggestedMinutes: item.suggestedMinutes,
             order: index + 1, // rank قطعی موتور — نه order AI
             aiOrder: aiItem?.order ?? null,
+            // فقط نمایشی — در هیچ تصمیم موتوری دخالت ندارد
+            reason: aiItem?.reason ?? null,
             priority: aiItem?.priority ?? engineTask?.priority ?? null,
             score: aiItem?.score ?? engineTask?.score ?? null,
             weight: item.weight,
@@ -137,6 +148,8 @@ export function buildPlanProposal(args: PlanProposalArgs): PlanProposal {
             estimatedMinutes: item.estimatedMinutes,
             weight: item.weight,
             aiOrder: aiItem?.order ?? null,
+            // فقط نمایشی — در هیچ تصمیم موتوری دخالت ندارد
+            reason: aiItem?.reason ?? null,
             // metadata از خود AI item (همان منبع آیتم‌های planned) — نه صرفاً کامل‌تر کردن JSON
             priority: aiItem?.priority ?? engineTask?.priority ?? null,
             score: aiItem?.score ?? engineTask?.score ?? null,

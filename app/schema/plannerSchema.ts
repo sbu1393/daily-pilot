@@ -44,6 +44,10 @@ const planProposalPlannedItemSchema = z.object({
     // rank قطعی موتور — عدد صحیح مثبت و یکتا (چک پایین)
     order: z.number().int().positive(),
     aiOrder: z.number().int().positive().nullable(),
+    // دلیل کوتاه AI — فقط informational. کلید اجباری ولی nullable (تا round-trip
+    // بی‌ابهام بماند) و bounded با همان محدوده‌ی planSchema.
+    // سرویس Apply آن را نمی‌خواند و در DB نمی‌نویسد (Task.reason دست‌نخورده می‌ماند).
+    reason: z.string().min(1).max(300).nullable(),
     priority: planPrioritySchema.nullable(),
     score: z.number().int().min(0).max(100).nullable(),
     weight: z.number().nonnegative(),
@@ -55,6 +59,8 @@ const planProposalUnfittedItemSchema = z.object({
     estimatedMinutes: z.number().int().min(5).max(480),
     weight: z.number().nonnegative(),
     aiOrder: z.number().int().positive().nullable(),
+    // همان semantics آیتم‌های planned: informational و bounded
+    reason: z.string().min(1).max(300).nullable(),
     // Phase 4.2 — همان semantics/bounds آیتم‌های planned: بدون این دو، Apply نمی‌تواند
     // metadata تسک‌های unfitted را persist کند و state پس از rebalance با proposal فرق می‌کند.
     // (همان enum/range موجود — هیچ enum یا range جدیدی ساخته نشد.)

@@ -42,6 +42,15 @@ function PriorityTag({ priority }: { priority: PlanProposalViewRow["priority"] }
 
 const fmtScore = (n: number | null) => (n == null ? "—" : faDigits(n))
 
+/**
+ * دلیل AI برای یک کار — فقط متن نمایشی (هیچ نقشی در ترتیب/تخصیص ندارد).
+ * اگر AI دلیلی نداده باشد هیچ چیزی رندر نمی‌شود (بدون متن hard-code و بدون جای خالی).
+ */
+function ReasonNote({ reason }: { reason: string | null }) {
+    if (!reason) return null
+    return <span className={styles.reason}>دلیل پیشنهاد: {reason}</span>
+}
+
 export default function PlanProposalModal({
     open,
     proposal,
@@ -166,6 +175,7 @@ export default function PlanProposalModal({
                                                 </span>
                                             )}
                                         </span>
+                                        <ReasonNote reason={item.reason} />
                                     </div>
                                 </li>
                             ))}
@@ -195,6 +205,7 @@ export default function PlanProposalModal({
                                             <PriorityTag priority={item.priority} />
                                             <span className={styles.tag}>امتیاز {fmtScore(item.score)}</span>
                                         </span>
+                                        <ReasonNote reason={item.reason} />
                                     </div>
                                 </li>
                             ))}

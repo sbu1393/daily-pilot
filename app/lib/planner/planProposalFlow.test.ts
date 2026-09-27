@@ -11,6 +11,7 @@ import {
     buildGenerateBody,
     createPlanProposalOrchestrator,
     isPlanProposal,
+    PLAN_PROPOSAL_STALE_MESSAGE,
     planProposalErrorMessage,
     type PlanProposal,
 } from "./planProposalFlow"
@@ -33,13 +34,24 @@ const proposal = (overrides: Partial<PlanProposal> = {}): PlanProposal => ({
             suggestedMinutes: 40,
             order: 1,
             aiOrder: 1,
+            reason: "نیاز به انجام در ابتدای روز دارد",
             priority: "HIGH",
             score: 80,
             weight: 100,
             partial: false,
         },
     ],
-    unfitted: [{ taskId: 2, estimatedMinutes: 30, weight: 60, aiOrder: 2, priority: "LOW", score: 30 }],
+    unfitted: [
+        {
+            taskId: 2,
+            estimatedMinutes: 30,
+            weight: 60,
+            aiOrder: 2,
+            reason: "در ظرفیت امروز جا نمی‌شود",
+            priority: "LOW",
+            score: 30,
+        },
+    ],
     plannedMinutes: 40,
     remainingMinutes: 80,
     aiUnscheduledTaskIds: [],
@@ -120,7 +132,13 @@ describe("orchestrator — generate", () => {
         const outcome = await flow.generate(DAY)
 
         expect(outcome.proposal).toBe(p)
-        expect(flow.getState()).toEqual({ proposal: p, isGenerating: false, isApplying: false, error: null })
+        expect(flow.getState()).toEqual({
+            proposal: p,
+            isGenerating: false,
+            isApplying: false,
+            error: null,
+            isStale: false,
+        })
     })
 
     it("(2) does not expose an invalid proposal on error and maps the message", async () => {
@@ -341,6 +359,123 @@ describe("orchestrator — round-trip integrity (Phase 4.4 / Steps 3, 7)", () =>
         const body = buildApplyBody(p.basis.dayKey, p)
         expect(body.expectedPlanVersion).toBe(p.basis.planVersion)
         expect(body.dayKey).toBe(p.basis.dayKey)
+    })
+
+    it("the AI's reason survives the full generate → apply round-trip (planned and unfitted)", async () => {
+        let captured: PlanProposal | null = null
+        const p = proposal()
+        const flow = createPlanProposalOrchestrator({
+            fetchProposal: async () => p,
+            applyProposal: async (_dayKey, sent) => {
+                captured = sent
+            },
+        })
+
+        await flow.generate(DAY)
+        await flow.apply()
+
+        const sent = captured as unknown as PlanProposal
+        expect(sent.planned[0]?.reason).toBe("نیاز به انجام در ابتدای روز دارد")
+        expect(sent.unfitted[0]?.reason).toBe("در ظرفیت امروز جا نمی‌شود")
+    })
+})
+
+describe("orchestrator — stale UX (client-side invalidation vs backend 409)", () => {
+    it("invalidate() discards the open proposal and flags it as stale", async () => {
+        const flow = createPlanProposalOrchestrator({
+            fetchProposal: async () => proposal(),
+            applyProposal: async () => {},
+        })
+
+        await flow.generate(DAY)
+        expect(flow.getState().isStale).toBe(false)
+
+        // یک mutation داخلی رخ داده (تغییر روز/کار/ظرفیت)
+        flow.invalidate()
+
+        expect(flow.getState().proposal).toBeNull()
+        expect(flow.getState().isStale).toBe(true)
+        expect(flow.getState().error).toBeNull()
+    })
+
+    it("invalidate() stays silent when no proposal was open (no spurious banners)", () => {
+        const flow = createPlanProposalOrchestrator()
+
+        // تعویض روز یا mutation بی‌ربط، وقتی کاربر اصلاً پیشنهادی نساخته
+        flow.invalidate()
+
+        expect(flow.getState().isStale).toBe(false)
+        expect(flow.getState().proposal).toBeNull()
+    })
+
+    it("clear() (user reject) never sets the stale flag", async () => {
+        const flow = createPlanProposalOrchestrator({
+            fetchProposal: async () => proposal(),
+            applyProposal: async () => {},
+        })
+
+        await flow.generate(DAY)
+        flow.clear() // کاربر روی «فعلاً نه» زده
+
+        expect(flow.getState().proposal).toBeNull()
+        expect(flow.getState().isStale).toBe(false)
+    })
+
+    it("invalidate() also cancels an in-flight generate so it cannot reopen the modal", async () => {
+        const d = deferred<PlanProposal>()
+        const flow = createPlanProposalOrchestrator({
+            fetchProposal: () => d.promise,
+            applyProposal: async () => {},
+        })
+
+        const pending = flow.generate(DAY)
+        flow.invalidate()
+        d.resolve(proposal())
+        const outcome = await pending
+
+        expect(outcome.proposal).toBeNull()
+        expect(flow.getState().proposal).toBeNull()
+    })
+
+    it("a new generate clears the stale flag (the CTA resolves the notice)", async () => {
+        const flow = createPlanProposalOrchestrator({
+            fetchProposal: async () => proposal(),
+            applyProposal: async () => {},
+        })
+
+        await flow.generate(DAY)
+        flow.invalidate()
+        expect(flow.getState().isStale).toBe(true)
+
+        // کاربر همان کاری را می‌کند که CTA «ایجاد برنامه جدید» از او خواسته بود
+        await flow.generate(DAY)
+
+        expect(flow.getState().isStale).toBe(false)
+        expect(flow.getState().proposal).not.toBeNull()
+    })
+
+    it("a backend 409 PLAN_STALE stays an error outcome, not the client-side stale flag", async () => {
+        const flow = createPlanProposalOrchestrator({
+            fetchProposal: async () => proposal(),
+            applyProposal: async () => {
+                throw new ApiClientError(409, "PLAN_STALE", "کهنه")
+            },
+        })
+
+        await flow.generate(DAY)
+        const outcome = await flow.apply()
+
+        // دو مسیر کاملاً جدا: 409 → پیام خطا (isStale خاموش می‌ماند)
+        expect(outcome.status).toBe("stale")
+        expect(outcome.message).toBe(planProposalErrorMessage(new ApiClientError(409, "PLAN_STALE", "کهنه")))
+        expect(flow.getState().proposal).toBeNull()
+        expect(flow.getState().isStale).toBe(false)
+        expect(flow.getState().error).not.toBeNull()
+    })
+
+    it("PLAN_PROPOSAL_STALE_MESSAGE explains the cause and is independent of PLAN_STALE", () => {
+        expect(PLAN_PROPOSAL_STALE_MESSAGE).toContain("دیگر معتبر نیست")
+        expect(PLAN_PROPOSAL_STALE_MESSAGE).toContain("ایجاد برنامه")
     })
 })
 

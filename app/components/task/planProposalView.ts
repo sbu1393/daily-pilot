@@ -27,6 +27,11 @@ export type PlanProposalViewRow = {
     priority: PlanProposalPriority | null
     score: number | null
     weight: number
+    /**
+     * دلیل کوتاه AI برای این تسک — فقط متن نمایشی.
+     * null/absent یعنی AI دلیلی نداده و UI باید بی‌سروصدا آن را نپوشاند.
+     */
+    reason: string | null
     /** ترتیب نمایش برای planned (rank قطعی موتور)؛ برای unfitted null */
     order: number | null
     /** فقط advisory — نه time-slot */
@@ -61,6 +66,17 @@ function fallbackTitle(taskId: number): string {
     return `کار ${faDigits(taskId)}`
 }
 
+/**
+ * نرمال‌سازی دلیل AI برای نمایش.
+ * رشته‌ی خالی/فقط‌فاصله یا غیررشته‌ای → null (UI اصلاً بلوک «دلیل» را رندر نمی‌کند).
+ * در غیر این صورت شکل نمایش تغییر نمی‌کند — فقط متن trim می‌شود.
+ */
+function normalizeReason(value: unknown): string | null {
+    if (typeof value !== "string") return null
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : null
+}
+
 function resolveTitle(
     taskId: number,
     byId: Map<number, TaskItem>,
@@ -88,6 +104,7 @@ export function buildPlanProposalView(
             priority: item.priority,
             score: item.score,
             weight: item.weight,
+            reason: normalizeReason(item.reason),
             order: item.order,
             aiOrder: item.aiOrder,
             suggestedMinutes: item.suggestedMinutes,
@@ -106,6 +123,7 @@ export function buildPlanProposalView(
             priority: item.priority,
             score: item.score,
             weight: item.weight,
+            reason: normalizeReason(item.reason),
             order: null,
             aiOrder: item.aiOrder,
             suggestedMinutes: null,

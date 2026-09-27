@@ -46,6 +46,7 @@ const proposal = (overrides: Partial<PlanProposal> = {}): PlanProposal => ({
             suggestedMinutes: 35,
             order: 1,
             aiOrder: 2,
+            reason: "نیاز به انجام در ابتدای روز دارد",
             priority: "HIGH",
             score: 80,
             weight: 100,
@@ -57,13 +58,24 @@ const proposal = (overrides: Partial<PlanProposal> = {}): PlanProposal => ({
             suggestedMinutes: 15,
             order: 2,
             aiOrder: 1,
+            reason: "اولویت پایین‌تر، در انتهای روز انجام می‌شود",
             priority: "MEDIUM",
             score: 50,
             weight: 60,
             partial: true,
         },
     ],
-    unfitted: [{ taskId: 3, estimatedMinutes: 90, weight: 120, aiOrder: 3, priority: "LOW", score: 20 }],
+    unfitted: [
+        {
+            taskId: 3,
+            estimatedMinutes: 90,
+            weight: 120,
+            aiOrder: 3,
+            reason: "در ظرفیت امروز جا نمی‌شود",
+            priority: "LOW",
+            score: 20,
+        },
+    ],
     plannedMinutes: 50,
     remainingMinutes: 70,
     aiUnscheduledTaskIds: [],
@@ -135,6 +147,37 @@ describe("buildPlanProposalView — missing task references", () => {
         expect(view.planned[1].title).toContain("۲")
         // proposal خودش دست‌نخورده
         expect(JSON.stringify(p)).toBe(snapshot)
+    })
+})
+
+describe("buildPlanProposalView — AI reason", () => {
+    it("passes the AI reason through for planned and unfitted rows", () => {
+        const view = buildPlanProposalView(proposal(), [task(1), task(2), task(3)])
+
+        expect(view.planned[0].reason).toBe("نیاز به انجام در ابتدای روز دارد")
+        expect(view.planned[1].reason).toBe("اولویت پایین‌تر، در انتهای روز انجام می‌شود")
+        expect(view.unfitted[0].reason).toBe("در ظرفیت امروز جا نمی‌شود")
+    })
+
+    it("normalizes an absent reason to null so the UI simply omits the block", () => {
+        const p = proposal()
+        // پاسخ کهنه/بدون reason یا مقدار غیرمنتظره → نباید UI را خراب کند
+        delete (p.planned[0] as { reason?: string | null }).reason
+        p.unfitted[0].reason = "   "
+
+        const view = buildPlanProposalView(p, [task(1), task(2), task(3)])
+
+        expect(view.planned[0].reason).toBeNull()
+        expect(view.unfitted[0].reason).toBeNull()
+    })
+
+    it("trims surrounding whitespace but keeps the AI's wording", () => {
+        const p = proposal()
+        p.planned[0].reason = "  اهمیت و محدودیت زمانی بالاتر  "
+
+        const view = buildPlanProposalView(p, [task(1), task(2), task(3)])
+
+        expect(view.planned[0].reason).toBe("اهمیت و محدودیت زمانی بالاتر")
     })
 })
 

@@ -213,6 +213,59 @@ describe("buildPlanProposal — capacity / unfitted", () => {
     })
 })
 
+describe("buildPlanProposal — AI reason (informational only)", () => {
+    it("carries the AI's short reason on planned items", () => {
+        const ai = plan([item(1, 1, { reason: "نیاز به انجام در ابتدای روز دارد" })])
+        const proposal = buildPlanProposal(args([task(1)], ai))
+
+        expect(proposal.planned[0]?.reason).toBe("نیاز به انجام در ابتدای روز دارد")
+    })
+
+    it("carries the AI's short reason on unfitted items too", () => {
+        // ظرفیت ۳۰ با دو تخمین ۶۰ → تسکِ کم‌وزن‌تر (شماره ۲) جا نمی‌شود
+        const ai = plan([
+            item(1, 1, { estimatedMinutes: 60, score: 90, reason: "اولویت بالا" }),
+            item(2, 2, { estimatedMinutes: 60, score: 10, reason: "در ظرفیت امروز جا نمی‌شود" }),
+        ])
+        const proposal = buildPlanProposal(args([task(1), task(2)], ai, 30))
+
+        expect(proposal.planned).toHaveLength(1)
+        expect(proposal.unfitted).toHaveLength(1)
+        expect(proposal.unfitted[0]?.reason).toBe("در ظرفیت امروز جا نمی‌شود")
+    })
+
+    it("normalizes a missing reason to null (planned and unfitted)", () => {
+        // AI دلیلی نداده است — proposal باید graceful بماند، نه crash کند
+        const ai = plan([
+            item(1, 1, { estimatedMinutes: 60, score: 90 }),
+            item(2, 2, { estimatedMinutes: 60, score: 10 }),
+        ])
+        const proposal = buildPlanProposal(args([task(1), task(2)], ai, 30))
+
+        expect(proposal.planned[0]?.reason).toBeNull()
+        expect(proposal.unfitted[0]?.reason).toBeNull()
+    })
+
+    it("never lets reason influence the deterministic engine's decisions", () => {
+        // همان ورودی، دو بار — یکی با reason و یکی بدون: خروجی موتور باید یکسان باشد
+        const withoutReason = plan([item(1, 1, { estimatedMinutes: 60 })])
+        const withReason = plan([item(1, 1, { estimatedMinutes: 60, reason: "دلیل کاملاً متفاوت" })])
+
+        const a = buildPlanProposal(args([task(1)], withoutReason))
+        const b = buildPlanProposal(args([task(1)], withReason))
+
+        // تمام تصمیم‌های موتور یکسان‌اند؛ تنها difference باید خودِ reason باشد
+        const strip = (p: ReturnType<typeof buildPlanProposal>) => ({
+            planned: p.planned.map(({ reason: _reason, ...rest }) => rest),
+            unfitted: p.unfitted.map(({ reason: _reason, ...rest }) => rest),
+            plannedMinutes: p.plannedMinutes,
+            remainingMinutes: p.remainingMinutes,
+        })
+
+        expect(strip(b)).toEqual(strip(a))
+    })
+})
+
 describe("buildPlanProposal — purity", () => {
     it("does not mutate the input tasks or AI output", () => {
         const tasks = [task(1, { estimatedTime: 10 })]

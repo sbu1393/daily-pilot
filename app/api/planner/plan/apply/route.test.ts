@@ -41,6 +41,7 @@ const planned = (taskId: number, overrides: Record<string, unknown> = {}) => ({
     suggestedMinutes: 40,
     order: taskId,
     aiOrder: taskId,
+    reason: null,
     priority: "HIGH",
     score: 80,
     weight: 100,
@@ -162,13 +163,48 @@ describe("POST /api/planner/plan/apply", () => {
         expect(mocks.applyPlan).not.toHaveBeenCalled()
     })
 
+    it("accepts a proposal whose items carry the AI's short reason (Phase 4.5)", async () => {
+        const withReason = {
+            ...PROPOSAL,
+            planned: [
+                planned(1, { reason: "نیاز به انجام در ابتدای روز دارد" }),
+                planned(2, { reason: null }),
+            ],
+        }
+
+        const res = await callPOST(body({ proposal: withReason }))
+        const parsed = await res.json()
+
+        expect(res.status).toBe(200)
+        expect(parsed.ok).toBe(true)
+        // دلیل فقط متن است — سرویس آن را به سرویس نمی‌دهد (Apply فقط
+        // estimatedTime/score/priority را persist می‌کند، نه reason)
+        expect(mocks.applyPlan).toHaveBeenCalledWith(USER.id, {
+            dayKey: DAY,
+            expectedPlanVersion: 5,
+            proposal: withReason,
+        })
+    })
+
+    it("rejects a 400 when an item's reason exceeds the bounded length", async () => {
+        const res = await callPOST(
+            body({ proposal: { ...PROPOSAL, planned: [planned(1, { reason: "ط".repeat(301) })] } }),
+        )
+        const parsed = await res.json()
+
+        expect(res.status).toBe(400)
+        expect(parsed.ok).toBe(false)
+        expect(parsed.error.code).toBe("VALIDATION_ERROR")
+        expect(mocks.applyPlan).not.toHaveBeenCalled()
+    })
+
     it("accepts a valid unfitted item carrying score/priority (Phase 4.2)", async () => {
         const res = await callPOST(
             body({
                 proposal: {
                     ...PROPOSAL,
                     unfitted: [
-                        { taskId: 3, estimatedMinutes: 20, weight: 10, aiOrder: 3, score: 40, priority: "MEDIUM" },
+                        { taskId: 3, estimatedMinutes: 20, weight: 10, aiOrder: 3, reason: null, score: 40, priority: "MEDIUM" },
                     ],
                 },
             }),

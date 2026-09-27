@@ -27,6 +27,8 @@ export type PlanProposalPlannedItem = {
     suggestedMinutes: number
     order: number
     aiOrder: number | null
+    /** دلیل کوتاه AI — فقط informational (هیچ نقشی در ترتیب/تخصیص ندارد) */
+    reason: string | null
     priority: PlanProposalPriority | null
     score: number | null
     weight: number
@@ -38,6 +40,8 @@ export type PlanProposalUnfittedItem = {
     estimatedMinutes: number
     weight: number
     aiOrder: number | null
+    /** دلیل کوتاه AI — فقط informational (هیچ نقشی در ترتیب/تخصیص ندارد) */
+    reason: string | null
     priority: PlanProposalPriority | null
     score: number | null
 }
@@ -149,11 +153,31 @@ export function planProposalErrorMessage(error: unknown): string {
 
 // ---------- State + orchestrator ----------
 
+/**
+ * پیام «پیشنهاد بی‌اعتبار شد» — **فقط** برای invalidation سمت کلاینت.
+ *
+ * تفکیک مهم (نباید با 409 PLAN_STALE یکی شود):
+ * - invalidation سمت کلاینت: یک mutation داخلی (تغییر روز، افزودن/حذف/تغییر کار، تغییر
+ *   ظرفیت) پیشنهادِ باز را دور می‌ریزد. هیچ درخواستی به backend نمی‌رود و هیچ 409‌ای
+ *   وجود ندارد؛ این پیام به کاربر می‌گوید چرا مودال بسته شد و چه کند.
+ * - رد 409 PLAN_STALE از بک‌اند: کاربر روی پیشنهادِ قدیمی Apply زده و backend آن را رد
+ *   کرده. مسیر `apply()` این حالت را جدا (outcome.status === "stale") و با پیام خودش
+ *   گزارش می‌کند و رفتارش دست‌نخورده می‌ماند.
+ */
+export const PLAN_PROPOSAL_STALE_MESSAGE =
+    "این پیشنهاد برنامه به‌دلیل تغییر در لیست کارها یا ظرفیت روز دیگر معتبر نیست. لطفاً دوباره «ایجاد برنامه» را اجرا کن."
+
 export type PlanProposalFlowState = {
     proposal: PlanProposal | null
     isGenerating: boolean
     isApplying: boolean
     error: string | null
+    /**
+     * پیشنهادِ باز به‌دلیل یک mutation داخلی بی‌اعتبار شد (نه به‌دلیل رد بک‌اند).
+     * فقط وقتی true می‌شود که واقعاً پیشنهادی باز بوده باشد؛ تعویض روز/رویداد بدون
+     * پیشنهادِ باز هیچ پیامی تولید نمی‌کند.
+     */
+    isStale: boolean
 }
 
 export const initialPlanProposalState: PlanProposalFlowState = {
@@ -161,6 +185,7 @@ export const initialPlanProposalState: PlanProposalFlowState = {
     isGenerating: false,
     isApplying: false,
     error: null,
+    isStale: false,
 }
 
 export type ApplyPlanOutcome = {
@@ -185,7 +210,14 @@ export type PlanProposalFlow = {
     generate: (dayKey: string) => Promise<GeneratePlanOutcome>
     /** Apply همیشه به روزِ اصلیِ خودِ proposal (basis.dayKey) می‌رود — نه روزِ در حال نمایش. */
     apply: () => Promise<ApplyPlanOutcome>
+    /** Reject/Close کاربر: discard محلی و بی‌صدا. هیچ mutation ای نمی‌زند. */
     clear: () => void
+    /**
+     * Invalidation داخلی (تغییر روز/کار/ظرفیت): مثل clear پروپوزال را دور می‌ریزد و
+     * پاسخ‌های در پرواز را بی‌اعتبار می‌کند، اما به‌جای حذف بی‌صدا وضعیت stale را
+     * روشن می‌کند تا UI بتواند به کاربر بگوید چرا و CTA «ایجاد برنامه جدید» بدهد.
+     */
+    invalidate: () => void
 }
 
 /**
@@ -220,11 +252,25 @@ export function createPlanProposalOrchestrator(deps?: Partial<PlanProposalFlowDe
         async generate(dayKey) {
             // هر Generate جدید، seq را جلو می‌برد → پاسخ درخواست‌های قدیمی‌تر دور ریخته می‌شود
             const token = ++seq
-            setState({ proposal: null, isGenerating: true, isApplying: false, error: null })
+            setState({
+                proposal: null,
+                isGenerating: true,
+                isApplying: false,
+                error: null,
+                // Generate جدید جایگزین پیام stale می‌شود (کاربر دقیقاً همان کاری را که
+                // stale notice از او خواسته بود انجام داده است)
+                isStale: false,
+            })
             try {
                 const proposal = await resolved.fetchProposal(dayKey)
                 if (token !== seq) return { proposal: null } // پاسخ کهنه — state دست نمی‌خورد
-                setState({ proposal, isGenerating: false, isApplying: false, error: null })
+                setState({
+                    proposal,
+                    isGenerating: false,
+                    isApplying: false,
+                    error: null,
+                    isStale: false,
+                })
                 return { proposal }
             } catch (error) {
                 if (token !== seq) return { proposal: null }
@@ -234,6 +280,7 @@ export function createPlanProposalOrchestrator(deps?: Partial<PlanProposalFlowDe
                     isGenerating: false,
                     isApplying: false,
                     error: message,
+                    isStale: false,
                 })
                 return { proposal: null, message }
             }
@@ -250,13 +297,27 @@ export function createPlanProposalOrchestrator(deps?: Partial<PlanProposalFlowDe
                 // نمایش می‌دهد. بنابراین تعویض روز هرگز نمی‌تواند proposal را به روز دیگری
                 // اعمال کند؛ proposal بدون هیچ بازسازی/تغییری به backend فرستاده می‌شود.
                 await resolved.applyProposal(proposal.basis.dayKey, proposal)
-                setState({ proposal: null, isGenerating: false, isApplying: false, error: null })
+                setState({
+                    proposal: null,
+                    isGenerating: false,
+                    isApplying: false,
+                    error: null,
+                    isStale: false,
+                })
                 return { status: "applied" }
             } catch (error) {
                 if (error instanceof ApiClientError && error.code === "PLAN_STALE") {
-                    // proposal کهنه هرگز force-apply نمی‌شود → discard
+                    // proposal کهنه هرگز force-apply نمی‌شود → discard.
+                    // این مسیر «رد بک‌اند» است، نه invalidation سمت کلاینت: پیام خطای
+                    // مخصوص خودش را می‌گیرد و isStale عمداً false می‌ماند.
                     const message = planProposalErrorMessage(error)
-                    setState({ proposal: null, isGenerating: false, isApplying: false, error: message })
+                    setState({
+                        proposal: null,
+                        isGenerating: false,
+                        isApplying: false,
+                        error: message,
+                        isStale: false,
+                    })
                     return { status: "stale", message }
                 }
                 const message = planProposalErrorMessage(error)
@@ -270,6 +331,16 @@ export function createPlanProposalOrchestrator(deps?: Partial<PlanProposalFlowDe
             // درخواست‌های در پرواز بی‌اعتبار می‌شوند تا پاسخ کهنه modal را باز نکند
             seq += 1
             setState(initialPlanProposalState)
+        },
+
+        invalidate() {
+            // مثل clear پاسخ‌های در پرواز را بی‌اعتبار می‌کند (Generate نیمه‌کاره برای
+            // روزی که دیگر انتخاب نشده نباید مودال را باز کند).
+            seq += 1
+            // فقط وقتی واقعاً پیشنهادی باز بوده پیام stale داده می‌شود؛ وگرنه هر تعویض روز
+            // یا هر mutation بی‌ربط، بنر «برنامه‌ات کهنه شد» الکی نشان می‌داد.
+            const hadProposal = state.proposal !== null
+            setState({ ...initialPlanProposalState, isStale: hadProposal })
         },
     }
 }

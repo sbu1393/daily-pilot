@@ -116,6 +116,16 @@
     color: #475467;
 }
 
+/* دلیل AI — متن کوتاه informational زیر ردیف؛ عمداً متفاوت از .tag تا
+   با «برچسب»های داده‌ای (مدت/امتیاز/اولویت) اشتباه نشود. */
+.reason {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.74rem;
+    line-height: 1.7;
+    color: #667085;
+}
+
 .tag {
     display: inline-flex;
     align-items: center;

@@ -83,6 +83,31 @@ describe("buildGenerateBody / buildApplyBody", () => {
         expect(body.expectedPlanVersion).toBe(5)
         expect(body.proposal).toBe(p) // همان reference — بدون بازسازی
     })
+
+    it("omits moveUnfittedToTomorrow entirely when the user did not ask for it (backward compatible)", () => {
+        const body = buildApplyBody(DAY, proposal())
+
+        expect("moveUnfittedToTomorrow" in body).toBe(false)
+    })
+
+    it("carries an explicit true through to the request body", () => {
+        const body = buildApplyBody(DAY, proposal(), true)
+
+        expect(body.moveUnfittedToTomorrow).toBe(true)
+        // فقط یک پرچم — نه انتخاب تسک، نه انتخاب روز مقصد
+        expect(Object.keys(body).sort()).toEqual([
+            "dayKey",
+            "expectedPlanVersion",
+            "moveUnfittedToTomorrow",
+            "proposal",
+        ])
+    })
+
+    it("carries an explicit false through to the request body", () => {
+        const body = buildApplyBody(DAY, proposal(), false)
+
+        expect(body.moveUnfittedToTomorrow).toBe(false)
+    })
 })
 
 describe("isPlanProposal", () => {
@@ -201,6 +226,8 @@ describe("orchestrator — apply", () => {
         expect(applyProposal.mock.calls[0][0]).toBe(DAY)
         expect(applyProposal.mock.calls[0][1]).toBe(p) // same object — not reconstructed
         expect(p.basis.planVersion).toBe(5)
+        // بدون انتخاب کاربر، هیچ پرچمی به endpoint نمی‌رود
+        expect(applyProposal.mock.calls[0][2]).toBeUndefined()
     })
 
     it("(6) a successful apply clears the proposal", async () => {
@@ -209,7 +236,6 @@ describe("orchestrator — apply", () => {
             applyProposal: async () => {},
         })
         await flow.generate(DAY)
-
         await flow.apply()
 
         expect(flow.getState().proposal).toBeNull()
@@ -495,5 +521,78 @@ describe("orchestrator — subscription", () => {
         expect(seen).toContain("g:true,p:false")
         expect(seen).toContain("g:false,p:true")
         expect(seen[seen.length - 1]).toBe("g:false,p:false")
+    })
+})
+
+/* ------------------------------------------------------------------ */
+/* Phase 4.4 — انتخاب «انتقال جا‌نشده‌ها به فردا» از مودال تا API       */
+/* ------------------------------------------------------------------ */
+
+describe("orchestrator — apply(moveUnfittedToTomorrow)", () => {
+    const setupFlow = (applyProposal: ReturnType<typeof vi.fn>) => {
+        const p = proposal()
+        const flow = createPlanProposalOrchestrator({ fetchProposal: async () => p, applyProposal })
+        return { flow, p }
+    }
+
+    it("forwards a checked choice (true) all the way to the apply endpoint", async () => {
+        const applyProposal = vi.fn().mockResolvedValue(undefined)
+        const { flow, p } = setupFlow(applyProposal)
+
+        await flow.generate(DAY)
+        const outcome = await flow.apply(true)
+
+        expect(outcome.status).toBe("applied")
+        expect(applyProposal).toHaveBeenCalledTimes(1)
+        expect(applyProposal.mock.calls[0][0]).toBe(DAY)
+        // proposal بدون هیچ تغییری همان reference می‌ماند — فقط پرچم اضافه می‌شود
+        expect(applyProposal.mock.calls[0][1]).toBe(p)
+        expect(applyProposal.mock.calls[0][2]).toBe(true)
+        expect(p.basis.dayKey).toBe(DAY)
+    })
+
+    it("forwards an unchecked choice (false) and stays backward compatible", async () => {
+        const applyProposal = vi.fn().mockResolvedValue(undefined)
+        const { flow, p } = setupFlow(applyProposal)
+
+        await flow.generate(DAY)
+        await flow.apply(false)
+
+        expect(applyProposal.mock.calls[0][1]).toBe(p)
+        expect(applyProposal.mock.calls[0][2]).toBe(false)
+    })
+
+    it("sends no flag at all when the modal never passes one (apply())", async () => {
+        const applyProposal = vi.fn().mockResolvedValue(undefined)
+        const { flow } = setupFlow(applyProposal)
+
+        await flow.generate(DAY)
+        await flow.apply()
+
+        expect(applyProposal.mock.calls[0][2]).toBeUndefined()
+    })
+
+    it("keeps the choice out of the flow state — it is not persisted anywhere", async () => {
+        const applyProposal = vi.fn().mockResolvedValue(undefined)
+        const { flow } = setupFlow(applyProposal)
+
+        await flow.generate(DAY)
+        await flow.apply(true)
+
+        expect("moveUnfittedToTomorrow" in flow.getState()).toBe(false)
+        // و پس از Apply، proposal دور ریخته می‌شود — انتخاب کاربر باقی نمی‌ماند
+        expect(flow.getState().proposal).toBeNull()
+    })
+
+    it("does not resend a move request when the apply fails with PLAN_STALE", async () => {
+        const applyProposal = vi.fn().mockRejectedValue(new ApiClientError(409, "PLAN_STALE", "stale"))
+        const { flow } = setupFlow(applyProposal)
+
+        await flow.generate(DAY)
+        const outcome = await flow.apply(true)
+
+        expect(outcome.status).toBe("stale")
+        expect(applyProposal).toHaveBeenCalledTimes(1)
+        expect(applyProposal.mock.calls[0][2]).toBe(true)
     })
 })

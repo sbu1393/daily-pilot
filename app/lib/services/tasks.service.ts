@@ -6,6 +6,7 @@ import {
     type RebalanceOutput,
 } from "@/app/lib/planner/rebalance"
 import { getDaySummary, type DaySummary } from "@/app/lib/planner/summary"
+import { buildRolloverOps } from "@/app/lib/planner/rolloverOps"
 import {
     canonicalKeyToLocalMidnight,
     getCanonicalDayKey,
@@ -283,35 +284,53 @@ export async function rolloverTasks(
     const affectedDays = new Set<string>()
     const moved: { id: number; from: string; to: string }[] = []
 
-    const ops: PrismaPromise<unknown>[] = []
+    // قاعدهٔ «روز مقصد» در همین مسیر عمومی عیناً حفظ شده و دست‌نخورده است:
+    // عقب‌افتاده → امروز؛ تسک امروز/آینده → فردا.
+    // فقط *محاسبهٔ نوشتن‌ها* به هستهٔ خالصِ rolloverOps سپرده شده تا مسیر Apply هم
+    // دقیقاً همان معنا را داشته باشد (بدون هیچ تغییری در رفتار این مسیر).
+    // گروه‌بندی بر اساس روز مقصد انجام می‌شود تا ترتیب تسک‌ها/روزها مثل قبل بماند.
+    const groups = new Map<string, typeof schedulable>()
     for (const task of schedulable) {
-        const from = task.dayKey
-        // عقب‌افتاده → امروز؛ تسک امروز/آینده → فردا
-        const to = from < today ? today : shiftCanonicalKey(from, 1)
-        affectedDays.add(from)
-        affectedDays.add(to)
-        moved.push({ id: task.id, from, to })
-        ops.push(
-            prisma.task.update({
-                where: { id: task.id },
-                data: {
-                    dayKey: to,
-                    scheduledDate: canonicalKeyToLocalMidnight(to, timezone),
-                    previousScheduledDate: task.scheduledDate,
-                    allocatedMinutes: null, // تخصیص در روز مقصد دوباره تصمیم گرفته می‌شه
-                },
-            }),
-        )
+        const to = task.dayKey < today ? today : shiftCanonicalKey(task.dayKey, 1)
+        const bucket = groups.get(to)
+        if (bucket) bucket.push(task)
+        else groups.set(to, [task])
+    }
+
+    const ops: PrismaPromise<unknown>[] = []
+    for (const [to, group] of groups) {
+        const plan = buildRolloverOps(group, to, timezone)
+
+        for (const op of plan.taskOps) {
+            affectedDays.add(op.fromDayKey)
+            affectedDays.add(op.toDayKey)
+            ops.push(
+                prisma.task.update({
+                    where: { id: op.taskId },
+                    data: {
+                        dayKey: op.toDayKey,
+                        scheduledDate: op.scheduledDate,
+                        previousScheduledDate: op.previousScheduledDate,
+                        allocatedMinutes: op.allocatedMinutes,
+                    },
+                }),
+            )
+        }
+
         // A2: رویداد ROLLED_OVER per-task در همان transaction (§6.3.6 — payload مثال)
-        ops.push(
-            prisma.taskEvent.create({
-                data: {
-                    taskId: task.id,
-                    type: "ROLLED_OVER",
-                    payload: { fromDayKey: from, toDayKey: to },
-                },
-            }),
-        )
+        for (const event of plan.eventOps) {
+            ops.push(
+                prisma.taskEvent.create({
+                    data: {
+                        taskId: event.taskId,
+                        type: "ROLLED_OVER",
+                        payload: { fromDayKey: event.fromDayKey, toDayKey: event.toDayKey },
+                    },
+                }),
+            )
+        }
+
+        moved.push(...plan.moved)
     }
 
     // A3: روزهای متأثر در همان transaction rollover stale می‌شوند (bump اتمیک)

@@ -57,6 +57,7 @@ import { PlanStaleError, AiProviderUnavailableError } from "@/app/lib/services/e
 const USER_ID = 7
 const OTHER_USER_ID = 99
 const DAY = "2026-09-27"
+const TIMEZONE = "Asia/Tehran"
 
 type Status = "TODO" | "IN_PROGRESS" | "DONE"
 type TaskRow = {
@@ -253,6 +254,7 @@ describe("spec §24 — main lifecycle: generate → accept → add task → reg
         // ── مرحله ۲: Accept ───────────────────────────────────────────
         const appliedFirst = await applyPlan(USER_ID, {
             dayKey: DAY,
+            timezone: TIMEZONE,
             expectedPlanVersion: first.basis.planVersion,
             proposal: first,
         })
@@ -266,6 +268,7 @@ describe("spec §24 — main lifecycle: generate → accept → add task → reg
         day.addTask(taskRow(4, { title: "خرید نان" }))
         const bumped = await applyPlan(USER_ID, {
             dayKey: DAY,
+            timezone: TIMEZONE,
             expectedPlanVersion: 1,
             proposal: first,
         }).then(
@@ -285,6 +288,7 @@ describe("spec §24 — main lifecycle: generate → accept → add task → reg
         // ── مرحله ۵: Accept مجدد → نسخهٔ N+1 ──────────────────────────
         const appliedSecond = await applyPlan(USER_ID, {
             dayKey: DAY,
+            timezone: TIMEZONE,
             expectedPlanVersion: second.basis.planVersion,
             proposal: second,
         })
@@ -404,6 +408,7 @@ describe("regression — AI advisory unscheduled overlaps engine planned", () =>
         // و Apply واقعاً اجرا می‌شود (گارد نسخه می‌گذرد، metadata نوشته می‌شود)
         const applied = await applyPlan(USER_ID, {
             dayKey: DAY,
+            timezone: TIMEZONE,
             expectedPlanVersion: proposal.basis.planVersion,
             proposal,
         })
@@ -458,6 +463,7 @@ describe("regression — AI advisory unscheduled overlaps engine planned", () =>
         // کل روز قابل Apply است
         const applied = await applyPlan(USER_ID, {
             dayKey: DAY,
+            timezone: TIMEZONE,
             expectedPlanVersion: proposal.basis.planVersion,
             proposal,
         })

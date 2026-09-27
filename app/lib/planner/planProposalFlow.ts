@@ -76,12 +76,23 @@ export function buildGenerateBody(dayKey: string): { dayKey: string } {
 /**
  * Apply دقیقاً همان proposal دریافت‌شده از Generate را round-trip می‌کند (بدون بازسازی/تغییر)
  * به‌همراه dayKey و expectedPlanVersion = basis.planVersion.
+ *
+ * `moveUnfittedToTomorrow` یک گزینهٔ اختیاری است (Phase 4.4): کاربر در مودال انتخاب
+ * می‌کند کارهای جا‌نشده به فردا منتقل شوند یا نه. این فقط یک boolean است — نه انتخاب
+ * تسک‌ها، نه انتخاب روز مقصد (هر دو سمت سرور و صرفاً بر پایهٔ `unfitted` روزِ proposal
+ * تصمیم گرفته می‌شوند). مقدار `undefined` یعنی «کلاً نخواسته» و ارسال نمی‌شود.
  */
 export function buildApplyBody(
     dayKey: string,
     proposal: PlanProposal,
-): { dayKey: string; expectedPlanVersion: number; proposal: PlanProposal } {
-    return { dayKey, expectedPlanVersion: proposal.basis.planVersion, proposal }
+    moveUnfittedToTomorrow?: boolean,
+): { dayKey: string; expectedPlanVersion: number; proposal: PlanProposal; moveUnfittedToTomorrow?: boolean } {
+    return {
+        dayKey,
+        expectedPlanVersion: proposal.basis.planVersion,
+        proposal,
+        ...(moveUnfittedToTomorrow === undefined ? {} : { moveUnfittedToTomorrow }),
+    }
 }
 
 // ---------- Runtime shape guard ----------
@@ -116,11 +127,15 @@ export async function fetchPlanProposal(dayKey: string, signal?: AbortSignal): P
     return data
 }
 
-export async function applyPlanProposal(dayKey: string, proposal: PlanProposal): Promise<void> {
+export async function applyPlanProposal(
+    dayKey: string,
+    proposal: PlanProposal,
+    moveUnfittedToTomorrow?: boolean,
+): Promise<void> {
     await api("/api/planner/plan/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildApplyBody(dayKey, proposal)),
+        body: JSON.stringify(buildApplyBody(dayKey, proposal, moveUnfittedToTomorrow)),
     })
 }
 
@@ -201,15 +216,24 @@ export type GeneratePlanOutcome = {
 
 export type PlanProposalFlowDeps = {
     fetchProposal: (dayKey: string) => Promise<PlanProposal>
-    applyProposal: (dayKey: string, proposal: PlanProposal) => Promise<void>
+    applyProposal: (
+        dayKey: string,
+        proposal: PlanProposal,
+        moveUnfittedToTomorrow?: boolean,
+    ) => Promise<void>
 }
 
 export type PlanProposalFlow = {
     getState: () => PlanProposalFlowState
     subscribe: (listener: (state: PlanProposalFlowState) => void) => () => void
     generate: (dayKey: string) => Promise<GeneratePlanOutcome>
-    /** Apply همیشه به روزِ اصلیِ خودِ proposal (basis.dayKey) می‌رود — نه روزِ در حال نمایش. */
-    apply: () => Promise<ApplyPlanOutcome>
+    /**
+     * Apply همیشه به روزِ اصلیِ خودِ proposal (basis.dayKey) می‌رود — نه روزِ در حال نمایش.
+     *
+     * `moveUnfittedToTomorrow` انتخاب صریح کاربر در مودال است (Phase 4.4). پیش‌فرض
+     * `undefined` یعنی «انتقالی نخواسته» و body دقیقاً مثل قبل ساخته می‌شود.
+     */
+    apply: (moveUnfittedToTomorrow?: boolean) => Promise<ApplyPlanOutcome>
     /** Reject/Close کاربر: discard محلی و بی‌صدا. هیچ mutation ای نمی‌زند. */
     clear: () => void
     /**
@@ -286,7 +310,7 @@ export function createPlanProposalOrchestrator(deps?: Partial<PlanProposalFlowDe
             }
         },
 
-        async apply() {
+        async apply(moveUnfittedToTomorrow) {
             const proposal = state.proposal
             if (!proposal) return { status: "noop" }
             if (state.isApplying) return { status: "noop" } // ضد Apply دوباره روی یک proposal
@@ -296,7 +320,9 @@ export function createPlanProposalOrchestrator(deps?: Partial<PlanProposalFlowDe
                 // Phase 4.4 (Step 12) — هدفِ Apply روزِ خودِ proposal است، نه روزی که UI الان
                 // نمایش می‌دهد. بنابراین تعویض روز هرگز نمی‌تواند proposal را به روز دیگری
                 // اعمال کند؛ proposal بدون هیچ بازسازی/تغییری به backend فرستاده می‌شود.
-                await resolved.applyProposal(proposal.basis.dayKey, proposal)
+                // انتخاب «انتقال جا‌نشده‌ها به فردا» هم صرفاً یک پرچم است و همان proposal
+                // را تغییر نمی‌دهد — تصمیم نهایی (کدام تسک، کدام روز) سمت سرور است.
+                await resolved.applyProposal(proposal.basis.dayKey, proposal, moveUnfittedToTomorrow)
                 setState({
                     proposal: null,
                     isGenerating: false,

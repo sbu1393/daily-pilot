@@ -316,8 +316,10 @@ export default function DailyTaskList() {
     // Phase 4.3 — Accept: فقط از تأیید صریح کاربر؛ proposal بدون بازسازی به Apply می‌رود.
     // Phase 4.4 — هدف Apply روزِ خودِ proposal است (نه selectedDate)، پس تعویض روز نمی‌تواند
     // آن را به روز دیگری بفرستد. موفقیت → رفرش همان مسیر موجود + planner:mutated.
-    const handleAcceptPlan = async () => {
-        const outcome = await applyPlan()
+    // `moveUnfittedToTomorrow` فقط از مودال می‌آید و همین‌جا بدون state اضافه (نه store
+    // نه global) مستقیم به Apply رد می‌شود — انتخاب کاربر، نه وضعیت دائمی برنامه.
+    const handleAcceptPlan = async (moveUnfittedToTomorrow: boolean) => {
+        const outcome = await applyPlan(moveUnfittedToTomorrow)
         if (outcome.status === "applied") {
             await afterMutation("برنامه اعمال شد ✅")
         } else if (outcome.message) {

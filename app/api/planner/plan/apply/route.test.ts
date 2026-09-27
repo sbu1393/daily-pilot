@@ -75,6 +75,7 @@ const RESULT = {
     plannedMinutes: 80,
     remainingMinutes: 40,
     tasks: [{ id: 1, estimatedTime: 40 }],
+    movedTaskIds: [],
 }
 
 const body = (overrides: Record<string, unknown> = {}) => ({
@@ -108,6 +109,9 @@ describe("POST /api/planner/plan/apply", () => {
             dayKey: DAY,
             expectedPlanVersion: 5,
             proposal: expect.objectContaining({ source: "1xai" }),
+            timezone: USER.timezone,
+            // نبودِ فیلد در body = رفتار قبلی Apply
+            moveUnfittedToTomorrow: false,
         })
     })
 
@@ -183,6 +187,8 @@ describe("POST /api/planner/plan/apply", () => {
             dayKey: DAY,
             expectedPlanVersion: 5,
             proposal: withReason,
+            timezone: USER.timezone,
+            moveUnfittedToTomorrow: false,
         })
     })
 
@@ -268,5 +274,77 @@ describe("POST /api/planner/plan/apply", () => {
         mocks.applyPlan.mockRejectedValue(new PlanStaleError())
         const err = await callPOST(body())
         expect(err.headers.get("X-Request-ID")).toEqual(expect.any(String))
+    })
+})
+
+/* ------------------------------------------------------------------ */
+/* Phase 4.4 — گزینهٔ اختیاری «انتقال موارد خارج از ظرفیت به فردا»       */
+/* ------------------------------------------------------------------ */
+
+describe("POST /api/planner/plan/apply — moveUnfittedToTomorrow (Phase 4.4)", () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.getCurrentUser.mockResolvedValue(USER)
+        mocks.applyPlan.mockResolvedValue({ ...RESULT, movedTaskIds: [3], destinationDayKey: "2026-09-28" })
+    })
+
+    it("accepts the flag and forwards it to the service verbatim", async () => {
+        const res = await callPOST(body({ moveUnfittedToTomorrow: true }))
+
+        expect(res.status).toBe(200)
+        expect(mocks.applyPlan).toHaveBeenCalledWith(
+            USER.id,
+            expect.objectContaining({ moveUnfittedToTomorrow: true }),
+        )
+    })
+
+    it("accepts the field being omitted entirely (backward-compatible client)", async () => {
+        const res = await callPOST(body())
+
+        expect(res.status).toBe(200)
+        // نبودِ فیلد به false نگاشت می‌شود تا رفتار قبلی Apply حفظ شود
+        expect(mocks.applyPlan).toHaveBeenCalledWith(
+            USER.id,
+            expect.objectContaining({ moveUnfittedToTomorrow: false }),
+        )
+    })
+
+    it("forwards an explicit false unchanged", async () => {
+        const res = await callPOST(body({ moveUnfittedToTomorrow: false }))
+
+        expect(res.status).toBe(200)
+        expect(mocks.applyPlan).toHaveBeenCalledWith(
+            USER.id,
+            expect.objectContaining({ moveUnfittedToTomorrow: false }),
+        )
+    })
+
+    it.each([
+        ["string", "true"],
+        ["number", 1],
+        ["null", null],
+        ["object", {}],
+    ])("rejects a non-boolean value (%s) and never calls the service", async (_label, value) => {
+        const res = await callPOST(body({ moveUnfittedToTomorrow: value }))
+
+        expect(res.status).toBe(400)
+        expect((await res.json()).error.code).toBe("VALIDATION_ERROR")
+        expect(mocks.applyPlan).not.toHaveBeenCalled()
+    })
+
+    it("exposes the moved tasks and destination day in the response envelope", async () => {
+        const parsed = await (await callPOST(body({ moveUnfittedToTomorrow: true }))).json()
+
+        expect(parsed.data.movedTaskIds).toEqual([3])
+        expect(parsed.data.destinationDayKey).toBe("2026-09-28")
+    })
+
+    it("never accepts a day or task list for the move — only the boolean", async () => {
+        const res = await callPOST(
+            body({ moveUnfittedToTomorrow: { taskIds: [3], dayKey: "2026-09-28" } }),
+        )
+
+        expect(res.status).toBe(400)
+        expect(mocks.applyPlan).not.toHaveBeenCalled()
     })
 })

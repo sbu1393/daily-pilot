@@ -149,6 +149,12 @@ export const planApplyRequestSchema = z.object({
     dayKey: z.string().refine(isValidCanonicalDayKey, "فرمت روز نامعتبر است"),
     expectedPlanVersion: z.number().int().nonnegative(),
     proposal: planProposalSchema,
+    // Phase 4.4 — اختیاری (additive، بدون شکستن قرارداد موجود): کاربر می‌تواند
+    // هنگام Apply، تسک‌های «خارج از ظرفیت» را به فردا منتقل کند. نبودِ فیلد
+    // یعنی رفتار قدیمیِ Apply (هیچ انتقالی). توجه: این فقط یک گزینه است —
+    // قاعدهٔ انتخاب کدام تسک‌ها (`unfitted`) و روز مقصد در سرویس و به‌صورت
+    // صرفاً سمت سرور است و هرگز از client پذیرفته نمی‌شود.
+    moveUnfittedToTomorrow: z.boolean().optional(),
 })
 
 export const reanalyzeTaskSchema = z.object({

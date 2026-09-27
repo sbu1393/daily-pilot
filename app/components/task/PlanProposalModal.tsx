@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 
 import AnimatedModal from "../motion/AnimatedModal"
 import { faDigits, fmtMinutes } from "@/app/lib/time"
@@ -19,6 +19,8 @@ import styles from "./planProposal.module.css"
 // - Close/Reject فقط محلی discard می‌کند (onClose) و هیچ mutation ای نمی‌زند.
 // - `order` = rank قطعی موتور؛ `aiOrder` فقط advisory است و هرگز مثل time-slot/ساعت واقعی نشان داده نمی‌شود.
 // - ظرفیت مستقیماً از proposal خوانده می‌شود (بدون بازمحاسبه).
+// - Phase 4.4: تنها یک گزینهٔ اختیاریِ محلی دارد — «انتقال موارد خارج از ظرفیت به فردا».
+//   این state عمداً محلیِ همین مودال است (نه global/store): مودال بسته شود، انتخاب هم می‌پرد.
 
 type Props = {
     open: boolean
@@ -27,7 +29,8 @@ type Props = {
     tasks: TaskItem[]
     isApplying?: boolean
     error?: string | null
-    onAccept: () => void
+    /** آرگومان = آیا کاربر خواسته جا‌نشده‌ها به فردا منتقل شوند (پیش‌فرض خاموش) */
+    onAccept: (moveUnfittedToTomorrow: boolean) => void
     onClose: () => void
 }
 
@@ -61,6 +64,12 @@ export default function PlanProposalModal({
     onClose,
 }: Props) {
     const view = useMemo(() => buildPlanProposalView(proposal, tasks), [proposal, tasks])
+
+    // Phase 4.4 — انتخاب محلیِ «انتقال جا‌نشده‌ها به فردا». پیش‌فرض خاموش است تا
+    // رفتار پیشین Apply (هیچ انتقالی) به‌عنوان پیش‌فرض حفظ شود.
+    const [moveToTomorrow, setMoveToTomorrow] = useState(false)
+    // گزینه فقط وقتی معنا دارد که واقعاً کاری جا نمانده باشد
+    const canMoveUnfitted = view.unfitted.length > 0
 
     // هنگام Apply، بستن (Escape/overlay/✕) قفل می‌شود تا وضعیت نیمه‌کاره نشود
     const guardedClose = () => {
@@ -215,6 +224,21 @@ export default function PlanProposalModal({
                     <p className={styles.hint}>
                         کارهای جا‌نشده دست‌نخورده می‌مانند؛ هیچ کاری خودکار حذف، موکول یا جابه‌جا نمی‌شود.
                     </p>
+
+                    {/* Phase 4.4 — گزینهٔ اختیاریِ انتقال به فردا. بدون تیک، رفتار قبلی عیناً حفظ می‌شود. */}
+                    {canMoveUnfitted && (
+                        <label className={styles.optionRow}>
+                            <input
+                                type="checkbox"
+                                className={styles.optionCheckbox}
+                                checked={moveToTomorrow}
+                                onChange={(event) => setMoveToTomorrow(event.target.checked)}
+                                disabled={isApplying}
+                            />
+                            <span>انتقال موارد خارج از ظرفیت به فردا</span>
+                        </label>
+                    )}
+
                     {sourceNotice && <p className={styles.hint}>{sourceNotice}</p>}
                 </div>
 
@@ -227,7 +251,7 @@ export default function PlanProposalModal({
                 <div className={taskStyles.modalActions}>
                     <button
                         className={taskStyles.btnPrimary}
-                        onClick={onAccept}
+                        onClick={() => onAccept(moveToTomorrow)}
                         disabled={isApplying}
                         aria-disabled={isApplying}
                     >

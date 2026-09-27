@@ -18,7 +18,9 @@
 import type { Prisma, Task } from "@prisma/client"
 
 import { getPrisma } from "@/app/lib/getPrisma"
+import { shiftCanonicalKey } from "@/app/lib/canonicalDay"
 import type { PlanProposal } from "@/app/lib/planner/planProposal"
+import { buildRolloverOps } from "@/app/lib/planner/rolloverOps"
 
 import { getDayTasks } from "./tasks.service"
 import { PlanStaleError } from "./errors"
@@ -27,6 +29,14 @@ export type ApplyPlanInput = {
     dayKey: string
     expectedPlanVersion: number
     proposal: PlanProposal
+    /** timezone کاربر — فقط برای محاسبهٔ نیمه‌شب محلیِ روز مقصد (بدون آن، از DB خوانده نمی‌شود) */
+    timezone: string
+    /**
+     * Phase 4.4 — گزینهٔ اختیاری «انتقال موارد خارج از ظرفیت به فردا».
+     * پیش‌فرض false؛ بدون آن رفتار Apply **دقیقاً** همان رفتار قبلی می‌ماند
+     * (هیچ تسکی جابه‌جا نمی‌شود، هیچ نسخه‌ای بیشتر bump نمی‌شود).
+     */
+    moveUnfittedToTomorrow?: boolean
 }
 
 export type ApplyPlanResult = {
@@ -38,6 +48,14 @@ export type ApplyPlanResult = {
     plannedMinutes: number
     remainingMinutes: number
     tasks: Task[]
+    /**
+     * Phase 4.4 (additive) — شناسهٔ تسک‌هایی که واقعاً به روز بعد منتقل شدند.
+     * اگر هیچ چیز منتقل نشد (گزینه خاموش، یا `unfitted` خالی) آرایهٔ خالی است.
+     * توجه: شناسه‌ها در این پروژه عددی‌اند (Prisma Int) — مثل `aiUnscheduledTaskIds`.
+     */
+    movedTaskIds: number[]
+    /** روز مقصد انتقال — فقط وقتی واقعاً چیزی منتقل شده باشد مقدار دارد. */
+    destinationDayKey?: string
 }
 
 /**
@@ -52,7 +70,8 @@ export type ApplyPlanResult = {
  * اگر گاردِ نسخه count=0 بدهد، کل تراکنش rollback می‌شود → هیچ تسکی تغییر نمی‌کند.
  */
 export async function applyPlan(userId: number, input: ApplyPlanInput): Promise<ApplyPlanResult> {
-    const { dayKey, expectedPlanVersion, proposal } = input
+    const { dayKey, expectedPlanVersion, proposal, timezone } = input
+    const moveUnfittedToTomorrow = input.moveUnfittedToTomorrow ?? false
 
     // (۱) Trust boundary — proposal باید به همین روز و همین نسخه تعلق داشته باشد.
     if (
@@ -76,7 +95,9 @@ export async function applyPlan(userId: number, input: ApplyPlanInput): Promise<
         }),
         prisma.task.findMany({
             where: { id: { in: referencedIds }, userId },
-            select: { id: true, dayKey: true, status: true },
+            // scheduledDate فقط وقتی لازم است که انتقالِ جا‌نشده‌ها خواسته شده باشد؛
+            // با همان select خوانده می‌شود تا Apply یک query بیشتر نزند.
+            select: { id: true, dayKey: true, status: true, scheduledDate: true },
         }),
     ])
 
@@ -109,6 +130,33 @@ export async function applyPlan(userId: number, input: ApplyPlanInput): Promise<
             priority: item.priority,
         }))
 
+    // Phase 4.4 — «انتقال موارد خارج از ظرفیت به فردا».
+    //
+    // قاعدهٔ مقصد (LOCKED): همیشه `shiftCanonicalKey(proposal.basis.dayKey, 1)` —
+    // یعنی **فردا نسبت به روزِ خودِ proposal**، نه فردا نسبت به امروز. برای
+    // پیشنهادِ مربوط به یک روز گذشته هم همین قاعده عیناً اعمال می‌شود؛ بنابراین
+    // شاخهٔ «عقب‌افتاده → امروز»ِ مسیر عمومی rollover اینجا عمداً استفاده نمی‌شود.
+    //
+    // فقط تسک‌های TODO جابه‌جا می‌شوند: تخصیص IN_PROGRESS محافظت‌شده است و
+    // DONE (که اصلاً در proposal نیست) پیش‌تر با PLAN_STALE رد شده است.
+    const destinationDayKey = shiftCanonicalKey(proposal.basis.dayKey, 1)
+    const unfittedIds = new Set(proposal.unfitted.map((item) => item.taskId))
+    const movableUnfitted = moveUnfittedToTomorrow
+        ? tasks.filter((task) => task.status === "TODO" && unfittedIds.has(task.id))
+        : []
+    const rolloverPlan = movableUnfitted.length
+        ? buildRolloverOps(
+              movableUnfitted.map((task) => ({
+                  id: task.id,
+                  dayKey: task.dayKey,
+                  scheduledDate: task.scheduledDate,
+              })),
+              destinationDayKey,
+              timezone,
+          )
+        : null
+    const movedTaskIds = rolloverPlan ? rolloverPlan.moved.map((m) => m.id) : []
+
     await prisma.$transaction(async (tx) => {
         // گاردِ اتمیک نسخه: increment شرطی. اگر روز بین Generate و Apply حرکت کرده باشد
         // (task اضافه/حذف/تمام/منتقل، تغییر ظرفیت، تغییر status... همه planVersion را bump می‌کنند)
@@ -134,6 +182,43 @@ export async function applyPlan(userId: number, input: ApplyPlanInput): Promise<
             // دفاعی: اگر تسک بین pre-check و تراکنش تغییر کرده باشد، هیچ نوشتنی commit نمی‌شود
             if (res.count !== 1) throw new PlanStaleError()
         }
+
+        // گام ۳ — انتقال جا‌نشده‌ها (فقط وقتی گزینه روشن باشد). planning-only:
+        // فقط dayKey/scheduledDate/previousScheduledDate/allocatedMinutes تغییر می‌کنند و
+        // status/category/priority/score/estimatedTime/reason دست‌نخورده می‌مانند.
+        for (const op of rolloverPlan?.taskOps ?? []) {
+            const res = await tx.task.updateMany({
+                where: { id: op.taskId, userId, dayKey, status: "TODO" },
+                data: {
+                    dayKey: op.toDayKey,
+                    scheduledDate: op.scheduledDate,
+                    previousScheduledDate: op.previousScheduledDate,
+                    allocatedMinutes: op.allocatedMinutes,
+                },
+            })
+            // همان دفاع قبلی: تغییر هم‌زمان ⇒ کل تراکنش بدون نوشتن برمی‌گردد
+            if (res.count !== 1) throw new PlanStaleError()
+        }
+
+        // گام ۴ — رویداد ROLLED_OVER برای هر تسکِ منتقل‌شده (همان semantics مسیر rollover)
+        for (const event of rolloverPlan?.eventOps ?? []) {
+            await tx.taskEvent.create({
+                data: {
+                    taskId: event.taskId,
+                    type: "ROLLED_OVER",
+                    payload: { fromDayKey: event.fromDayKey, toDayKey: event.toDayKey },
+                },
+            })
+        }
+
+        // گام ۵ — فقط روز مقصد bump می‌شود؛ روز مبدأ در گام ۱ (گارد) bump شده و
+        // دوباره bump نمی‌شود. نبودِ DailyPlan در مقصد یعنی no-op (همان رفتار rollover).
+        if (rolloverPlan) {
+            await tx.dailyPlan.updateMany({
+                where: { userId, dayKey: destinationDayKey },
+                data: { planVersion: { increment: 1 } },
+            })
+        }
     })
 
     // (۴) تخصیص از مسیر lazy rebalance موجود دوباره محاسبه می‌شود (همان scheduler قطعی). این یک
@@ -154,5 +239,8 @@ export async function applyPlan(userId: number, input: ApplyPlanInput): Promise<
         plannedMinutes: summary.committedMinutes,
         remainingMinutes: summary.poolMinutes,
         tasks: dayTasks,
+        // additive: وقتی چیزی منتقل نشده، مقصد اصلاً معنا ندارد
+        movedTaskIds,
+        ...(movedTaskIds.length > 0 ? { destinationDayKey } : {}),
     }
 }

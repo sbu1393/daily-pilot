@@ -20,7 +20,7 @@ export type UsePlanProposalResult = PlanProposalFlowState & {
     /** Generate: proposal + پیام خطای احتمالی (بدون پرتاب استثنا). */
     generate: (dayKey: string) => Promise<GeneratePlanOutcome>
     /** Apply: proposal فعلی را به روزِ خودش (basis.dayKey) به endpoint موجود Apply می‌فرستد. */
-    apply: () => Promise<ApplyPlanOutcome>
+    apply: (moveUnfittedToTomorrow?: boolean) => Promise<ApplyPlanOutcome>
     /** Discard محلی proposal — هیچ mutation ای انجام نمی‌دهد. (Reject/Close کاربر) */
     clear: () => void
     /** پیشنهادِ باز به‌دلیل mutation داخلی بی‌اعتبار شد (تغییر روز/کار/ظرفیت). */

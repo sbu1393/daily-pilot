@@ -159,3 +159,33 @@
     line-height: 1.9;
     color: #667085;
 }
+
+/* Phase 4.4 — ردیف گزینهٔ اختیاری «انتقال جا‌نشده‌ها به فردا».
+   کل ردیف قابل کلیک است (label) تا هدف لمس بزرگ‌تر شود؛ در RTL چیدمان طبیعی می‌ماند. */
+.optionRow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid #eaecf0;
+    border-radius: 10px;
+    background: #fcfcfd;
+    font-size: 0.8rem;
+    line-height: 1.7;
+    color: #344054;
+    cursor: pointer;
+}
+
+.optionRow:has(.optionCheckbox:disabled) {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.optionCheckbox {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: #175cd3;
+    cursor: inherit;
+}

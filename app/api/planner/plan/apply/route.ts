@@ -35,12 +35,17 @@ export async function POST(req: NextRequest) {
             return validationErrorResponse(parsed.error.flatten(), undefined, context.requestId)
         }
 
-        const { dayKey, expectedPlanVersion, proposal } = parsed.data
+        const { dayKey, expectedPlanVersion, proposal, moveUnfittedToTomorrow } = parsed.data
 
         const result = await applyPlan(user.id, {
             dayKey,
             expectedPlanVersion,
             proposal: proposal as PlanProposal,
+            // timezone از session کاربر می‌آید (نه از body) — نیمه‌شب محلیِ روز مقصد
+            // باید در همان منطقهٔ زمانی‌ای محاسبه شود که روزهای کاربر با آن تعریف شده‌اند.
+            timezone: user.timezone,
+            // Phase 4.4 — نبودِ فیلد = رفتار قبلیِ Apply
+            moveUnfittedToTomorrow: moveUnfittedToTomorrow ?? false,
         })
 
         return okResponse(result, { requestId: context.requestId })

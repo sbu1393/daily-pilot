@@ -1,5 +1,18 @@
 import { canonicalKeyToLocalMidnight } from "@/app/lib/canonicalDay"
-import { CATEGORY_REQUIRED_MESSAGE, TASK_CATEGORY_KEYS } from "@/app/lib/categories"
+import {
+    CATEGORY_ICON_WITHOUT_CATEGORY_MESSAGE,
+    CATEGORY_REQUIRED_MESSAGE,
+    CUSTOM_CATEGORY_ICON_INVALID_MESSAGE,
+    CUSTOM_CATEGORY_ICON_REQUIRED_MESSAGE,
+    CUSTOM_CATEGORY_ICONS,
+    CUSTOM_CATEGORY_LABEL_MESSAGE,
+    CUSTOM_CATEGORY_MARKUP_MESSAGE,
+    CUSTOM_CATEGORY_MIN_LENGTH,
+    CUSTOM_CATEGORY_MAX_LENGTH,
+    CUSTOM_CATEGORY_RESERVED_MESSAGE,
+    PRESET_ICON_FORBIDDEN_MESSAGE,
+    classifyCategory,
+} from "@/app/lib/categories"
 import { z } from "zod"
 
 // C1 — Task CRUD validation (Phase C1: Task CRUD Foundation)
@@ -37,18 +50,107 @@ function makeScheduledDateField(timezone: string) {
 }
 
 /**
- * دسته‌بندی تسک — **اجباری** و از واژگان canonical.
+ * دسته‌بندی تسک — **اجباری**، و یا یک کلید canonical (preset) یا یک برچسب
+ * سفارشی معتبر.
  *
- * `z.enum` روی آرایهٔ ثابت، هر ورودی خارج از واژگان را رد می‌کند: غایب
- * (undefined)، null، رشتهٔ خالی/فقط‌فاصله، کلید ناشناخته و غیررشته. یعنی
- * «هیچ مسیر create موفقی با category خالی وجود ندارد».
+ * قبلاً اینجا `z.enum` بود؛ حالا رشتهٔ trim‌شده‌ای می‌پذیرد که یا در واژگان
+ * canonical است یا قاعدهٔ custom را گذرانده (طول، نبود markup، نبود هم‌پوشانی
+ * با کلیدهای preset). غایب (undefined)، null، رشتهٔ خالی/فقط‌فاصله، غیررشته و
+ * برچسب نامعتبر همچنان خطا هستند — یعنی «هیچ مسیر create موفقی با دستهٔ خالی
+ * وجود ندارد» دست‌نخورده می‌ماند.
+ *
+ * `categoryIcon` در همین سطح جداگانه validate می‌شود: برای custom **اجباری** و
+ * باید عضو allowlist باشد، برای preset **نباید** فرستاده شود (آیکن از واژگان
+ * می‌آید و ذخیره نمی‌شود).
  *
  * این قید فقط در مرز create اعمال می‌شود؛ ستون DB همچنان nullable است تا
- * داده‌های legacy از بین نروند (بازبینی: نبود migration عمدی).
+ * داده‌های legacy از بین نروند (بازبینی: نبود backfill عمدی).
  */
-export const taskCategorySchema = z.enum(TASK_CATEGORY_KEYS, {
-    message: CATEGORY_REQUIRED_MESSAGE,
-})
+export const taskCategorySchema = z
+    .string({ message: CATEGORY_REQUIRED_MESSAGE })
+    .trim()
+    .superRefine((value, ctx) => {
+        if (classifyCategory(value) === "none") {
+            ctx.addIssue({
+                code: "custom",
+                message: customLabelMessage(value),
+            })
+        }
+    })
+
+/** پیام خطای دقیق custom، برای اینکه کاربر بداند *چرا* رد شده است. */
+function customLabelMessage(value: string): string {
+    const trimmed = value.trim()
+    if (trimmed.length === 0) return CATEGORY_REQUIRED_MESSAGE
+    if (trimmed.length < CUSTOM_CATEGORY_MIN_LENGTH || trimmed.length > CUSTOM_CATEGORY_MAX_LENGTH) {
+        return CUSTOM_CATEGORY_LABEL_MESSAGE
+    }
+    if (trimmed.includes("<") || trimmed.includes(">")) return CUSTOM_CATEGORY_MARKUP_MESSAGE
+    return CUSTOM_CATEGORY_RESERVED_MESSAGE
+}
+
+/**
+ * جفت (category, categoryIcon) با قاعده‌های ترکیبی.
+ * خروجی نرمال‌شده نیست (رشتهٔ خام) — نرمال‌سازی در `normalizeCategorySelection`
+ * انجام می‌شود تا هر دو مسیر HTTP و سرویس دقیقاً یک قانون داشته باشند.
+ */
+const categorySelectionRefinement = (value: { category: unknown; categoryIcon?: string | null }, ctx: z.RefinementCtx) => {
+    const kind = classifyCategory(value.category)
+    if (kind === "custom") {
+        if (value.categoryIcon == null) {
+            ctx.addIssue({ code: "custom", path: ["categoryIcon"], message: CUSTOM_CATEGORY_ICON_REQUIRED_MESSAGE })
+        } else if (!(CUSTOM_CATEGORY_ICONS as readonly string[]).includes(value.categoryIcon)) {
+            ctx.addIssue({ code: "custom", path: ["categoryIcon"], message: CUSTOM_CATEGORY_ICON_INVALID_MESSAGE })
+        }
+    } else if (kind === "preset" && value.categoryIcon != null) {
+        ctx.addIssue({ code: "custom", path: ["categoryIcon"], message: PRESET_ICON_FORBIDDEN_MESSAGE })
+    }
+}
+
+const categoryIconField = z
+    .string({ message: CUSTOM_CATEGORY_ICON_INVALID_MESSAGE })
+    .nullish()
+
+/**
+ * فیلدهای مشترک دسته — به‌صورت شیء، نه `.shape`.
+ *
+ * استفاده از `.shape` روی یک شیءِ refinement‌شده refinementها را دور می‌ریزد
+ * (فقط فیلدهای خام برمی‌گردند) و قاعدهٔ ترکیبیِ icon بی‌صدا حذف می‌شود. برای همین
+ * شکل شیء اینجا جدا تعریف و بعد **روی همان شیء** refine می‌شود.
+ */
+const categoryShape = {
+    category: taskCategorySchema,
+    categoryIcon: categoryIconField,
+}
+
+/** قاعدهٔ ترکیبی مسیر PATCH — `category` اختیاری است، ولی icon بدون دسته پذیرفته نیست. */
+function updateCategorySelectionRefinement(
+    value: { category?: string | null; categoryIcon?: string | null },
+    ctx: z.RefinementCtx,
+) {
+    if (value.category === undefined) {
+        if (value.categoryIcon != null) {
+            ctx.addIssue({
+                code: "custom",
+                path: ["category"],
+                message: CATEGORY_ICON_WITHOUT_CATEGORY_MESSAGE,
+            })
+        }
+        return
+    }
+    if (value.category === null) {
+        // «حذف دسته» — icon هم باید پاک شود
+        if (value.categoryIcon != null) {
+            ctx.addIssue({
+                code: "custom",
+                path: ["categoryIcon"],
+                message: PRESET_ICON_FORBIDDEN_MESSAGE,
+            })
+        }
+        return
+    }
+    categorySelectionRefinement({ category: value.category, categoryIcon: value.categoryIcon }, ctx)
+}
 
 export function makeCreateTaskSchema(timezone: string) {
     return z.object({
@@ -59,8 +161,11 @@ export function makeCreateTaskSchema(timezone: string) {
             .max(200, "عنوان خیلی طولانی است"),
         scheduledDate: makeScheduledDateField(timezone),
         // بدون `.optional()`/`.nullable()` — نبودن یا null عمداً خطاست
-        category: taskCategorySchema,
+        ...categoryShape,
     })
+        // قاعدهٔ ترکیبی روی خودِ شیء: custom بدون آیکن رد می‌شود و برای preset
+        // ارسال آیکن خطاست.
+        .superRefine(categorySelectionRefinement)
 }
 
 // فیلدهای مجاز ویرایش (C1): status، title، scheduledDate، category
@@ -76,11 +181,13 @@ export function makeUpdateTaskSchema(timezone: string) {
                 .optional(),
             status: z.enum(["TODO", "IN_PROGRESS"]).optional(),
             scheduledDate: makeScheduledDateField(timezone).optional(),
-            // ویرایش هم فقط از واژگان canonical می‌پذیرد — PATCH دیگر نمی‌تواند
-            // رشتهٔ دلخواه (مخالف create) تزریق کند. null یعنی «حذف دسته» و مجاز است
-            // تا کاربر بتواند یک تسک را به حالت بدون دسته برگرداند.
+            // ویرایش هم همان قاعدهٔ create را می‌پذیرد (preset یا custom + آیکن)،
+            // نه صرفاً واژگان canonical. null یعنی «حذف دسته» و مجاز است تا کاربر
+            // بتواند یک تسک را به حالت بدون دسته برگرداند.
             category: taskCategorySchema.nullable().optional(),
+            categoryIcon: categoryIconField,
         })
+        .superRefine(updateCategorySelectionRefinement)
         .refine(
             (d) =>
                 d.title !== undefined ||

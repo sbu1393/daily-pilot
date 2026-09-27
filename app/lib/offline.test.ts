@@ -105,8 +105,12 @@ const queuedItem = (title: string, category: TaskCategoryKey = "work") => ({
     scheduledDate: SCHEDULED_DATE,
 })
 
-const bodyOf = (call: unknown[]): { title: string; scheduledDate: string; category: TaskCategoryKey } =>
-    JSON.parse((call[1] as { body: string }).body)
+const bodyOf = (call: unknown[]): {
+    title: string
+    scheduledDate: string
+    category: string
+    categoryIcon?: string
+} => JSON.parse((call[1] as { body: string }).body)
 
 describe("offline layer (H2 — per-user scope)", () => {
     beforeEach(() => {
@@ -315,6 +319,114 @@ describe("offline layer (H3 — sync guard)", () => {
         enqueueTask(queuedItem("گزارش", "work"))
         enqueueTask(queuedItem("گزارش", "home"))
         expect(readQueue()).toHaveLength(2)
+    })
+
+    /* ---------- دستهٔ سفارشی در صف آفلاین ---------- */
+
+    it("carries a custom category and its icon through the queue", () => {
+        setOfflineUserId(1)
+        const queued = enqueueTask({
+            title: "طراحی سایت",
+            category: "پروژه شخصی",
+            categoryIcon: "🚀",
+            dayKey: DAY_KEY,
+            scheduledDate: SCHEDULED_DATE,
+        })
+
+        expect(queued.category).toBe("پروژه شخصی")
+        expect(queued.categoryIcon).toBe("🚀")
+        expect(readQueue()[0]).toMatchObject({
+            category: "پروژه شخصی",
+            categoryIcon: "🚀",
+        })
+    })
+
+    it("refuses a custom category with no icon — offline cannot bypass the rule", () => {
+        setOfflineUserId(1)
+        expect(() =>
+            enqueueTask({
+                title: "طراحی سایت",
+                category: "پروژه شخصی",
+                dayKey: DAY_KEY,
+                scheduledDate: SCHEDULED_DATE,
+            }),
+        ).toThrow(/INVALID_TASK_CATEGORY/)
+        expect(readQueue()).toHaveLength(0)
+    })
+
+    it("refuses a custom icon that is not on the allowlist", () => {
+        setOfflineUserId(1)
+        expect(() =>
+            enqueueTask({
+                title: "طراحی سایت",
+                category: "پروژه شخصی",
+                categoryIcon: "🦄",
+                dayKey: DAY_KEY,
+                scheduledDate: SCHEDULED_DATE,
+            }),
+        ).toThrow(/INVALID_TASK_CATEGORY/)
+        expect(readQueue()).toHaveLength(0)
+    })
+
+    it("sends categoryIcon in the sync payload for a custom category", async () => {
+        setOfflineUserId(1)
+        enqueueTask({
+            title: "طراحی سایت",
+            category: "پروژه شخصی",
+            categoryIcon: "🚀",
+            dayKey: DAY_KEY,
+            scheduledDate: SCHEDULED_DATE,
+        })
+        fetchMock.mockResolvedValue({ ok: true })
+
+        await expect(syncQueue()).resolves.toBe(1)
+        expect(bodyOf(fetchMock.mock.calls[0])).toEqual({
+            title: "طراحی سایت",
+            scheduledDate: SCHEDULED_DATE,
+            category: "پروژه شخصی",
+            categoryIcon: "🚀",
+        })
+    })
+
+    it("still syncs a legacy queued preset item that predates categoryIcon", async () => {
+        setOfflineUserId(1)
+        // صفِ نوشته‌شده پیش از این نسخه: فقط کلید canonical، بدون categoryIcon
+        storage["dp:offline:v3:queue:1"] = JSON.stringify([
+            {
+                id: "local-legacy",
+                title: "کار قدیمی",
+                category: "work",
+                dayKey: DAY_KEY,
+                scheduledDate: SCHEDULED_DATE,
+                createdAt: "2026-03-05T06:00:00.000Z",
+            },
+        ])
+
+        fetchMock.mockResolvedValue({ ok: true })
+        await expect(syncQueue()).resolves.toBe(1)
+        expect(bodyOf(fetchMock.mock.calls[0])).toEqual({
+            title: "کار قدیمی",
+            scheduledDate: SCHEDULED_DATE,
+            category: "work",
+        })
+    })
+
+    it("skips a legacy queued custom item whose icon never made it to disk", async () => {
+        setOfflineUserId(1)
+        storage["dp:offline:v3:queue:1"] = JSON.stringify([
+            {
+                id: "local-legacy-custom",
+                title: "پروژه نیمه‌کاره",
+                category: "پروژه شخصی",
+                dayKey: DAY_KEY,
+                scheduledDate: SCHEDULED_DATE,
+                createdAt: "2026-03-05T06:00:00.000Z",
+            },
+        ])
+
+        fetchMock.mockResolvedValue({ ok: true })
+        await expect(syncQueue()).resolves.toBe(0)
+        expect(fetchMock).not.toHaveBeenCalled()
     })
 
     it("skips a legacy queued item that has no category instead of creating a category-less Task", async () => {

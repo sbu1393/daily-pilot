@@ -163,6 +163,79 @@ describe("POST /api/tasks", () => {
         expect(raw).not.toContain("INVALID_TASK_CATEGORY")
     })
 
+    /* ---------- دستهٔ سفارشی در مرز HTTP ---------- */
+
+    it("forwards a custom category and its icon to the service", async () => {
+        const res = await POST(
+            new NextRequest("http://localhost/api/tasks", {
+                method: "POST",
+                body: JSON.stringify({
+                    title: "طراحی سایت",
+                    scheduledDate: SCHEDULED_DATE,
+                    category: "پروژه شخصی",
+                    categoryIcon: "🚀",
+                }),
+            }),
+        )
+
+        expect(res.status).toBe(201)
+        expect(mocks.createTask).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.anything(),
+            expect.objectContaining({ category: "پروژه شخصی", categoryIcon: "🚀" }),
+        )
+    })
+
+    it("returns 400 for a custom category with no icon and never calls the service", async () => {
+        const res = await POST(
+            new NextRequest("http://localhost/api/tasks", {
+                method: "POST",
+                body: JSON.stringify({
+                    title: "طراحی سایت",
+                    scheduledDate: SCHEDULED_DATE,
+                    category: "پروژه شخصی",
+                }),
+            }),
+        )
+
+        expect(res.status).toBe(400)
+        expect(mocks.createTask).not.toHaveBeenCalled()
+    })
+
+    it("returns 400 for an icon outside the allowlist", async () => {
+        const res = await POST(
+            new NextRequest("http://localhost/api/tasks", {
+                method: "POST",
+                body: JSON.stringify({
+                    title: "طراحی سایت",
+                    scheduledDate: SCHEDULED_DATE,
+                    category: "پروژه شخصی",
+                    categoryIcon: "🦄",
+                }),
+            }),
+        )
+
+        expect(res.status).toBe(400)
+        expect(mocks.createTask).not.toHaveBeenCalled()
+    })
+
+    it("returns 400 when a preset is sent with its own icon", async () => {
+        const res = await POST(
+            new NextRequest("http://localhost/api/tasks", {
+                method: "POST",
+                body: JSON.stringify({
+                    title: "خرید نان",
+                    scheduledDate: SCHEDULED_DATE,
+                    category: "shopping",
+                    categoryIcon: "🛒",
+                }),
+            }),
+        )
+
+        expect(res.status).toBe(400)
+        expect(mocks.createTask).not.toHaveBeenCalled()
+    })
+
     it("returns 400 VALIDATION_ERROR for malformed JSON (not 500) and never calls the service", async () => {
         const res = await POST(
             new NextRequest("http://localhost/api/tasks", {

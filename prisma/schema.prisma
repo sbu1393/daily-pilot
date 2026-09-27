@@ -111,6 +111,7 @@ model Task {
   id                    Int           @id @default(autoincrement())
   title                 String
   category              String?
+  categoryIcon          String? // فقط برای دستهٔ سفارشی؛ presetها آیکن‌شان از واژگان canonical می‌آید و اینجا null می‌ماند
   priority              TaskPriority?
   score                 Int? // 0 تا 100 — خروجی AI
   reason                String? // دلیل اولویت‌بندی — خروجی AI

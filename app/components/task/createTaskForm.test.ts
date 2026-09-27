@@ -51,7 +51,8 @@ describe("validateCreateForm — category is required", () => {
         for (const c of TASK_CATEGORIES) {
             const r = validateCreateForm("خرید نان", c.key)
             expect(r.ok).toBe(true)
-            if (r.ok) expect(r.category).toBe(c.key)
+            // preset بدون آیکن ارسال می‌شود؛ آیکن از واژگان canonical می‌آید
+            if (r.ok) expect(r.category).toEqual({ category: c.key, categoryIcon: null })
         }
     })
 
@@ -62,6 +63,8 @@ describe("validateCreateForm — category is required", () => {
     })
 
     it("blocks submit for a key outside the vocabulary", () => {
+        // فراخوانی دوآرگومانی هیچ حالت customی فعال نمی‌کند، پس هیچ رشتهٔ آزادی
+        // (حتی اگر برچسب معتبری باشد) از آن راه رد نمی‌شود.
         for (const bad of ["Work", "Urgent", "", "universe"] as unknown as TaskCategoryKey[]) {
             const r = validateCreateForm("خرید نان", bad)
             expect(r.ok).toBe(false)
@@ -81,7 +84,7 @@ describe("validateCreateForm — category is required", () => {
 })
 
 describe("buildCreateTaskBody", () => {
-    it("includes exactly title, scheduledDate and the selected category", () => {
+    it("includes exactly title, scheduledDate and the selected category for a preset", () => {
         const body = buildCreateTaskBody("  خرید نان  ", SCHEDULED_DATE, "shopping")
         expect(body).toEqual({
             title: "خرید نان",
@@ -89,6 +92,21 @@ describe("buildCreateTaskBody", () => {
             category: "shopping",
         })
         expect(Object.keys(body).sort()).toEqual(["category", "scheduledDate", "title"])
+    })
+
+    it("adds categoryIcon for a custom category", () => {
+        const body = buildCreateTaskBody("طراحی سایت", SCHEDULED_DATE, "پروژه شخصی", "🚀")
+        expect(body).toEqual({
+            title: "طراحی سایت",
+            scheduledDate: SCHEDULED_DATE,
+            category: "پروژه شخصی",
+            categoryIcon: "🚀",
+        })
+    })
+
+    it("trims a custom label before sending it", () => {
+        const body = buildCreateTaskBody("طراحی سایت", SCHEDULED_DATE, "  پروژه شخصی  ", "🚀")
+        expect(body.category).toBe("پروژه شخصی")
     })
 
     it("never sends dayKey from the client (§6.2.2.1)", () => {

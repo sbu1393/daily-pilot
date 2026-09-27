@@ -11,12 +11,19 @@ import styles from "./task.module.css"
 import { formatCanonicalToJalali } from "../../lib/time"
 import { NotebookPen, Unplug } from "lucide-react"
 import {
-    buildCreateTaskBody,
     CATEGORY_REQUIRED_MESSAGE,
-    TASK_CATEGORIES,
+    CUSTOM_CATEGORY_ICON_REQUIRED_MESSAGE,
+    CUSTOM_CATEGORY_LABEL_MESSAGE,
+} from "@/app/lib/categories"
+import {
+    buildCreateTaskBody,
     validateCreateForm,
-    type TaskCategoryKey,
 } from "./createTaskForm"
+import CategoryPicker from "./CategoryPicker"
+import {
+    EMPTY_CATEGORY_DRAFT,
+    type CategoryDraft,
+} from "./categoryForm"
 
 
 type Props = {
@@ -29,15 +36,19 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
     const { selectedDate, timezone } = useCalendar()
     const [text, setText] = useState("")
     // دسته‌بندی اجباری است و **هیچ پیش‌فرضی ندارد** — تا وقتی کاربر خودش انتخاب
-    // نکرده، `null` است و submit مسدود می‌شود.
-    const [category, setCategory] = useState<TaskCategoryKey | null>(null)
-    const [categoryError, setCategoryError] = useState(false)
+    // نکرده، draft خالی است و submit مسدود می‌شود. draft می‌تواند preset یا
+    // custom (نام + آیکن) باشد؛ اعتبارسنجی در لایهٔ pure انجام می‌شود.
+    const [categoryDraft, setCategoryDraft] = useState<CategoryDraft>(EMPTY_CATEGORY_DRAFT)
+    // فیلدی که آخرین خطا به آن مربوط بوده تا پیام دقیقاً کنار همان فیلد بنشیند
+    const [categoryErrorField, setCategoryErrorField] = useState<
+        "category" | "customLabel" | "customIcon" | null
+    >(null)
     const [loading, setLoading] = useState(false)
     const [offline, setOffline] = useState(false)
 
     // بستن/باز شدن دوباره: پیام خطا نباید از قبل باقی بماند
     useEffect(() => {
-        if (open) setCategoryError(false)
+        if (open) setCategoryErrorField(null)
     }, [open])
 
     useEffect(() => {
@@ -64,34 +75,36 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
 
     /* ذخیره در صف آفلاین — تحلیل AI بعد از سینک انجام می‌شود */
     // C1: قرارداد ساخت = title + scheduledDate (ISO نیمه‌شب محلی روز انتخابی)؛ dayKey سمت سرور ساخته می‌شود (§6.2.2.1)
-    const saveOffline = (value: string, cat: TaskCategoryKey) => {
+    const saveOffline = (value: string, selection: { category: string; categoryIcon: string | null }) => {
         enqueueTask({
             title: value,
-            category: cat,
+            category: selection.category,
+            categoryIcon: selection.categoryIcon,
             dayKey: selectedDate,
             scheduledDate: canonicalKeyToLocalMidnight(selectedDate, timezone).toISOString(),
         })
         toast.info(`${<Unplug />} آفلاین هستی — کار ذخیره شد و بعد از اتصال سینک می‌شود`)
         setText("")
-        setCategory(null)
+        setCategoryDraft(EMPTY_CATEGORY_DRAFT)
         onClose()
         onCreated()
     }
 
     const submit = async () => {
         // یک دروازهٔ واحد: اگر عنوان یا دسته معتبر نباشد، هیچ درخواستی ارسال
-        // نمی‌شود. سرور هم جداگانه (و مستقل) همین قاعده را در schema اعمال می‌کند.
-        const validation = validateCreateForm(text, category)
+        // نمی‌شود. سرور هم جداگانه (و مستقل) همین قاعده را در schema و سرویس
+        // اعمال می‌کند، پس UI فقط لایهٔ اول است.
+        const validation = validateCreateForm(text, null, categoryDraft)
         if (!validation.ok) {
-            if (validation.message === CATEGORY_REQUIRED_MESSAGE) setCategoryError(true)
+            if (validation.field !== "title") setCategoryErrorField(validation.field)
             toast.error(validation.message)
             return
         }
-        const cat = validation.category
+        const selection = validation.category
         const value = text.trim()
 
         if (isOffline()) {
-            saveOffline(value, cat)
+            saveOffline(value, selection)
             return
         }
 
@@ -104,21 +117,22 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
                     buildCreateTaskBody(
                         value,
                         canonicalKeyToLocalMidnight(selectedDate, timezone).toISOString(),
-                        cat,
+                        selection.category,
+                        selection.categoryIcon,
                     ),
                 ),
             })
 
             setText("")
-            setCategory(null)
-            setCategoryError(false)
+            setCategoryDraft(EMPTY_CATEGORY_DRAFT)
+            setCategoryErrorField(null)
             onClose()
             onCreated()
             toast.success("کار ساخته شد و زمان‌بندی شد ✅")
         } catch (e) {
             /* خطای شبکه حین ارسال → ذخیره در صف آفلاین */
             if (e instanceof TypeError) {
-                saveOffline(value, cat)
+                saveOffline(value, selection)
             } else {
                 toast.error(e instanceof Error ? e.message : "خطا در ایجاد کار")
             }
@@ -156,35 +170,21 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
                     if (e.key === "Enter" && !loading) submit()
                 }}
             />
-            <fieldset className={styles.categoryFieldset}>
-                <legend className={styles.categoryLegend}>دسته‌بندی *</legend>
-                <div className={styles.categoryGrid} role="radiogroup" aria-label="دسته‌بندی">
-                    {TASK_CATEGORIES.map((cat) => {
-                        const selected = category === cat.key
-                        return (
-                            <button
-                                type="button"
-                                key={cat.key}
-                                role="radio"
-                                aria-checked={selected}
-                                className={`${styles.categoryChip} ${selected ? styles.categoryChipSelected : ""}`}
-                                onClick={() => {
-                                    setCategory(cat.key)
-                                    setCategoryError(false)
-                                }}
-                            >
-                                <span aria-hidden="true">{cat.icon}</span>
-                                <span>{cat.label}</span>
-                            </button>
-                        )
-                    })}
-                </div>
-                {categoryError && (
-                    <p className={styles.categoryError} role="alert">
-                        {CATEGORY_REQUIRED_MESSAGE}
-                    </p>
-                )}
-            </fieldset>
+            <CategoryPicker
+                value={categoryDraft}
+                onChange={(draft) => {
+                    setCategoryDraft(draft)
+                    setCategoryErrorField(null)
+                }}
+                error={categoryErrorField === "category" ? CATEGORY_REQUIRED_MESSAGE : null}
+                customLabelError={
+                    categoryErrorField === "customLabel" ? CUSTOM_CATEGORY_LABEL_MESSAGE : null
+                }
+                customIconError={
+                    categoryErrorField === "customIcon" ? CUSTOM_CATEGORY_ICON_REQUIRED_MESSAGE : null
+                }
+                disabled={loading}
+            />
             <div className={styles.modalActions}>
                 <button className={styles.btnPrimary} onClick={submit} disabled={loading}>
                     {loading ? "⏳ در حال ساخت…" : "ایجاد کار"}

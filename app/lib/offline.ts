@@ -1,7 +1,7 @@
 "use client"
 
 import { clearLegacySettingsKeys } from "@/app/lib/reminder"
-import { assertTaskCategoryKey, isTaskCategoryKey, type TaskCategoryKey } from "@/app/lib/categories"
+import { assertCategorySelection, normalizeCategorySelection } from "@/app/lib/categories"
 import type { TaskItem } from "@/app/components/task/taskTypes"
 import type { DaySummary } from "@/app/hooks/useDaySummary"
 
@@ -59,7 +59,15 @@ const LEGACY_PREFIXES = ["dp:offline:v2:day:", "dp:offline:queue"]
 export type QueuedTask = {
     id: string // شناسه محلی موقت
     title: string
-    category: TaskCategoryKey // اجباری — دقیقاً مثل مسیر آنلاین
+    /**
+     * اجباری — دقیقاً مثل مسیر آنلاین: یا کلید canonical (preset) یا برچسب
+     * سفارشی. آیکن custom در `categoryIcon` می‌آید و برای preset null است.
+     *
+     * `categoryIcon` اختیاری است تا آیتم‌های صفِ ذخیره‌شده **قبل** از این
+     * نسخه (که فقط کلید preset داشتند) همچنان معتبر بمانند و سینک شوند.
+     */
+    category: string
+    categoryIcon?: string | null
     dayKey: string // برای نمایش محلی تسک زیر روز درست
     scheduledDate: string // ISO instant نیمه‌شب محلی روز — قرارداد API (C1): سرور dayKey را از آن می‌سازد
     createdAt: string
@@ -233,14 +241,16 @@ function writeQueue(queue: QueuedTask[]) {
 export function enqueueTask(item: Omit<QueuedTask, "id" | "createdAt">): QueuedTask {
     // Fail-fast در مرز صف: یک آیتم بدون دستهٔ معتبر هرگز وارد صف نمی‌شود، پس
     // مسیر آفلاین نمی‌تواند قاعدهٔ «دستهٔ اجباری» را دور بزند.
-    assertTaskCategoryKey(item.category)
+    assertCategorySelection(item.category, item.categoryIcon)
+    const selection = normalizeCategorySelection(item.category, item.categoryIcon)!
 
     // H3 — deduplication: ارسال دوباره‌ی همان کار (دابل‌کلیک/ری‌ترای فرم) صف را دو برابر نمی‌کند
     const duplicate = readQueue().find(
         (q) =>
             q.title === item.title &&
             q.scheduledDate === item.scheduledDate &&
-            q.category === item.category,
+            q.category === selection.category &&
+            (q.categoryIcon ?? null) === selection.categoryIcon,
     )
     if (duplicate) return duplicate
 
@@ -289,7 +299,9 @@ async function runSync(): Promise<number> {
         try {
             // آیتم‌های صفِ پیش از این نسخه (بدون دسته) نباید بی‌صدا Task
             // بدون دسته بسازند؛ کنار گذاشته می‌شوند تا کاربر متوجه شود.
-            if (!isTaskCategoryKey(item.category)) continue
+            // آیتم‌های قدیمی که فقط یک کلید preset دارند (بدون categoryIcon) هنوز
+            // معتبرند و روان سینک می‌شوند — سازگاری به عقب حفظ شده.
+            if (!normalizeCategorySelection(item.category, item.categoryIcon)) continue
             const res = await fetch("/api/tasks", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -297,6 +309,7 @@ async function runSync(): Promise<number> {
                     title: item.title,
                     scheduledDate: item.scheduledDate,
                     category: item.category,
+                    ...(item.categoryIcon ? { categoryIcon: item.categoryIcon } : {}),
                 }),
             })
             if (!res.ok) break // خطای سرور → بعداً دوباره تلاش می‌کنیم

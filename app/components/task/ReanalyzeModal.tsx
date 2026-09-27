@@ -119,7 +119,7 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
                                 <span className={styles.aiLabel}>تحلیل فعلی</span>
                                 <span className={styles.aiValue}>
                                     <Chip {...(task.priority != null ? priorityMeta[task.priority] : priorityMissingMeta)} />
-                                    <Chip {...categoryInfo(task.category)} />
+                                    <Chip {...categoryInfo(task.category, task.categoryIcon)} />
                                     <span>امتیاز {fmtScore(task.score)}</span>
                                     <span>{fmtEst(task.estimatedTime)}</span>
                                 </span>
@@ -197,9 +197,11 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
                                 <div className={styles.aiRow}>
                                     <span className={styles.aiLabel}>دسته‌بندی</span>
                                     <span className={styles.aiValue}>
-                                        <span className={styles.oldVal}>{categoryInfo(old!.category).label}</span>
+                                        <span className={styles.oldVal}>
+                                            {categoryInfo(old!.category, old!.categoryIcon).label}
+                                        </span>
                                         <span className={styles.vs}>←</span>
-                                        <Chip {...categoryInfo(next!.category)} />
+                                        <Chip {...categoryInfo(next!.category, next!.categoryIcon)} />
                                     </span>
                                 </div>
                                 <div className={styles.divider} />

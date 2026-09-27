@@ -48,3 +48,47 @@ describe("categoryInfo — legacy and unknown data never crash the UI", () => {
         expect(info.icon).toBe("")
     })
 })
+
+describe("categoryInfo — custom categories show their own name and icon", () => {
+    it("renders the stored label and icon", () => {
+        const info = categoryInfo("پروژه شخصی", "🚀")
+        expect(info.label).toBe("پروژه شخصی")
+        expect(info.icon).toBe("🚀")
+    })
+
+    it("keeps the neutral colours — a custom category has no palette entry", () => {
+        const info = categoryInfo("پروژه شخصی", "🚀")
+        expect(info.color).toBeTruthy()
+        expect(info.bg).toBeTruthy()
+    })
+
+    it("falls back to a safe icon when the stored one is missing", () => {
+        expect(categoryInfo("پروژه شخصی").icon).toBe("🏷️")
+        expect(categoryInfo("پروژه شخصی", null).icon).toBe("🏷️")
+    })
+
+    it("falls back to a safe icon when the stored one is not on the allowlist", () => {
+        for (const bad of ["🦄", "", "<svg>"]) {
+            expect(categoryInfo("پروژه شخصی", bad).icon).toBe("🏷️")
+        }
+    })
+
+    it("ignores a stale icon on a preset row and still shows the vocabulary icon", () => {
+        expect(categoryInfo("work", "🚀").icon).toBe("💼")
+        expect(categoryInfo("home", null).icon).toBe("🏠")
+    })
+
+    it("gives legacy free text a safe icon instead of crashing", () => {
+        expect(categoryInfo("Work").icon).toBe("🏷️")
+        expect(categoryInfo("Work").label).toBe("Work")
+    })
+
+    it("stays neutral for null even when an icon is somehow present", () => {
+        expect(categoryInfo(null, "🚀")).toEqual({
+            label: "بدون دسته",
+            icon: "",
+            color: "#475467",
+            bg: "#f2f4f7",
+        })
+    })
+})

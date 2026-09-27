@@ -538,6 +538,72 @@
     color: #b42318;
 }
 
+/* ---------- دستهٔ سفارشی (نام + آیکن) ---------- */
+/* پنل custom زیر شبکهٔ چیپ‌ها باز می‌شود؛ همه‌ی رنگ‌ها از همان توکن‌های
+   globals.css می‌آیند تا در حالت تیره هم درست باشد. */
+
+.customCategory {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px;
+    margin-top: 4px;
+    border: 1.5px dashed var(--border);
+    border-radius: 14px;
+    background: var(--input-bg);
+}
+
+.customFieldLabel {
+    font-size: .78rem;
+    font-weight: 700;
+    color: var(--muted);
+}
+
+.iconGrid {
+    display: grid;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 2px;
+}
+
+.iconChip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 1;
+    min-height: 40px;
+    padding: 0;
+    border: 1.5px solid var(--border);
+    border-radius: 12px;
+    background: var(--card, var(--input-bg));
+    font-size: 1.15rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: border-color .15s ease, transform .1s ease, background .15s ease;
+}
+
+.iconChip:hover {
+    border-color: var(--primary);
+}
+
+.iconChip:active {
+    transform: scale(.92);
+}
+
+.iconChip:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+/* آیکن انتخاب‌شده — حلقهٔ ضخیم و پس‌زمینهٔ متمایز */
+.iconChipSelected,
+.iconChipSelected:hover {
+    border-color: var(--primary);
+    background: var(--primary);
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+}
+
 @media (max-width: 480px) {
     .categoryGrid {
         grid-template-columns: repeat(2, minmax(0, 1fr));

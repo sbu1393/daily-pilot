@@ -8,12 +8,17 @@ import { faDigits, fmtMinutes } from "@/app/lib/time"
 import { toast } from "react-toastify"
 import styles from "./history.module.css"
 import {formatCanonicalToJalali} from "../../lib/time"
-
+import { categoryInfo } from "./taskTypes"
 
 type TaskItem = {
     id: number
     title: string
     category: string | null
+    /**
+     * فقط برای دستهٔ سفارشی؛ presetها آیکن‌شان را از واژگان canonical می‌گیرند.
+     * اختیاری است تا پاسخ‌های قدیمی/کش‌شده که این فیلد را ندارند هم معتبر بمانند.
+     */
+    categoryIcon?: string | null
     status: "TODO" | "IN_PROGRESS" | "DONE"
     allocatedMinutes: number | null
     spentMinutes: number | null
@@ -136,7 +141,16 @@ export default function DayHistoryPanel() {
                                         <li key={t.id} className={styles.item}>
                                             <div className={styles.itemMain}>
                                                 <span className={styles.itemText}>{t.title}</span>
-                                                <span className={styles.itemCat}>{t.category ?? "بدون دسته"}</span>
+                                                <span className={styles.itemCat}>
+                                                    {(() => {
+                                                        // همان resolver مشترکِ TaskCard: preset آیکنش را از
+                                                        // واژگان canonical می‌گیرد، custom آیکن ذخیره‌شده‌اش
+                                                        // را (و اگر خالی/خراب بود fallback امن). بدون
+                                                        // نگاشت دومی و بدون crash برای دادهٔ legacy.
+                                                        const cat = categoryInfo(t.category, t.categoryIcon)
+                                                        return cat.icon ? `${cat.icon} ${cat.label}` : cat.label
+                                                    })()}
+                                                </span>
                                             </div>
                                             <div className={styles.itemMeta}>
                                                 <span className={styles.metaChip}>تخصیص: {fmtMinutes(base)}</span>

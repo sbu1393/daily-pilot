@@ -235,6 +235,65 @@ describe("reanalyzeTask", () => {
         expect(updateArgs.data.category).toBe("health") // از تحلیل
         expect(result.task.category).toBe("health")
     })
+
+    it("never overwrites a user's custom category, and never touches its icon", async () => {
+        const task = {
+            id: 3,
+            userId: 1,
+            title: "طراحی سایت",
+            dayKey: today,
+            status: "TODO",
+            category: "پروژه شخصی",
+            categoryIcon: "🚀",
+            priority: null,
+            score: null,
+            reason: null,
+            estimatedTime: null,
+        }
+        prismaMock.task.findFirst.mockResolvedValue(task)
+        prismaMock.task.update.mockImplementation(async (args: unknown) => {
+            const { data } = args as { data: Record<string, unknown> }
+            return { ...task, ...data }
+        })
+
+        const result = await reanalyzeTask(1, TIMEZONE, 3)
+
+        const updateArgs = prismaMock.task.update.mock.calls[0][0]
+        // AI پیشنهاد «health» داده، ولی دستهٔ انتخابی کاربر authoritative است
+        expect(updateArgs.data.category).toBe("پروژه شخصی")
+        // آیکن اصلاً در update نوشته نمی‌شود — دست‌نخورده می‌ماند
+        expect(updateArgs.data).not.toHaveProperty("categoryIcon")
+        expect(result.task.category).toBe("پروژه شخصی")
+        expect(result.task.categoryIcon).toBe("🚀")
+    })
+
+    it("does not attach an icon when it completes a legacy null category from the analysis", async () => {
+        const task = {
+            id: 4,
+            userId: 1,
+            title: "ورزش",
+            dayKey: today,
+            status: "TODO",
+            category: null,
+            categoryIcon: null,
+            priority: null,
+            score: null,
+            reason: null,
+            estimatedTime: null,
+        }
+        prismaMock.task.findFirst.mockResolvedValue(task)
+        prismaMock.task.update.mockImplementation(async (args: unknown) => {
+            const { data } = args as { data: Record<string, unknown> }
+            return { ...task, ...data }
+        })
+
+        await reanalyzeTask(1, TIMEZONE, 4)
+
+        const updateArgs = prismaMock.task.update.mock.calls[0][0]
+        expect(updateArgs.data.category).toBe("health")
+        // آیکن presetها از واژگان می‌آید، پس چیزی برای ذخیره نیست
+        expect(updateArgs.data).not.toHaveProperty("categoryIcon")
+    })
 })
 
 describe("createTask — دستهٔ canonical اجباری است", () => {
@@ -296,6 +355,46 @@ describe("createTask — دستهٔ canonical اجباری است", () => {
         ).rejects.toThrow(/INVALID_TASK_CATEGORY/)
         expect(prismaMock.task.create).not.toHaveBeenCalled()
     })
+
+    it("persists a custom label with its allowlisted icon", async () => {
+        await createTask(1, TIMEZONE, {
+            title: "کار",
+            scheduledDate,
+            category: "پروژه شخصی",
+            categoryIcon: "🚀",
+        })
+        const data = prismaMock.task.create.mock.calls[0][0].data
+        expect(data.category).toBe("پروژه شخصی")
+        expect(data.categoryIcon).toBe("🚀")
+    })
+
+    it("never stores an icon for a canonical preset — it is resolved from the vocabulary", async () => {
+        await createTask(1, TIMEZONE, { title: "کار", scheduledDate, category: "work" })
+        expect(prismaMock.task.create.mock.calls[0][0].data.categoryIcon).toBeNull()
+    })
+
+    it("rejects a custom label whose icon is not on the allowlist", async () => {
+        await expect(
+            createTask(1, TIMEZONE, {
+                title: "کار",
+                scheduledDate,
+                category: "پروژه شخصی",
+                categoryIcon: "<script>" as unknown as string,
+            }),
+        ).rejects.toThrow(/INVALID_TASK_CATEGORY/)
+        expect(prismaMock.task.create).not.toHaveBeenCalled()
+    })
+
+    it("rejects a custom label with no icon at all", async () => {
+        await expect(
+            createTask(1, TIMEZONE, {
+                title: "کار",
+                scheduledDate,
+                category: "پروژه شخصی",
+            }),
+        ).rejects.toThrow(/INVALID_TASK_CATEGORY/)
+        expect(prismaMock.task.create).not.toHaveBeenCalled()
+    })
 })
 
 describe("updateTask (A1 — Content vs Planning-only)", () => {
@@ -306,7 +405,8 @@ describe("updateTask (A1 — Content vs Planning-only)", () => {
         title: "قدیمی",
         dayKey: today,
         status: "TODO",
-        category: "Work",
+        category: "work",
+        categoryIcon: null,
         priority: "HIGH",
         score: 80,
         reason: "دلیل قبلی",
@@ -350,7 +450,7 @@ describe("updateTask (A1 — Content vs Planning-only)", () => {
         })
 
         expect(result.task.title).toBe("عنوان جدید")
-        expect(result.task.category).toBe("Work") // حفظ شده
+        expect(result.task.category).toBe("work") // حفظ شده
         expect(result.task.allocatedMinutes).toBe(30) // حفظ شده
     })
 
@@ -405,16 +505,20 @@ describe("updateTask (A1 — Content vs Planning-only)", () => {
     })
 
     it("category-only edit: sets category, no EDITED, no bump", async () => {
-        const result = await updateTask(1, TIMEZONE, 5, { category: "Health" })
+        // fixture از کلید canonical استفاده می‌کند: سرویس حالا یک جفت
+        // (category, categoryIcon) معتبر را الزام می‌کند و «Health» با حرف بزرگ
+        // یک near-missِ preset است که عمداً رد می‌شود (تست‌های جداگانه این را
+        // قفل می‌کنند).
+        const result = await updateTask(1, TIMEZONE, 5, { category: "health" })
 
         const updateArgs = prismaMock.task.update.mock.calls[0][0]
-        expect(updateArgs.data.category).toBe("Health")
+        expect(updateArgs.data.category).toBe("health")
         expect(updateArgs.data).not.toHaveProperty("score")
 
         expect(prismaMock.taskEvent.create).not.toHaveBeenCalled()
         expect(prismaMock.dailyPlan.updateMany).not.toHaveBeenCalled()
 
-        expect(result.task.category).toBe("Health")
+        expect(result.task.category).toBe("health")
     })
 
     it("no-op edit (same values): no update, no event, no bump", async () => {
@@ -436,7 +540,7 @@ describe("updateTask (A1 — Content vs Planning-only)", () => {
     })
 
     it("returns changed=true + changedFields=[category] for a category-only mutation", async () => {
-        const result = await updateTask(1, TIMEZONE, 5, { category: "Health" })
+        const result = await updateTask(1, TIMEZONE, 5, { category: "health" })
 
         expect(result.changed).toBe(true)
         expect(result.changedFields).toEqual(["category"])
@@ -465,7 +569,7 @@ describe("updateTask (A1 — Content vs Planning-only)", () => {
             title: "عنوان جدید",
             status: "IN_PROGRESS",
             scheduledDate: canonicalKeyToLocalMidnight(next, TIMEZONE),
-            category: "Health",
+            category: "health",
         })
 
         expect(result.changed).toBe(true)
@@ -487,7 +591,7 @@ describe("updateTask (A1 — Content vs Planning-only)", () => {
         const result = await updateTask(1, TIMEZONE, 5, {
             title: "قدیمی", // unchanged
             status: "TODO", // unchanged
-            category: "Work", // unchanged
+            category: "work", // unchanged
         })
 
         expect(result.changed).toBe(false)
@@ -508,6 +612,146 @@ describe("updateTask (A1 — Content vs Planning-only)", () => {
         await expect(updateTask(1, TIMEZONE, 999, { title: "عنوان جدید" })).rejects.toThrow(
             /پیدا نشد|Task not found/i,
         )
+    })
+
+    /* ---------- دستهٔ سفارشی در PATCH ---------- */
+
+    it("preset → custom: writes the label and the icon together", async () => {
+        const result = await updateTask(1, TIMEZONE, 5, {
+            category: "پروژه شخصی",
+            categoryIcon: "🚀",
+        })
+
+        const data = prismaMock.task.update.mock.calls[0][0].data
+        expect(data.category).toBe("پروژه شخصی")
+        expect(data.categoryIcon).toBe("🚀")
+        expect(result.changed).toBe(true)
+        expect(result.changedFields).toEqual(["category"])
+    })
+
+    it("custom → preset: clears the stored icon instead of leaving it orphaned", async () => {
+        prismaMock.task.findFirst.mockResolvedValue({
+            ...task,
+            category: "پروژه شخصی",
+            categoryIcon: "🚀",
+        })
+
+        await updateTask(1, TIMEZONE, 5, { category: "work" })
+
+        const data = prismaMock.task.update.mock.calls[0][0].data
+        expect(data.category).toBe("work")
+        expect(data.categoryIcon).toBeNull()
+    })
+
+    it("renames a custom label while keeping its icon", async () => {
+        prismaMock.task.findFirst.mockResolvedValue({
+            ...task,
+            category: "پروژه شخصی",
+            categoryIcon: "🚀",
+        })
+
+        await updateTask(1, TIMEZONE, 5, { category: "پروژه کاری", categoryIcon: "🚀" })
+
+        const data = prismaMock.task.update.mock.calls[0][0].data
+        expect(data.category).toBe("پروژه کاری")
+        expect(data.categoryIcon).toBe("🚀")
+    })
+
+    it("swaps only the icon of a custom category", async () => {
+        prismaMock.task.findFirst.mockResolvedValue({
+            ...task,
+            category: "پروژه شخصی",
+            categoryIcon: "🚀",
+        })
+
+        const result = await updateTask(1, TIMEZONE, 5, {
+            category: "پروژه شخصی",
+            categoryIcon: "💡",
+        })
+
+        const data = prismaMock.task.update.mock.calls[0][0].data
+        expect(data.categoryIcon).toBe("💡")
+        expect(result.changed).toBe(true)
+    })
+
+    it("is a no-op when the custom label and icon are both unchanged", async () => {
+        prismaMock.task.findFirst.mockResolvedValue({
+            ...task,
+            category: "پروژه شخصی",
+            categoryIcon: "🚀",
+        })
+
+        const result = await updateTask(1, TIMEZONE, 5, {
+            category: "پروژه شخصی",
+            categoryIcon: "🚀",
+        })
+
+        expect(result.changed).toBe(false)
+        expect(prismaMock.task.update).not.toHaveBeenCalled()
+    })
+
+    it("rejects an invalid custom update without writing anything", async () => {
+        // آیکن خارج از allowlist
+        await expect(
+            updateTask(1, TIMEZONE, 5, {
+                category: "پروژه شخصی",
+                categoryIcon: "🦄" as unknown as string,
+            }),
+        ).rejects.toThrow(/INVALID_TASK_CATEGORY/)
+        // برچسبی که هم‌پوشان با کلید preset دارد
+        await expect(
+            updateTask(1, TIMEZONE, 5, { category: "Work", categoryIcon: "🚀" }),
+        ).rejects.toThrow(/INVALID_TASK_CATEGORY/)
+        expect(prismaMock.task.update).not.toHaveBeenCalled()
+    })
+
+    it("clearing the category also clears the icon", async () => {
+        prismaMock.task.findFirst.mockResolvedValue({
+            ...task,
+            category: "پروژه شخصی",
+            categoryIcon: "🚀",
+        })
+
+        await updateTask(1, TIMEZONE, 5, { category: null })
+
+        const data = prismaMock.task.update.mock.calls[0][0].data
+        expect(data.category).toBeNull()
+        expect(data.categoryIcon).toBeNull()
+    })
+
+    it("clearing an already category-less task is a no-op (regression)", async () => {
+        // هر دو از قبل null هستند ⇒ PATCH نباید چیزی بنویسد، event بدهد یا
+        // changed=true گزارش کند. معادل no-op semantics قبل از دستهٔ custom.
+        prismaMock.task.findFirst.mockResolvedValue({
+            ...task,
+            category: null,
+            categoryIcon: null,
+        })
+
+        const result = await updateTask(1, TIMEZONE, 5, { category: null })
+
+        expect(result.changed).toBe(false)
+        expect(result.changedFields).toEqual([])
+        expect(prismaMock.task.update).not.toHaveBeenCalled()
+        expect(prismaMock.taskEvent.create).not.toHaveBeenCalled()
+        expect(prismaMock.dailyPlan.updateMany).not.toHaveBeenCalled()
+    })
+
+    it("clearing a custom task that only has a stray icon still writes both fields", async () => {
+        // دادهٔ نیمه‌کاره: دسته ندارد ولی آیکن دارد. این واقعاً یک تغییر است
+        // (آیکن یتیم باید پاک شود) و نباید no-op گزارش شود.
+        prismaMock.task.findFirst.mockResolvedValue({
+            ...task,
+            category: null,
+            categoryIcon: "🚀",
+        })
+
+        const result = await updateTask(1, TIMEZONE, 5, { category: null })
+
+        expect(result.changed).toBe(true)
+        const data = prismaMock.task.update.mock.calls[0][0].data
+        expect(data.category).toBeNull()
+        expect(data.categoryIcon).toBeNull()
     })
 })
 

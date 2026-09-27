@@ -1,4 +1,4 @@
-import { getTaskCategory, isTaskCategoryKey } from "@/app/lib/categories"
+import { getTaskCategory, isTaskCategoryKey, resolveCategoryDisplay } from "@/app/lib/categories"
 
 export type TaskPriority = "HIGH" | "MEDIUM" | "LOW"
 export type TaskStatus = "TODO" | "IN_PROGRESS" | "DONE"
@@ -7,6 +7,12 @@ export type TaskItem = {
     id: number
     title: string
     category: string | null
+    /**
+     * فقط برای دستهٔ سفارشی؛ presetها آیکن‌شان را از واژگان canonical می‌گیرند
+     * و اینجا null می‌ماند. اختیاری است تا دادهٔ كش‌شده/legacy که این فیلد را
+     * ندارد همچنان معتبر بماند.
+     */
+    categoryIcon?: string | null
     priority: TaskPriority | null // null = تسک هنوز تحلیل نشده (G-16)
     score: number | null
     reason: string | null
@@ -62,21 +68,25 @@ const categoryFallback = { color: "#475467", bg: "#f2f4f7" }
 /**
  * categoryInfo — تنها نقطهٔ نمایش دسته در UI.
  *
- * از واژگان canonical مشتق می‌شود، پس هیچ نگاشت دومی وجود ندارد. برای مقادیر
- * legacy (مثلاً «Work» یا «Urgent» از قبل ذخیره‌شده) یا هر رشتهٔ ناشناخته، به
- * fallback خنثی برمی‌گردد — بدون حذف داده و بدون crash.
+ * رنگ و برچسب از واژگان canonical مشتق می‌شوند (هیچ نگاشت دومی وجود ندارد) و
+ * آیکن از `resolveCategoryDisplay` می‌آید: preset آیکن واژگان را می‌گیرد و
+ * custom آیکن ذخیره‌شده را — یا اگر خالی/خراب بود یک fallback امن.
+ *
+ * برای مقادیر legacy (مثلاً «Work» یا «Urgent» از قبل ذخیره‌شده) یا هر رشتهٔ
+ * ناشناخته، به fallback خنثی برمی‌گردد — بدون حذف داده و بدون crash.
  */
-export function categoryInfo(category: string | null): {
+export function categoryInfo(category: string | null, categoryIcon?: string | null): {
     label: string
     icon: string
     color: string
     bg: string
 } {
-    // icon خالی برای fallbackهای legacy است تا UI آن را رندر نکند
-    if (!category) return { label: "بدون دسته", icon: "", ...categoryFallback }
+    const display = resolveCategoryDisplay(category, categoryIcon)
+    if (!category) return { ...display, ...categoryFallback }
     if (isTaskCategoryKey(category)) {
         const meta = getTaskCategory(category)!
         return { label: meta.label, icon: meta.icon, ...categoryColor[category] }
     }
-    return { label: category, icon: "", ...categoryFallback }
+    // custom (یا legacy) — رنگ خنثی، اما برچسب و آیکن واقعی خودش
+    return { ...display, ...categoryFallback }
 }

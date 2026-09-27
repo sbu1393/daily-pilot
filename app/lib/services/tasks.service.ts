@@ -14,7 +14,11 @@ import {
     shiftCanonicalKey,
 } from "@/app/lib/canonicalDay"
 import type { Prisma, PrismaPromise, Task } from "@prisma/client"
-import { assertTaskCategoryKey, type TaskCategoryKey } from "@/app/lib/categories"
+import {
+    assertCategorySelection,
+    normalizeCategorySelection,
+    type CustomCategoryIcon,
+} from "@/app/lib/categories"
 import {
     TaskNotFoundError,
     MissingDayKeyError,
@@ -26,24 +30,33 @@ import {
 } from "./errors"
 
 // ---------- ساخت تسک (مستقل از AI — فیلدهای تحلیل null می‌مانند تا Analyze صریح) ----------
-// دسته‌بندی استثنا است: در این محصول **اجباری** است و همیشه از واژگان canonical
-// می‌آید. بقیهٔ فیلدهای AI (priority/score/reason/estimatedTime) همچنان null می‌مانند
-// تا «تحلیل مجدد» صریح آن‌ها را پر کند — این رفتار تغییری نکرده است.
+// دسته‌بندی استثنا است: در این محصول **اجباری** است و یا یک کلید canonical (preset)
+// می‌آید یا یک برچسب سفارشی + آیکنِ عضو allowlist. برای preset آیکن ذخیره
+// نمی‌شود (null) تا تغییر آیکن presetها migration داده‌ای نخواهد. بقیهٔ فیلدهای AI
+// (priority/score/reason/estimatedTime) همچنان null می‌مانند تا «تحلیل مجدد»
+// صریح آن‌ها را پر کند — این رفتار تغییری نکرده است.
 // §6.2.2.1: dayKey هرگز از Client پذیرفته نمی‌شود — از scheduledDate + user.timezone سمت سرور محاسبه می‌شود.
 // scheduledDate ذخیره‌شده هم به نیمه‌شب محلیِ همان روز (canonicalKeyToLocalMidnight) نرمال می‌شود.
 // A3: ساخت = mutation مؤثر بر برنامه → planVersion روز در همان transaction اتمیک افزایش می‌یابد.
 export async function createTask(
     userId: number,
     timezone: string,
-    input: { title: string; scheduledDate: Date; category: TaskCategoryKey },
+    input: {
+        title: string
+        scheduledDate: Date
+        category: string
+        categoryIcon?: CustomCategoryIcon | string | null
+    },
 ): Promise<{ task: Task }> {
     const { title, scheduledDate, category } = input
     const prisma = getPrisma()
 
     // Fail-fast: سرویس هرگز نباید «دستهٔ غایب/نامعتبر» را به null تبدیل کند.
     // این خط دفاعی است — schema مسیر HTTP قبلاً رد کرده، اما هر مسیر دیگری
-    // (مثلاً یک caller داخلی) نمی‌تواند بی‌صدا یک Task بدون دسته بسازد.
-    assertTaskCategoryKey(category)
+    // (مثلاً یک caller داخلی یا صف آفلاین) نمی‌تواند بی‌صدا یک Task بدون دسته
+    // یا یک custom ناقص بسازد.
+    assertCategorySelection(category, input.categoryIcon)
+    const selection = normalizeCategorySelection(category, input.categoryIcon)!
 
     const dayKey = getCanonicalDayKey(scheduledDate, timezone)
     const localMidnight = canonicalKeyToLocalMidnight(dayKey, timezone)
@@ -57,7 +70,8 @@ export async function createTask(
                 userId,
                 // در همان transaction ذخیره می‌شود: Task یا با دسته ساخته می‌شود
                 // یا اصلاً ساخته نمی‌شود.
-                category,
+                category: selection.category,
+                categoryIcon: selection.categoryIcon,
             },
         })
 
@@ -417,13 +431,36 @@ export async function updateTask(
         status?: "TODO" | "IN_PROGRESS"
         scheduledDate?: Date
         category?: string | null
+        categoryIcon?: string | null
     },
 ): Promise<{ task: Task; changed: boolean; changedFields: string[] }> {
     const prisma = getPrisma()
     const task = await prisma.task.findFirst({ where: { id: taskId, userId } })
     if (!task) throw new TaskNotFoundError()
 
-    const categoryChanged = input.category !== undefined && input.category !== task.category
+    // دسته و آیکن یک **واحد فراداده** هستند: هر تغییر یکی از آن‌ها هر دو را
+    // با هم می‌نویسد تا Task هرگز در حالت نیمه‌کاره (custom بدون آیکن، یا preset
+    // با آیکن بیگانه) نیفتد. آیکن بدون دسته در PATCH مجاز نیست (schema رد می‌کند).
+    // «حذف دسته» = category=null؛ مقدارِ نوشتنی مستقیماً null نگه داشته می‌شود
+    // (نه یک sentinel مثل "") تا با task.category از نوع null مقایسه شود و PATCH
+    // تکراری روی تسکِ بدون دسته، no-op بماند — دقیقاً مثل رفتار پیش از custom.
+    let nextCategory: string | null | undefined
+    let nextCategoryIcon: CustomCategoryIcon | null | undefined
+    if (input.category !== undefined) {
+        if (input.category === null) {
+            nextCategory = null
+            nextCategoryIcon = null
+        } else {
+            assertCategorySelection(input.category, input.categoryIcon)
+            const selection = normalizeCategorySelection(input.category, input.categoryIcon)!
+            nextCategory = selection.category
+            nextCategoryIcon = selection.categoryIcon
+        }
+    }
+
+    const categoryChanged =
+        nextCategory !== undefined &&
+        (nextCategory !== task.category || nextCategoryIcon !== task.categoryIcon)
 
     const data: Prisma.TaskUpdateInput = {}
     let titleChanged = false
@@ -451,7 +488,10 @@ export async function updateTask(
         data.status = input.status
     }
     if (categoryChanged) {
-        data.category = input.category
+        // null یعنی «حذف دسته» و مجاز است تا کاربر بتواند تسک را به حالت بدون
+        // دسته برگرداند؛ بقیهٔ زمان‌ها یک جفت معتبر و نرمال‌شده می‌نویسند.
+        data.category = nextCategory!
+        data.categoryIcon = nextCategoryIcon!
     }
 
     const isContent = titleChanged // §6.3.5: تغییر متن = Content Mutation

@@ -8,7 +8,7 @@ import { getCanonicalToday } from "@/app/lib/canonicalDay"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import { categoryInfo, priorityMeta, priorityMissingMeta, type TaskItem } from "./taskTypes"
 import styles from "./task.module.css"
-import { AlarmClock, ChevronDown } from "lucide-react"
+import { AlarmClock, ChevronDown, Pencil } from "lucide-react"
 // «تنظیم زمان» — فقط خواندن یادآوری از context و یک دکمه/نشان اضافه؛ هیچ منطق موجودی تغییر نکرده
 import { useTaskReminders } from "@/app/hooks/useTaskReminder"
 import { formatReminderTime } from "@/app/lib/taskReminder"
@@ -36,6 +36,8 @@ type Props = {
     onReanalyze?: (task: TaskItem) => void
     /** اختیاری — باز کردن مودال «تنظیم زمان» (additive؛ بدون آن کارت مثل قبل کار می‌کند) */
     onRemind?: (task: TaskItem) => void
+    /** اختیاری — باز کردن مودال ویرایش (additive؛ بدون آن کارت مثل قبل کار می‌کند) */
+    onEdit?: (task: TaskItem) => void
 }
 
 /**
@@ -51,7 +53,7 @@ type Props = {
  * به همین دلیل پنل همیشه در DOM می‌ماند و با `visibility` از ناظر پنهان می‌شود.
  * کارتِ DONE خودش جمع می‌شود؛ کارتِ DONE بدون دلیل، چیزی برای باز‌کردن ندارد.
  */
-function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind }: Props) {
+function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind, onEdit }: Props) {
     const { timezone } = useCalendar()
     const [open, setOpen] = useState(false)
     // یادآوری فقط بعد از خواندن localStorage معنا دارد (ready) → رندر سرور و کلاینت یکسان می‌ماند
@@ -62,7 +64,9 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind }: Props) 
     const panelId = `${uid}-panel`
 
     const done = task.status === "DONE"
-    const cat = categoryInfo(task.category)
+    // دستهٔ preset آیکنش را از واژگان canonical می‌گیرد؛ دستهٔ سفارشی آیکن
+    // ذخیره‌شده‌اش را (و اگر خالی/خراب بود یک fallback امن). UI هرگز crash نمی‌کند.
+    const cat = categoryInfo(task.category, task.categoryIcon)
     const pr = task.priority != null ? priorityMeta[task.priority] : priorityMissingMeta
 
     const saved =
@@ -221,6 +225,15 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind }: Props) 
                                 <button className={styles.btnPrimary} onClick={() => onComplete(task)}>
                                     تمام شد ✓
                                 </button>
+                                {onEdit && (
+                                    <button
+                                        className={styles.btnGhost}
+                                        onClick={() => onEdit(task)}
+                                        title="ویرایش عنوان و دسته‌بندی"
+                                    >
+                                        <Pencil size={15} aria-hidden="true" /> ویرایش
+                                    </button>
+                                )}
                                 <button
                                     className={`${styles.btnGhost} ${reminderStyles.iconBtn}`}
                                     onClick={() => onRemind?.(task)}

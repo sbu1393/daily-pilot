@@ -27,6 +27,7 @@ import CompleteTaskModal from "./CompleteTaskModal"
 import RolloverDialog from "./RolloverDialog"
 import styles from "./task.module.css"
 import ReanalyzeModal from "./ReanalyzeModal"
+import EditTaskModal from "./EditTaskModal"
 // «تنظیم زمان» — مودال یادآوری (additive؛ هیچ جریان موجودی را تغییر نمی‌دهد)
 import ReminderModal from "./ReminderModal"
 import SuggestionModal from "./SuggestionModal"
@@ -79,7 +80,10 @@ export default function DailyTaskList() {
     const [completeTask, setCompleteTask] = useState<TaskItem | null>(null)
     const [rolloverOpen, setRolloverOpen] = useState(false)
     const [deleteTask, setDeleteTask] = useState<TaskItem | null>(null)
-    const [reanalyzeTask, setReanalyzeTask] = useState<TaskItem | null>(null)// «تنظیم زمان»: تنها یک state نمایشی برای مودال یادآوری
+    const [reanalyzeTask, setReanalyzeTask] = useState<TaskItem | null>(null)
+    // ویرایش کار: تنها state نمایشی مودال (خود مودال روی PATCH می‌زند)
+    const [editTask, setEditTask] = useState<TaskItem | null>(null)
+    // «تنظیم زمان»: تنها یک state نمایشی برای مودال یادآوری
     const [remindTask, setRemindTask] = useState<TaskItem | null>(null)
 
     // استیت‌های مربوط به هوش مصنوعی
@@ -410,6 +414,7 @@ export default function DailyTaskList() {
                                 onDelete={setDeleteTask}
                                 onReanalyze={setReanalyzeTask}
                                 onRemind={setRemindTask}
+                                onEdit={setEditTask}
                             />
                         ))}
                         {visibleQueued.map((q) => (
@@ -519,6 +524,14 @@ export default function DailyTaskList() {
                 task={reanalyzeTask}
                 onClose={() => setReanalyzeTask(null)}
                 onDone={() => afterMutation()}
+            />
+            {/* مودال ویرایش: عنوان + دستهٔ (preset یا custom). تغییر دسته فرادادهٔ
+                کاربر است و طبق قرارداد موجود هیچ اثری بر برنامه‌ریزی ندارد. */}
+            <EditTaskModal
+                key={editTask?.id ?? "none"}
+                task={editTask}
+                onClose={() => setEditTask(null)}
+                onSaved={() => afterMutation()}
             />
             {/* مودال «تنظیم زمان» — کارِ یادآوری کاملاً محلی است و هیچ درخواستی به سرور نمی‌زند */}
             <ReminderModal

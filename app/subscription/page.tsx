@@ -1,10 +1,15 @@
 "use client"
 
 // صفحه اشتراک — طراحی نمایشی (Static)؛ اتصال به درگاه زرین‌پال بعداً اضافه می‌شود.
+//
+// ظاهر: توکن‌های دیزاین سیستم در globals.css + کلاس‌های این ماژول.
+// دکمه‌های «خرید» و «پلن فعلی» از primitives مشترک پروژه استفاده می‌کنند
+// (dp-btn / dp-btn-premium / dp-btn-ghost / dp-btn-block) تا با بقیهٔ اپ یکدست بماند.
 
 import Link from "next/link"
-import { Check, Crown } from "lucide-react"
+import { Check, Crown, Sparkles } from "lucide-react"
 import { faDigits } from "@/app/lib/time"
+import styles from "./subscription.module.css"
 
 interface PlanCard {
     title: string
@@ -55,65 +60,71 @@ export default function SubscriptionPage() {
     }
 
     return (
-        <div className="max-w-5xl mx-auto px-4 py-8">
-            <header className="text-center mb-10">
-                <h1 className="text-2xl font-extrabold text-[var(--ink)] flex items-center justify-center gap-2">
-                    <Crown className="text-amber-500" size={28} aria-hidden="true" />
+        <div className={styles.page}>
+            <header className={styles.head}>
+                <h1 className={styles.title}>
+                    <Crown className={styles.titleIcon} size={28} aria-hidden="true" />
                     اشتراک ویژه
                 </h1>
-                <p className="mt-2 text-[var(--muted)] text-sm">
+                <p className={styles.subtitle}>
                     ارتقا بده و بدون محدودیت روزت را بساز
                 </p>
             </header>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className={styles.grid}>
                 {plans.map((plan) => (
                     <section
                         key={plan.title}
-                        className={`rounded-2xl border p-6 flex flex-col gap-4 shadow-md bg-[var(--surface)] ${
-                            plan.highlight
-                                ? "border-amber-400 ring-2 ring-amber-300 relative"
-                                : "border-[var(--border)]"
-                        }`}
+                        className={
+                            plan.highlight ? `${styles.card} ${styles.cardFeatured}` : styles.card
+                        }
                     >
                         {plan.highlight && (
-                            <span className="absolute -top-3 right-4 bg-amber-400 text-white text-xs font-bold px-3 py-1 rounded-full shadow">
-                                پیشنهاد ویژه
+                            <span className={styles.badge}>
+                                <Sparkles size={12} aria-hidden="true" />
+                                پیشنهادی
                             </span>
                         )}
-                        <h2 className="text-lg font-extrabold text-[var(--ink)]">{plan.title}</h2>
-                        <div>
-                            <span className="text-2xl font-extrabold text-[var(--ink)]">
-                                {plan.price}
-                            </span>
-                            <span className="block text-xs text-[var(--muted)] mt-1">
-                                {plan.period}
-                            </span>
+
+                        <h2 className={styles.cardTitle}>{plan.title}</h2>
+
+                        <div className={styles.priceRow}>
+                            <span className={styles.priceValue}>{plan.price}</span>
+                            <span className={styles.pricePeriod}>{plan.period}</span>
                         </div>
-                        <ul className="flex flex-col gap-2 text-sm text-[var(--ink-2)]">
+
+                        <ul className={styles.features}>
                             {plan.features.map((feature) => (
-                                <li key={feature} className="flex items-center gap-2">
-                                    <Check size={16} className="text-amber-500 shrink-0" aria-hidden="true" />
-                                    {feature}
+                                <li key={feature} className={styles.feature}>
+                                    <Check
+                                        size={16}
+                                        className={plan.highlight ? styles.checkGold : styles.check}
+                                        aria-hidden="true"
+                                    />
+                                    <span>{feature}</span>
                                 </li>
                             ))}
                         </ul>
-                        {plan.price === "۰" ? (
-                            <Link
-                                href="/dashboard"
-                                className="mt-auto text-center bg-[var(--surface-solid)] border-2 border-[var(--border)] text-[var(--ink-2)] font-bold py-2 px-4 rounded-lg hover:border-[var(--primary)] transition"
-                            >
-                                پلن فعلی
-                            </Link>
-                        ) : (
-                            <button
-                                type="button"
-                                onClick={handleBuy}
-                                className="mt-auto bg-amber-400 hover:bg-amber-500 text-white font-bold py-2 px-4 rounded-lg shadow-md transition"
-                            >
-                                خرید
-                            </button>
-                        )}
+
+                        <div className={styles.cta}>
+                            {plan.price === "۰" ? (
+                                <Link
+                                    href="/dashboard"
+                                    className="dp-btn dp-btn-ghost dp-btn-block"
+                                >
+                                    پلن فعلی
+                                </Link>
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={handleBuy}
+                                    className="dp-btn dp-btn-premium dp-btn-block"
+                                >
+                                    <Sparkles size={16} aria-hidden="true" />
+                                    خرید
+                                </button>
+                            )}
+                        </div>
                     </section>
                 ))}
             </div>

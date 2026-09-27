@@ -6,6 +6,8 @@ import { CalendarProvider } from "./contexts/CalenderContext"
 import { SettingsProvider } from "./contexts/SettingsContext"
 import PwaRegister from "./components/PwaRegister"
 import OfflineIndicator from "./components/OfflineIndicator"
+// «تنظیم زمان» — یادآوری تسک + آلارم صوتی (کاملاً additive؛ فقط localStorage)
+import { ReminderProvider } from "./hooks/useTaskReminder"
 import Splash from "./components/Splash"
 import { ToastContainer } from "react-toastify"
 
@@ -33,7 +35,12 @@ export const metadata: Metadata = {
 const themeScript = `
 (function () {
   try {
-    var raw = localStorage.getItem("dp:settings");
+    // تنظیمات user-scoped هستند (dp:settings:u<id> | dp:settings:anon) و
+    // scope از کلید نشستِ لایه‌ی آفلاین خوانده می‌شود — همان قاعده‌ی
+    // scopeToken() در app/lib/reminder.ts.
+    var uid = localStorage.getItem("dp:offline:v3:user");
+    var scope = uid && /^[0-9]+$/.test(uid) ? "u" + uid : "anon";
+    var raw = localStorage.getItem("dp:settings:" + scope);
     var theme = "system";
     if (raw) { theme = JSON.parse(raw).theme || "system"; }
     var dark = theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -60,14 +67,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <meta name="theme-color" media="(prefers-color-scheme: light)" content="#6366f1" />
         <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b1120" />
+        <meta name="enamad" content="31470106" />
       </head>          <body className={vazir.className}>
         <Splash />
         <CalendarProvider>
           <SettingsProvider>
-            {children}
-            <OfflineIndicator />
-            <ToastContainer position="bottom-left" rtl closeOnClick pauseOnHover />
-            <PwaRegister />
+            <ReminderProvider>
+              {children}
+              <OfflineIndicator />
+              <ToastContainer position="bottom-left" rtl closeOnClick pauseOnHover />
+              <PwaRegister />
+            </ReminderProvider>
           </SettingsProvider>
         </CalendarProvider>
       </body>

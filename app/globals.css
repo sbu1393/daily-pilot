@@ -55,6 +55,20 @@
   --danger-bg-strong: #ffe4e6;
   --amber: #d97706;
 
+  /* طلایی/پریمیوم (دکمهٔ ارتقا و کارت ویژه) */
+  --gold-from: #f59e0b;
+  --gold-to: #ca8a04;
+  --gold-from-hover: #d97706;
+  --gold-to-hover: #a16207;
+  /* متن روی زمینهٔ طلایی: تیره است چون سفید روی amber-500 کنتراست کافی ندارد */
+  --gold-ink: #422006;
+  --gold-ring: rgba(245, 158, 11, .5);
+  --gold-soft: rgba(245, 158, 11, .14);
+  --gradient-gold: linear-gradient(135deg, var(--gold-from), var(--gold-to));
+  --gradient-gold-hover: linear-gradient(135deg, var(--gold-from-hover), var(--gold-to-hover));
+  --shadow-gold: 0 10px 26px -10px rgba(217, 119, 6, .5);
+  --shadow-gold-lg: 0 18px 38px -12px rgba(217, 119, 6, .62);
+
   /* شعاع */
   --radius-sm: 12px;
   --radius-md: 18px;
@@ -103,6 +117,16 @@
   --danger-strong: #fb7185;
   --danger-bg-strong: rgba(251, 113, 133, .14);
   --amber: #f59e0b;
+
+  /* طلایی/پریمیوم در تم تیره: روشن‌تر ولی همان متن تیرهٔ پرکنتراست */
+  --gold-from: #fbbf24;
+  --gold-to: #f59e0b;
+  --gold-from-hover: #f59e0b;
+  --gold-to-hover: #d97706;
+  --gold-ring: rgba(251, 191, 36, .45);
+  --gold-soft: rgba(251, 191, 36, .16);
+  --shadow-gold: 0 10px 26px -10px rgba(0, 0, 0, .6);
+  --shadow-gold-lg: 0 18px 38px -12px rgba(0, 0, 0, .7);
 
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, .3);
   --shadow-sm: 0 6px 14px -6px rgba(0, 0, 0, .45);
@@ -252,6 +276,24 @@ samp {
   color: #fff;
   background: var(--gradient-danger);
   box-shadow: var(--shadow-md), 0 4px 12px -6px rgba(220, 38, 38, .45);
+}
+
+/* دکمهٔ پریمیوم (طلایی) — ارتقای حساب. گرادینت + هاور تیره‌تر + سایهٔ نرم */
+.dp-btn-premium {
+  color: var(--gold-ink);
+  background: var(--gradient-gold);
+  box-shadow: var(--shadow-md), var(--shadow-gold);
+}
+
+.dp-btn-premium:hover:not(:disabled) {
+  background: var(--gradient-gold-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg), var(--shadow-gold-lg);
+}
+
+.dp-btn-premium:focus-visible {
+  outline: 3px solid var(--gold-ring);
+  outline-offset: 3px;
 }
 
 .dp-btn-block {
@@ -851,6 +893,17 @@ samp {
   width: min(1200px, 92%);
   margin: auto;
   padding: 36px 0;
+}
+
+/* نوار ارتقای حساب در AppShell — امتداد کانتینر با همان ریتم فاصله */
+.app-upgrade-bar {
+  width: min(1200px, 92%);
+  margin: 4px auto 0;
+}
+
+.app-upgrade-bar .dp-btn {
+  padding: 10px 18px;
+  font-size: .85rem;
 }
 
 /* ============================================================

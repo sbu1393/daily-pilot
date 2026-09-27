@@ -1,0 +1,264 @@
+/* ============================================================
+   Footer — فوتر عمومی روزساز
+   ------------------------------------------------------------
+   استایل با توکن‌های دیزاین پروژه (app/globals.css) نوشته شده تا با
+   لندینگ و بقیه‌ی اپ یکدست بماند و در تم روشن/تیره درست کار کند.
+   چیدمان RTL از dir="rtl" روی <html> ارث می‌برد.
+   ============================================================ */
+
+.footer {
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink-2);
+    font-family: var(--font-sans);
+}
+
+/* حداقلِ عرضِ محتوا: روی دسکتاپ ۳ ستون، تبلت ۲ و موبایل ۱ ستون */
+.inner {
+    max-width: 1120px;
+    margin-inline: auto;
+    padding: 56px 20px 40px;
+    display: grid;
+    grid-template-columns: 1.7fr 1fr 1.15fr;
+    gap: 44px 32px;
+    align-items: start;
+}
+
+/* ---------- ستون راست: برند ---------- */
+.brandColumn {
+    display: grid;
+    gap: 16px;
+    justify-items: start;
+    max-width: 380px;
+}
+
+.brandLink {
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
+    border-radius: var(--radius-full);
+    transition: transform 0.2s ease;
+}
+
+.brandLink:hover {
+    transform: translateY(-2px);
+}
+
+.brandLink:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 4px;
+}
+
+.tagline {
+    margin: 0;
+    font-size: 0.9rem;
+    line-height: 2;
+    color: var(--muted);
+}
+
+.socialTitle {
+    margin: 2px 0 0;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--ink);
+    letter-spacing: -0.2px;
+}
+
+.socials {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.social {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 15px;
+    border-radius: var(--radius-full);
+    border: 1.5px solid var(--border);
+    background: var(--surface-solid);
+    color: var(--ink-2);
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-decoration: none;
+    transition: border-color 0.2s ease, color 0.2s ease, background-color 0.2s ease,
+        transform 0.2s ease;
+}
+
+.social:hover {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+    transform: translateY(-2px);
+}
+
+.social:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+/* ---------- ستون‌های لینک ---------- */
+.column {
+    display: grid;
+    gap: 15px;
+    justify-items: start;
+}
+
+.columnTitle {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: var(--ink);
+    letter-spacing: -0.2px;
+}
+
+.links {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 11px;
+    justify-items: start;
+}
+
+.link {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    font-size: 0.87rem;
+    line-height: 1.8;
+    text-decoration: none;
+    border-radius: 6px;
+    transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.link:hover {
+    color: var(--primary-dark);
+    transform: translateX(-3px);
+}
+
+.link:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+}
+
+.email {
+    direction: ltr;
+    unicode-bidi: embed;
+    font-size: 0.85rem;
+}
+
+/* ---------- نماد اعتماد الکترونیکی (اینماد) ---------- */
+.seal {
+    margin-top: 4px;
+    padding: 10px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: #fff;
+    box-shadow: var(--shadow-xs);
+    display: inline-flex;
+}
+
+.sealLink {
+    display: inline-flex;
+    line-height: 0;
+    border-radius: 10px;
+    transition: transform 0.2s ease;
+}
+
+.sealLink:hover {
+    transform: translateY(-2px);
+}
+
+.sealLink:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+}
+
+/* ابعاد ثابت: مستقل از بارگذاری تصویر، چیدمان نمی‌پرد (بدون CLS) */
+.sealImg {
+    display: block;
+    width: 110px;
+    height: 120px;
+    object-fit: contain;
+    cursor: pointer;
+}
+
+/* ---------- نوار پایین ---------- */
+.bottomBar {
+    border-top: 1px solid var(--border-soft);
+    padding: 18px 20px;
+    text-align: center;
+}
+
+.copyright {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--muted-2);
+}
+
+/* ============================================================
+   ریسپانسیو
+   ============================================================ */
+
+/* تبلت: برند تمام‌عرض، دو ستون لینک زیر آن */
+@media (max-width: 900px) {
+    .inner {
+        grid-template-columns: 1fr 1fr;
+        gap: 34px 24px;
+        padding: 48px 20px 34px;
+    }
+
+    .brandColumn {
+        grid-column: 1 / -1;
+        max-width: none;
+    }
+}
+
+/* موبایل: یک‌ستونی و دکمه‌های شبکه‌ی اجتماعی هم‌عرض */
+@media (max-width: 600px) {
+    .inner {
+        grid-template-columns: 1fr;
+        gap: 30px;
+        padding: 40px 18px 28px;
+    }
+
+    .brandColumn {
+        grid-column: auto;
+    }
+
+    .socials {
+        width: 100%;
+    }
+
+    .social {
+        flex: 1 1 auto;
+        justify-content: center;
+    }
+}
+
+/* ---------- تم تیره ---------- */
+/* توکن‌ها خودشان عوض می‌شوند؛ فقط نماد اینماد باید روی زمینه‌ی روشن بماند */
+:global([data-theme="dark"]) .seal {
+    background: #fff;
+    border-color: rgba(255, 255, 255, 0.16);
+}
+
+/* ---------- دسترس‌پذیری ---------- */
+@media (prefers-reduced-motion: reduce) {
+    .brandLink,
+    .social,
+    .link,
+    .sealLink {
+        transition: none;
+    }
+
+    .brandLink:hover,
+    .social:hover,
+    .link:hover,
+    .sealLink:hover {
+        transform: none;
+    }
+}

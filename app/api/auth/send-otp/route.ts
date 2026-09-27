@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { generateOtpCode, hashOtp } from "@/lib/otp"
-import { getPrisma } from "@/app/lib/getPrisma"
 import { verifyTurnstile } from "@/app/lib/turnstile"
 import { CAPTCHA_ACTIONS } from "@/app/lib/captchaActions"
-import { Resend } from "resend"
+import { createOtpChallenge, sendOtpEmail } from "@/app/lib/services/otp.service"
 
 export async function POST(req: NextRequest) {
   try {
@@ -37,21 +35,24 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const code = generateOtpCode()
-    const codeHash = await hashOtp(code)
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000)
+    const challenge = await createOtpChallenge(email)
+    const delivery = await sendOtpEmail(email, challenge.code)
 
-    await getPrisma().otpCode.create({
-      data: { email, codeHash, expiresAt },
-    })
-
-    const resend = new Resend(process.env.RESEND_API_KEY)
-    await resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL ?? "DailyPilot <onboarding@resend.dev>",
-      to: email,
-      subject: "کد تأیید DailyPilot",
-      html: `<p>کد یک‌بار مصرف شما: <strong>${code}</strong></p><p>این کد تا ۱۰ دقیقه معتبر است.</p>`,
-    })
+    // شکست ارسال هرگز بی‌صدا رد نمی‌شود: کد در DB هست ولی به کاربر نرسیده، پس
+    // پاسخ موفقیت دروغین نمی‌دهیم (همان قرارداد مسیر login).
+    if (!delivery.sent) {
+      console.error("[send-otp] email delivery failed:", delivery.error)
+      return NextResponse.json(
+        {
+          ok: false,
+          error: {
+            code: "EMAIL_DELIVERY_FAILED",
+            message: "ارسال کد ناموفق بود؛ دوباره تلاش کن",
+          },
+        },
+        { status: 503 },
+      )
+    }
 
     return NextResponse.json({ ok: true, message: "کد با موفقیت ارسال شد" }, { status: 200 })
   } catch (error) {

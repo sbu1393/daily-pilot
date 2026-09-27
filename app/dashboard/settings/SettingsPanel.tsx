@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -13,6 +13,14 @@ import FormInput from "@/app/components/FormInput"
 import { profileSchema } from "@/app/schema/formSchema"
 import { useSettings } from "@/app/contexts/SettingsContext"
 import { api } from "@/app/lib/api/client"
+import {
+    ensurePushSubscription,
+    hasNotificationPermission,
+    removePushSubscription,
+    sendTestNotification,
+    syncReminderSchedule,
+    type PushFailureReason,
+} from "@/app/lib/pushSubscription"
 import moment from "moment-jalaali"
 import { faDigits } from "@/app/lib/time"
 import InstallCard from "@/app/components/pwa/InstallCard"
@@ -80,6 +88,19 @@ function reminderTimeToHHMM(h12: number, minute: number, period: DayPeriod): str
 
 type Tab = "account" | "preferences" | "install" | "info"
 
+/* پیام‌های فارسی خطاهای Push — بدون افشای جزئیات فنی به کاربر.
+ * هر پیام روشن می‌کند که یادآور همان‌جا هم بیکار نمانده: تا وقتی برنامه باز است،
+ * تایمر صفحه یادآور را نشان می‌دهد (تخریب تدریجی، نه شکست کامل). */
+const PUSH_REASON_LABEL: Record<PushFailureReason, string> = {
+    UNSUPPORTED: "مرورگر این دستگاه از اعلان پس‌زمینه پشتیبانی نمی‌کند؛ یادآور فقط وقتی برنامه باز است کار می‌کند",
+    NOT_CONFIGURED: "اعلان پس‌زمینه روی سرور فعال نشده است؛ یادآور فقط وقتی برنامه باز است کار می‌کند",
+    PERMISSION_DENIED: "برای دریافت یادآور، اجازه‌ی اعلان را در مرورگر بدهید",
+    NO_REGISTRATION: "برنامه روی این دستگاه کامل نصب نشده است؛ یادآور فقط وقتی برنامه باز است کار می‌کند",
+    SUBSCRIBE_FAILED: "ثبت اعلان روی این دستگاه ناموفق بود؛ یادآور فقط وقتی برنامه باز است کار می‌کند",
+    SERVER_REJECTED: "سرور اشتراک اعلان را نپذیرفت؛ یادآور فقط وقتی برنامه باز است کار می‌کند",
+    RATE_LIMITED: "تعداد تلاش‌ها زیاد بود؛ چند دقیقه بعد امتحان کن",
+}
+
 /* انیمیشن ورود محتوای هر تب */
 const tabMotion = {
     initial: { opacity: 0, y: 14 },
@@ -107,6 +128,9 @@ export default function SettingsPanel({ user }: { user: UserData }) {
             ? jalaliDaysInMonth(birthJalali.jy, birthJalali.jm)
             : 31
     const reminder = parseReminderTime(settings.reminderTime)
+    // Web Push — وضعیت دکمه‌ی «تست اعلان» + گارد هم‌گام‌سازی یک‌باره
+    const [pushBusy, setPushBusy] = useState(false)
+    const pushSyncedRef = useRef(false)
     // بخش تغییر رمز عبور
     const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" })
     const [passwordLoading, setPasswordLoading] = useState(false)
@@ -174,15 +198,87 @@ export default function SettingsPanel({ user }: { user: UserData }) {
         update({ reminderTime: reminderTimeToHHMM(next.h12, next.minute, next.period) })
     }
 
+    /*
+     * هم‌گام‌سازی خودکار اشتراک Push: اگر یادآور فعال و مجوز داده شده باشد،
+     * با باز شدن صفحه‌ی تنظیمات اشتراک این دستگاه دوباره ثبت می‌شود (بدون prompt).
+     * این کار endpointهای چرخیده/باطل‌شده را تازه می‌کند.
+     */
+    useEffect(() => {
+        if (pushSyncedRef.current) return
+        if (!settings.reminderEnabled) return
+        if (!hasNotificationPermission()) return
+
+        pushSyncedRef.current = true
+        void ensurePushSubscription({ requestPermission: false })
+    }, [settings.reminderEnabled])
+
+    /*
+     * آینه‌کردن برنامه‌ی یادآور روی سرور با یک تأخیر کوچک (debounce):
+     * تریگر cron سرور از همین مقدار استفاده می‌کند. تغییر سریع دقیقه‌ها
+     * (اسکرول select) بنابراین یک درخواست می‌فرستد، نه ده‌تا.
+     */
+    useEffect(() => {
+        if (!settings.reminderEnabled) return
+        if (!hasNotificationPermission()) return
+
+        const timer = setTimeout(() => {
+            void syncReminderSchedule({ enabled: true, time: settings.reminderTime })
+        }, 800)
+
+        return () => clearTimeout(timer)
+    }, [settings.reminderEnabled, settings.reminderTime])
+
+    /*
+     * یادآور دو لایه دارد:
+     *  ۱. تایمر صفحه (همیشه) — وقتی برنامه باز است.
+     *  ۲. Web Push (اشتراک این دستگاه) — وقتی برنامه بسته است/دستگاه در Doze است.
+     * روشن/خاموش کردن یادآور، اشتراک Push را هم می‌سازد/لغو می‌کند؛ اگر Push
+     * ممکن نباشد، لایه‌ی اول دست‌نخورده می‌ماند و کاربر دلیلش را می‌بیند.
+     */
     const onToggleReminder = async (enabled: boolean) => {
         update({ reminderEnabled: enabled })
-        if (enabled) {
-            const granted = await requestNotificationPermission()
-            toast.info(
-                granted
-                    ? "یادآور فعال شد؛ در زمان تعیین‌شده به شما اطلاع می‌دهیم"
-                    : "برای دریافت یادآور، اجازه‌ی اعلان را در مرورگر بدهید",
-            )
+
+        if (!enabled) {
+            // خاموش شدن یادآور = لغو اشتراک Push این دستگاه + آینه‌ی سرور
+            void removePushSubscription()
+            void syncReminderSchedule({ enabled: false, time: settings.reminderTime })
+            return
+        }
+
+        const granted = await requestNotificationPermission()
+        if (!granted) {
+            toast.info(PUSH_REASON_LABEL.PERMISSION_DENIED)
+            return
+        }
+
+        const result = await ensurePushSubscription({ requestPermission: true })
+        toast.info(
+            result.ok
+                ? "یادآور فعال شد؛ حتی وقتی برنامه بسته است هم برایت اعلان می‌فرستیم"
+                : PUSH_REASON_LABEL[result.reason],
+        )
+    }
+
+    /* ارسال اعلان آزمایشی — تنها راه تأیید اینکه Push در حالت بسته هم می‌رسد */
+    const onSendTestPush = async () => {
+        setPushBusy(true)
+        try {
+            const result = await sendTestNotification()
+            if (!result.ok) {
+                toast.error(PUSH_REASON_LABEL[result.reason])
+                return
+            }
+            if (result.sent > 0) {
+                toast.success(`اعلان آزمایشی برای ${faDigits(result.sent)} دستگاه ارسال شد`)
+                return
+            }
+            if (result.failed > 0) {
+                toast.error("ارسال اعلان ناموفق بود؛ چند دقیقه بعد دوباره تلاش کن")
+                return
+            }
+            toast.info("این دستگاه اشتراک فعال ندارد؛ یادآور را خاموش و دوباره روشن کن")
+        } finally {
+            setPushBusy(false)
         }
     }
 
@@ -517,6 +613,14 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                                             <option value="pm">شب</option>
                                         </select>
                                     </div>
+                                    <button
+                                        type="button"
+                                        className="dp-btn dp-btn-ghost"
+                                        disabled={pushBusy}
+                                        onClick={onSendTestPush}
+                                    >
+                                        {pushBusy ? "در حال ارسال..." : "🔔 ارسال اعلان آزمایشی"}
+                                    </button>
                                 </div>
                             )}
                         </div>

@@ -184,15 +184,37 @@ describe("POST /api/auth/send-otp", () => {
         expect(mocks.emailSend).not.toHaveBeenCalled()
     })
 
-    it("returns 500 INTERNAL when email delivery fails after a valid captcha", async () => {
+    /* -------------------------------------------------------------- */
+    /* شکست ارسال ایمیل — هرگز بی‌صدا رد نمی‌شود                       */
+    /* -------------------------------------------------------------- */
+
+    it("returns 503 EMAIL_DELIVERY_FAILED when the provider throws (network failure)", async () => {
         mocks.emailSend.mockRejectedValue(new Error("resend down"))
         const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
         const res = await callPOST({ email: EMAIL, turnstileToken: TURNSTILE_TOKEN })
 
-        expect(res.status).toBe(500)
+        expect(res.status).toBe(503)
         const parsed = await res.json()
-        expect(parsed.error.code).toBe("INTERNAL")
+        expect(parsed.ok).toBe(false)
+        expect(parsed.error.code).toBe("EMAIL_DELIVERY_FAILED")
+        errorSpy.mockRestore()
+    })
+
+    it("returns 503 EMAIL_DELIVERY_FAILED when the provider returns an API error without throwing", async () => {
+        // قرارداد واقعی SDK: خطای API (403/401/429) به‌جای throw، در
+        // { data: null, error } برمی‌گردد — دقیقاً حالتی که قبلاً بی‌صدا رد می‌شد.
+        mocks.emailSend.mockResolvedValue({
+            data: null,
+            error: { message: "domain not verified", name: "validation_error", statusCode: 403 },
+        })
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+        const res = await callPOST({ email: EMAIL, turnstileToken: TURNSTILE_TOKEN })
+
+        expect(res.status).toBe(503)
+        const parsed = await res.json()
+        expect(parsed.error.code).toBe("EMAIL_DELIVERY_FAILED")
         errorSpy.mockRestore()
     })
 })

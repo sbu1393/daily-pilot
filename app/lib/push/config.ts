@@ -1,70 +1,77 @@
-// ADR-07 / Phase 3-A — VAPID configuration (سرور-محور).
-//
-// مسئولیت: فقط کلیدهای لازم برای ارسال Web Push از env خوانده می‌شوند.
-// - کلید خصوصی هرگز log/return نمی‌شود و هرگز به client نمی‌رسد.
-// - برخلاف billing (که fail-fast throw می‌کند)، نبود config این‌جا «ghost» نیست بلکه یک
-//   حالت قابل‌انتظار است (ارسال Push اختیاری است): resolver نتیجه‌ی discriminated برمی‌گرداند
-//   و هیچ‌جا crash نمی‌کند. نام کلیدها در پیام می‌آید، مقدار هرگز.
-// - Public key سمت client همان `NEXT_PUBLIC_VAPID_PUBLIC_KEY` باقی می‌ماند (فاز ۲).
+/*
+ * Web Push (VAPID) — پیکربندی سرور
+ * ---------------------------------------------------------------
+ * سه متغیر محیطی لازم است (هیچ‌کدام مقدار پیش‌فرض ندارند):
+ *
+ *   NEXT_PUBLIC_VAPID_PUBLIC_KEY  کلید عمومی VAPID (Base64URL، ~87 کاراکتر)
+ *                                 «NEXT_PUBLIC_» است چون مرورگر هم باید آن را
+ *                                 به pushManager.subscribe بدهد؛ بنابراین باید
+ *                                 در **زمان build** هم موجود باشد.
+ *   VAPID_PRIVATE_KEY             کلید خصوصی VAPID — فقط سرور (هرگز به client
+ *                                 نمی‌رود، هرگز log نمی‌شود).
+ *   VAPID_SUBJECT                 شناسه‌ی تماس مالک کلید: `mailto:you@example.com`
+ *                                 یا یک URL https.
+ *
+ * تولید کلیدها: `npm run vapid:keys` (اسکریپت scripts/generate-vapid-keys.ts).
+ *
+ * این ماژول هیچ‌وقت throw نمی‌کند؛ مصرف‌کننده با `configured` تصمیم می‌گیرد
+ * (تا نبودِ کلیدها فقط باعث «اعلان غیرفعال» شود، نه 500 در مسیرهای دیگر).
+ */
 
 export const PUSH_ENV = {
-    /** کلید عمومی VAPID سمت سرور (web-push). */
-    publicKey: "VAPID_PUBLIC_KEY",
-    /** کلید خصوصی VAPID — فقط سرور؛ هرگز به client نمی‌رسد. */
+    publicKey: "NEXT_PUBLIC_VAPID_PUBLIC_KEY",
     privateKey: "VAPID_PRIVATE_KEY",
-    /** subject (mailto: یا URL) — موردنیاز web-push. */
     subject: "VAPID_SUBJECT",
-    /** کلید عمومی سمت client (فاز ۲) — همان مقدار کلید عمومی، نام متفاوت. */
-    clientPublicKey: "NEXT_PUBLIC_VAPID_PUBLIC_KEY",
 } as const
 
-/** منبع env — تزریق‌پذیر تا resolver خالص و بدون env واقعی قابل تست باشد. */
-export type PushEnvSource = Record<string, string | undefined>
-
-export interface VapidConfig {
-    readonly publicKey: string
-    readonly privateKey: string
-    readonly subject: string
+export type PushConfig = {
+    publicKey: string
+    privateKey: string
+    subject: string
 }
 
-export type PushConfigResult =
-    | { ok: true; config: VapidConfig }
-    | { ok: false; missing: string[] }
+export type PushConfiguration =
+    | { configured: true; config: PushConfig; missing: [] }
+    | { configured: false; config: null; missing: string[] }
 
-/** subject معتبر برای web-push: `mailto:` یا URL مطلق http(s). */
-function isValidSubject(subject: string): boolean {
-    if (subject.startsWith("mailto:")) return subject.length > "mailto:".length
+export type EnvLike = Record<string, string | undefined>
+
+/** یک URL https یا mailto معتبر لازم است (قرارداد VAPID). */
+export function isValidVapidSubject(subject: string): boolean {
+    const trimmed = subject.trim()
+    if (trimmed.startsWith("mailto:")) {
+        return /^mailto:[^\s@]+@[^\s@]+$/.test(trimmed)
+    }
+
     try {
-        const url = new URL(subject)
-        return url.protocol === "https:" || url.protocol === "http:"
+        return new URL(trimmed).protocol === "https:"
     } catch {
         return false
     }
 }
 
 /**
- * resolve پیکربندی VAPID از یک منبع env — خالص و بدون I/O.
- * خروجی `ok:false` فقط نام کلیدهای غایب/نامعتبر را می‌دهد (هیچ مقدار secretی برنمی‌گردد).
+ * خواندن پیکربندی Push از env. `missing` نام متغیرهای غایب/نامعتبر را برمی‌گرداند
+ * تا پیام خطا و لاگ دقیق باشد — **هرگز مقدارها را برنمی‌گرداند**.
  */
-export function resolvePushConfig(env: PushEnvSource): PushConfigResult {
-    const read = (key: string): string => (typeof env[key] === "string" ? env[key]!.trim() : "")
+export function readPushConfiguration(env: EnvLike = process.env): PushConfiguration {
+    const publicKey = (env[PUSH_ENV.publicKey] ?? "").trim()
+    const privateKey = (env[PUSH_ENV.privateKey] ?? "").trim()
+    const subject = (env[PUSH_ENV.subject] ?? "").trim()
 
     const missing: string[] = []
-    const publicKey = read(PUSH_ENV.publicKey)
-    const privateKey = read(PUSH_ENV.privateKey)
-    const subject = read(PUSH_ENV.subject)
-
     if (!publicKey) missing.push(PUSH_ENV.publicKey)
     if (!privateKey) missing.push(PUSH_ENV.privateKey)
     if (!subject) missing.push(PUSH_ENV.subject)
-    else if (!isValidSubject(subject)) missing.push(PUSH_ENV.subject)
+    else if (!isValidVapidSubject(subject)) missing.push(PUSH_ENV.subject)
 
-    if (missing.length > 0) return { ok: false, missing }
+    if (missing.length > 0) {
+        return { configured: false, config: null, missing }
+    }
 
-    return { ok: true, config: { publicKey, privateKey, subject } }
+    return { configured: true, config: { publicKey, privateKey, subject }, missing: [] }
 }
 
-/** پیکربندی VAPID از environment فرایند (خواندن در لحظه‌ی فراخوانی، بدون cache). */
-export function getPushConfig(): PushConfigResult {
-    return resolvePushConfig(process.env)
+export function isPushConfigured(env: EnvLike = process.env): boolean {
+    return readPushConfiguration(env).configured
 }

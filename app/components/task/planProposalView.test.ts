@@ -24,7 +24,6 @@ const task = (id: number, overrides: Partial<TaskItem> = {}): TaskItem => ({
     allocatedMinutes: null,
     spentMinutes: null,
     completedOn: null,
-    reminderAt: null,
     createdAt: "2026-09-27T00:00:00.000Z",
     updatedAt: "2026-09-27T00:00:00.000Z",
     ...overrides,

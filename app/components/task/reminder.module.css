@@ -1,0 +1,357 @@
+/* ============================================================
+   Reminder (تنظیم زمان) — استایل‌های اختصاصی این فیچر
+   ------------------------------------------------------------
+   فقط توکن‌های دیزاین پروژه (app/globals.css) → سازگار با تم روشن/تیره.
+   کلاس‌های عمومی (modalHead/btnPrimary/…) از task.module.css می‌آیند تا
+   ظاهر مودال‌ها یکدست بماند.
+   ============================================================ */
+
+/* ---------- نشانِ یادآوری روی کارت تسک ---------- */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--amber);
+    background: var(--warning-bg);
+    color: var(--ink);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+/* یادآوری‌ای که زمانش گذشته (اجرا شده) */
+.badgePast {
+    opacity: 0.62;
+}
+
+/* دکمه‌ی آیکون‌دار (کنار .btnGhost موجود در task.module.css) */
+.iconBtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* ---------- مودال: یادآوری فعال ---------- */
+.activeBox {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 13px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--amber);
+    background: var(--warning-bg);
+}
+
+.activeIcon {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--surface-solid);
+    color: var(--amber);
+}
+
+.activeText {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.activeText b {
+    font-size: 0.82rem;
+    color: var(--ink);
+}
+
+.activeText span {
+    font-size: 0.78rem;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---------- مودال: انتخاب زمان ---------- */
+.fieldLabel {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--muted);
+    margin-bottom: -6px;
+}
+
+/* ورودی native تاریخ/ساعت — عمداً LTR است (ترتیب قطعه‌ها استاندارد مرورگر) */
+.dateInput {
+    width: 100%;
+    direction: ltr;
+    text-align: center;
+    padding: 11px 12px;
+    border-radius: var(--radius-sm);
+    border: 1.5px solid var(--border);
+    background: var(--input-bg);
+    color: var(--ink);
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-variant-numeric: tabular-nums;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.dateInput:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.dateInput:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* ---------- مودال: انتخاب‌های سریع ---------- */
+.quickRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.quickChip {
+    border: 1.5px solid var(--border);
+    background: var(--surface-solid);
+    color: var(--ink-2);
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease,
+        transform 0.15s ease;
+}
+
+.quickChip:hover:not(:disabled) {
+    border-color: var(--amber);
+    background: var(--warning-bg);
+    color: var(--ink);
+    transform: translateY(-1px);
+}
+
+.quickChip:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+.quickChip:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ---------- مودال: پیش‌نمایش ---------- */
+.preview {
+    margin: 0;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--primary-dark);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.previewEmpty {
+    color: var(--muted-2);
+    font-weight: 500;
+}
+
+.previewWarn {
+    color: var(--danger-strong);
+}
+
+/* ============================================================
+   بنر آلارم (بالای صفحه، روی همه‌چیز)
+   ============================================================ */
+.alarmLayer {
+    position: fixed;
+    inset-inline: 0;
+    top: 14px;
+    z-index: 1080; /* بالاتر از overlay مودال‌ها (1060) */
+    display: grid;
+    justify-items: center;
+    gap: 10px;
+    padding-inline: 12px;
+    pointer-events: none; /* لایه هیچ‌چیزی را بلاک نمی‌کند */
+}
+
+.alarm {
+    pointer-events: auto;
+    width: min(560px, 100%);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: 18px;
+    border: 2px solid var(--amber);
+    background:
+        linear-gradient(135deg, rgba(245, 158, 11, 0.14), rgba(245, 158, 11, 0.04)),
+        var(--surface-solid);
+    box-shadow: 0 22px 48px -18px rgba(15, 23, 42, 0.45);
+}
+
+.alarmBell {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--gradient-gold);
+    color: var(--gold-ink);
+    animation: alarmShake 1.1s ease-in-out infinite;
+}
+
+.alarmBell svg {
+    width: 21px;
+    height: 21px;
+}
+
+.alarmBody {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+    flex: 1;
+}
+
+.alarmText {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 800;
+    color: var(--ink);
+    line-height: 1.7;
+}
+
+.alarmMeta {
+    margin: 0;
+    font-size: 0.76rem;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.alarmActions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex: none;
+}
+
+.alarmStop,
+.alarmSnooze {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.alarmStop {
+    border: none;
+    background: var(--gradient-gold);
+    color: var(--gold-ink);
+    box-shadow: var(--shadow-gold);
+}
+
+.alarmStop:hover {
+    background: var(--gradient-gold-hover);
+    transform: translateY(-1px);
+}
+
+.alarmSnooze {
+    border: 1.5px solid var(--border);
+    background: var(--surface-solid);
+    color: var(--ink-2);
+}
+
+.alarmSnooze:hover {
+    border-color: var(--primary);
+    color: var(--primary-dark);
+    transform: translateY(-1px);
+}
+
+.alarmStop:focus-visible,
+.alarmSnooze:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+@keyframes alarmShake {
+    0%,
+    60%,
+    100% {
+        transform: rotate(0deg);
+    }
+    70% {
+        transform: rotate(-11deg);
+    }
+    80% {
+        transform: rotate(11deg);
+    }
+    90% {
+        transform: rotate(-6deg);
+    }
+}
+
+/* ============================================================
+   ریسپانسیو
+   ============================================================ */
+@media (max-width: 620px) {
+    .alarm {
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .alarmBody {
+        flex-basis: calc(100% - 54px);
+    }
+
+    .alarmActions {
+        width: 100%;
+    }
+
+    .alarmStop,
+    .alarmSnooze {
+        flex: 1 1 auto;
+        justify-content: center;
+    }
+
+    .quickRow {
+        width: 100%;
+    }
+
+    .quickChip {
+        flex: 1 1 auto;
+        text-align: center;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .alarmBell {
+        animation: none;
+    }
+
+    .quickChip,
+    .alarmStop,
+    .alarmSnooze {
+        transition: none;
+    }
+
+    .quickChip:hover:not(:disabled),
+    .alarmStop:hover,
+    .alarmSnooze:hover {
+        transform: none;
+    }
+}

@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "analyze:daykey": "node --env-file=.env --experimental-strip-types --disable-warning=ExperimentalWarning scripts/analyze-daykey-migration.ts",
-    "bootstrap:admin": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/bootstrap-admin.ts"
+    "bootstrap:admin": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/bootstrap-admin.ts",
+    "vapid:keys": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/generate-vapid-keys.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

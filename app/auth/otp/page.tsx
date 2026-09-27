@@ -1,13 +1,33 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { Suspense, useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import CaptchaWidget, { type CaptchaWidgetHandle } from "@/app/components/CaptchaWidget"
 import { CAPTCHA_ACTIONS } from "@/app/lib/captchaActions"
 
-export default function OtpPage() {
-  const [email, setEmail] = useState("")
+/**
+ * صفحهٔ تأیید کد یک‌بار مصرف — دو حالت مصرف:
+ *
+ * 1) **`?mode=login&challengeId=…&email=…`** — مرحلهٔ دوم ورود (2FA). چالش از قبل
+ *    توسط `/api/auth/login` ساخته و ایمیل شده است، پس از مرحلهٔ ایمیل عبور می‌کنیم و
+ *    مستقیماً فیلد کد را نشان می‌دهیم. بعد از تأیید، سشن توسط سرور صادر می‌شود و
+ *    کاربر به `/dashboard` می‌رود.
+ * 2) **بدون پارامتر** — تأیید سادهٔ ایمیل: ابتدا ایمیل می‌گیریم، کد می‌فرستیم
+ *    (`/api/auth/send-otp`) و سپس تأیید می‌کنیم. در این حالت سشن صادر نمی‌شود.
+ *
+ * `useSearchParams` در یک Suspense boundary قرار دارد (الزام Next برای پریرندر).
+ */
+function OtpPageInner() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+
+  const challengeId = (searchParams.get("challengeId") ?? "").trim()
+  // ورود دو مرحله‌ای فقط وقتی معتبر است که شناسهٔ چالش سرور هم همراه باشد
+  const isTwoFactor = searchParams.get("mode") === "login" && challengeId !== ""
+
+  const [email, setEmail] = useState(searchParams.get("email") ?? "")
   const [code, setCode] = useState("")
-  const [step, setStep] = useState<"email" | "code">("email")
+  const [step, setStep] = useState<"email" | "code">(isTwoFactor ? "code" : "email")
   const [loading, setLoading] = useState(false)
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
   const captchaRef = useRef<CaptchaWidgetHandle | null>(null)
@@ -61,7 +81,8 @@ export default function OtpPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: email.trim(),
+          // در حالت 2FA شناسهٔ چالش می‌رود؛ در حالت ساده ایمیل کافی است
+          ...(isTwoFactor ? { challengeId } : { email: email.trim() }),
           code: code.trim(),
           turnstileToken: token,
         }),
@@ -71,8 +92,13 @@ export default function OtpPage() {
         alert(data?.error?.message ?? "تأیید کد ناموفق بود")
         return
       }
+      if (isTwoFactor) {
+        // سشن نهایی همین حالا توسط سرور صادر شده است
+        router.push("/dashboard")
+        router.refresh()
+        return
+      }
       alert("کد با موفقیت تأیید شد")
-      console.log("OTP verified successfully")
     } catch {
       alert("خطا در ارتباط با سرور")
     } finally {
@@ -83,7 +109,15 @@ export default function OtpPage() {
 
   return (
     <div style={{ maxWidth: 400, margin: "40px auto", padding: 24 }}>
-      <h1>تأیید ایمیل با کد یک‌بار مصرف</h1>
+      <h1>{isTwoFactor ? "تأیید ورود با کد ایمیل" : "تأیید ایمیل با کد یک‌بار مصرف"}</h1>
+
+      {isTwoFactor && (
+        <p style={{ marginTop: 8, opacity: 0.8 }}>
+          کد ۶ رقمی به ایمیل زیر فرستاده شد:
+          <br />
+          <strong dir="ltr">{email}</strong>
+        </p>
+      )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 24 }}>
         <label>
@@ -139,5 +173,13 @@ export default function OtpPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function OtpPage() {
+  return (
+    <Suspense fallback={null}>
+      <OtpPageInner />
+    </Suspense>
   )
 }

@@ -217,6 +217,13 @@ export default function DailyTaskList() {
         setIsAdvisorOrderActive(false)
     }, [selectedDate])
 
+    // Phase 4.4 (Step 12) — تعویض روز: proposalِ روزِ قبلی باید discard شود تا هرگز در روزِ
+    // دیگر نمایش داده/اعمال نشود. clear() هم‌زمان seq را جلو می‌برد، پس هر Generate در پرواز
+    // (برای روزی که دیگر انتخاب نشده) نمی‌تواند modal را برای روزِ اشتباه باز کند.
+    useEffect(() => {
+        clearPlan()
+    }, [selectedDate, clearPlan])
+
     // Phase 2 — و با هر جهش برنامه (افزودن/حذف/انتقال/تحلیل) از رویداد سراسری ریست می‌شود
     useEffect(() => {
         const reset = () => setIsAdvisorOrderActive(false)
@@ -302,9 +309,10 @@ export default function DailyTaskList() {
     }
 
     // Phase 4.3 — Accept: فقط از تأیید صریح کاربر؛ proposal بدون بازسازی به Apply می‌رود.
-    // موفقیت → رفرش همان مسیر موجود + رویداد planner:mutated (allocations سمت سرور محاسبه می‌شود).
+    // Phase 4.4 — هدف Apply روزِ خودِ proposal است (نه selectedDate)، پس تعویض روز نمی‌تواند
+    // آن را به روز دیگری بفرستد. موفقیت → رفرش همان مسیر موجود + planner:mutated.
     const handleAcceptPlan = async () => {
-        const outcome = await applyPlan(selectedDate)
+        const outcome = await applyPlan()
         if (outcome.status === "applied") {
             await afterMutation("برنامه اعمال شد ✅")
         } else if (outcome.message) {

@@ -18,8 +18,8 @@ export type {
 export type UsePlanProposalResult = PlanProposalFlowState & {
     /** Generate: proposal + پیام خطای احتمالی (بدون پرتاب استثنا). */
     generate: (dayKey: string) => Promise<GeneratePlanOutcome>
-    /** Apply: proposal فعلی را به endpoint موجود Apply می‌فرستد. */
-    apply: (dayKey: string) => Promise<ApplyPlanOutcome>
+    /** Apply: proposal فعلی را به روزِ خودش (basis.dayKey) به endpoint موجود Apply می‌فرستد. */
+    apply: () => Promise<ApplyPlanOutcome>
     /** Discard محلی proposal — هیچ mutation ای انجام نمی‌دهد. */
     clear: () => void
 }

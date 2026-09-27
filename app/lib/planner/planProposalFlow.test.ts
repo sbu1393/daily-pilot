@@ -175,7 +175,7 @@ describe("orchestrator — apply", () => {
         })
 
         const { proposal: generated } = await flow.generate(DAY)
-        const outcome = await flow.apply(DAY)
+        const outcome = await flow.apply()
 
         expect(outcome.status).toBe("applied")
         expect(generated).toBe(p)
@@ -192,7 +192,7 @@ describe("orchestrator — apply", () => {
         })
         await flow.generate(DAY)
 
-        await flow.apply(DAY)
+        await flow.apply()
 
         expect(flow.getState().proposal).toBeNull()
         expect(flow.getState().isApplying).toBe(false)
@@ -206,7 +206,7 @@ describe("orchestrator — apply", () => {
         })
         await flow.generate(DAY)
 
-        const outcome = await flow.apply(DAY)
+        const outcome = await flow.apply()
 
         expect(outcome.status).toBe("stale")
         expect(outcome.message).toContain("به‌روز نیست")
@@ -223,7 +223,7 @@ describe("orchestrator — apply", () => {
         })
         await flow.generate(DAY)
 
-        const outcome = await flow.apply(DAY)
+        const outcome = await flow.apply()
 
         expect(outcome.status).toBe("error")
         expect(flow.getState().proposal).not.toBeNull() // می‌تواند دوباره تأیید کند
@@ -247,7 +247,7 @@ describe("orchestrator — apply", () => {
         const applyProposal = vi.fn().mockResolvedValue(undefined)
         const flow = createPlanProposalOrchestrator({ applyProposal })
 
-        const outcome = await flow.apply(DAY)
+        const outcome = await flow.apply()
 
         expect(outcome.status).toBe("noop")
         expect(applyProposal).not.toHaveBeenCalled()
@@ -262,8 +262,8 @@ describe("orchestrator — apply", () => {
         })
         await flow.generate(DAY)
 
-        const first = flow.apply(DAY)
-        const second = flow.apply(DAY) // در حال اعمال → noop
+        const first = flow.apply()
+        const second = flow.apply() // در حال اعمال → noop
 
         gate.resolve()
         const [a, b] = await Promise.all([first, second])
@@ -271,6 +271,76 @@ describe("orchestrator — apply", () => {
         expect(a.status).toBe("applied")
         expect(b.status).toBe("noop")
         expect(applyProposal).toHaveBeenCalledTimes(1)
+    })
+})
+
+/* ---------------- Phase 4.4 — day isolation & round-trip ---------------- */
+
+describe("orchestrator — day isolation (Phase 4.4 / Step 12)", () => {
+    it("apply targets the proposal's own day (basis.dayKey), not any external day", async () => {
+        const applyProposal = vi.fn().mockResolvedValue(undefined)
+        const pA = proposal({ basis: { ...proposal().basis, dayKey: "2026-09-27" } })
+        const flow = createPlanProposalOrchestrator({ fetchProposal: async () => pA, applyProposal })
+
+        await flow.generate("2026-09-27")
+        await flow.apply()
+
+        expect(applyProposal).toHaveBeenCalledTimes(1)
+        expect(applyProposal.mock.calls[0][0]).toBe("2026-09-27")
+        expect(applyProposal.mock.calls[0][1]).toBe(pA)
+    })
+
+    it("a proposal cleared by a day switch cannot be applied (no network call)", async () => {
+        const applyProposal = vi.fn().mockResolvedValue(undefined)
+        const flow = createPlanProposalOrchestrator({ fetchProposal: async () => proposal(), applyProposal })
+
+        await flow.generate(DAY)
+        flow.clear() // کاربر روز را عوض کرد
+        const outcome = await flow.apply()
+
+        expect(outcome.status).toBe("noop")
+        expect(applyProposal).not.toHaveBeenCalled()
+    })
+
+    it("an in-flight generate from a previous day cannot reopen the modal after clear()", async () => {
+        const d = deferred<PlanProposal>()
+        const flow = createPlanProposalOrchestrator({ fetchProposal: () => d.promise })
+
+        const pending = flow.generate("2026-09-27")
+        flow.clear() // روز عوض شد پیش از رسیدن پاسخ
+        d.resolve(proposal({ basis: { ...proposal().basis, dayKey: "2026-09-27" } }))
+        const outcome = await pending
+
+        expect(outcome.proposal).toBeNull()
+        expect(flow.getState().proposal).toBeNull()
+    })
+})
+
+describe("orchestrator — round-trip integrity (Phase 4.4 / Steps 3, 7)", () => {
+    it("unfitted items (with score/priority) survive the full generate → apply round-trip", async () => {
+        let captured: PlanProposal | null = null
+        const p = proposal()
+        const flow = createPlanProposalOrchestrator({
+            fetchProposal: async () => p,
+            applyProposal: async (_dayKey, sent) => {
+                captured = sent
+            },
+        })
+
+        await flow.generate(DAY)
+        await flow.apply()
+
+        expect(captured).toBe(p) // same reference — no reconstruction
+        expect((captured as unknown as PlanProposal).unfitted).toEqual(p.unfitted)
+        expect((captured as unknown as PlanProposal).unfitted[0]).toMatchObject({
+            taskId: 2,
+            score: 30,
+            priority: "LOW",
+        })
+        // Apply payload carries expectedPlanVersion = basis.planVersion
+        const body = buildApplyBody(p.basis.dayKey, p)
+        expect(body.expectedPlanVersion).toBe(p.basis.planVersion)
+        expect(body.dayKey).toBe(p.basis.dayKey)
     })
 })
 

@@ -39,6 +39,9 @@ export default function Dashboard() {
     const handleSaved = useCallback(async () => {
         setModal({ open: false, isEdit: false })
         await refresh(true)
+        // Phase 4.4 (Step 4/Scenario E) — تغییر ظرفیت یک mutationِ برنامه است: با همان رویداد
+        // سراسری موجود، proposal باز discard و پیشنهاد/چیدمان تازه می‌شود (بدون سیستم event دوم).
+        window.dispatchEvent(new Event("planner:mutated"))
     }, [refresh])
 
     return (

@@ -183,7 +183,8 @@ export type PlanProposalFlow = {
     getState: () => PlanProposalFlowState
     subscribe: (listener: (state: PlanProposalFlowState) => void) => () => void
     generate: (dayKey: string) => Promise<GeneratePlanOutcome>
-    apply: (dayKey: string) => Promise<ApplyPlanOutcome>
+    /** Apply همیشه به روزِ اصلیِ خودِ proposal (basis.dayKey) می‌رود — نه روزِ در حال نمایش. */
+    apply: () => Promise<ApplyPlanOutcome>
     clear: () => void
 }
 
@@ -238,15 +239,17 @@ export function createPlanProposalOrchestrator(deps?: Partial<PlanProposalFlowDe
             }
         },
 
-        async apply(dayKey) {
+        async apply() {
             const proposal = state.proposal
             if (!proposal) return { status: "noop" }
             if (state.isApplying) return { status: "noop" } // ضد Apply دوباره روی یک proposal
 
             setState({ ...state, isApplying: true, error: null })
             try {
-                // proposal بدون هیچ بازسازی/تغییری به backend فرستاده می‌شود
-                await resolved.applyProposal(dayKey, proposal)
+                // Phase 4.4 (Step 12) — هدفِ Apply روزِ خودِ proposal است، نه روزی که UI الان
+                // نمایش می‌دهد. بنابراین تعویض روز هرگز نمی‌تواند proposal را به روز دیگری
+                // اعمال کند؛ proposal بدون هیچ بازسازی/تغییری به backend فرستاده می‌شود.
+                await resolved.applyProposal(proposal.basis.dayKey, proposal)
                 setState({ proposal: null, isGenerating: false, isApplying: false, error: null })
                 return { status: "applied" }
             } catch (error) {

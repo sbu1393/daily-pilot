@@ -67,7 +67,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <meta name="theme-color" media="(prefers-color-scheme: light)" content="#6366f1" />
         <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b1120" />
-        <meta name="enamad" content="31470106" />
+        {/* شناسهٔ نماد اعتماد الکترونیکی — همان مقدار ENAMAD_ID در components/layout/Footer.tsx.
+            فایل تأیید متناظر در public/7839480.txt قرار دارد. */}
+        <meta name="enamad" content="7839480" />
       </head>          <body className={vazir.className}>
         <Splash />
         <CalendarProvider>

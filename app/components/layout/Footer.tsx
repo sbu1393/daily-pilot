@@ -15,7 +15,7 @@ import styles from "./footer.module.css"
 /* تکرار می‌شود؛ بنابراین یک بار تعریف شده تا امکان واگرایی نباشد.        */
 /* ------------------------------------------------------------------ */
 const ENAMAD_ID = "7839480"
-const ENAMAD_CODE = "GAPGPTMASKTOKENayd6z95tcd5X0X"
+const ENAMAD_CODE = "7ZP44769fhtWK3mSC2aaG1k1O60yzU2i"
 
 const ENAMAD_URL = `https://trustseal.enamad.ir/?id=${ENAMAD_ID}&Code=${ENAMAD_CODE}`
 const ENAMAD_LOGO_URL = `https://trustseal.enamad.ir/logo.aspx?id=${ENAMAD_ID}&Code=${ENAMAD_CODE}`

@@ -19,6 +19,25 @@ const PLAN_LIMITS: Record<UserPlan, number> = {
     PRO: 300,
 }
 
+// فاز ۱ (AI Daily Plan) — logical AI features و هزینهٔ هر عملیات بر حسب quota unit.
+// هزینهٔ «plan» برای کلِ مجموعهٔ تسک‌های یک روز است، نه per-task:
+//   یک درخواست «ایجاد برنامه» = یک عملیات منطقی = ۱ unit، مستقل از تعداد تسک‌ها.
+// این تنها منبع اعداد feature است؛ هیچ route نباید hard-code کند.
+export const AI_FEATURE_UNITS = {
+    analyze: 1,
+    plan: 1,
+} as const
+
+export type AiFeature = keyof typeof AI_FEATURE_UNITS
+
+/**
+ * resolveFeatureUnits — هزینهٔ هر logical AI operation (واحد quota).
+ * «plan» هرگز بر اساس تعداد تسک‌ها محاسبه نمی‌شود؛ همیشه ۱ unit برای یک تولید کامل پلن.
+ */
+export function resolveFeatureUnits(feature: AiFeature): number {
+    return AI_FEATURE_UNITS[feature]
+}
+
 /**
  * resolve plan کاربر → policy کووتا.
  * FREE (و هر مقدار نامعتبر/null/undefined) → 15 unit؛ PRO → 300 unit.

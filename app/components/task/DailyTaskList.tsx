@@ -31,9 +31,11 @@ import EditTaskModal from "./EditTaskModal"
 import SuggestionModal from "./SuggestionModal"
 import AdvisorCard from "./AdvisorCard"
 import { useDaySuggestion } from "@/app/hooks/useDaySuggestion"
+import { usePlanProposal } from "@/app/hooks/usePlanProposal"
+import PlanProposalModal from "./PlanProposalModal"
 import { orderTasksByAdvisor } from "@/app/lib/planner/advisorOrder"
 import { type AdvisorResult } from "@/app/lib/planner/advisor"
-import { LayersPlus, Megaphone, RotateCwFadingClock } from "lucide-react"
+import { LayersPlus, Megaphone, RotateCwFadingClock, Sparkles } from "lucide-react"
 
 const priorityWeight: Record<TaskPriority, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 }
 
@@ -49,6 +51,18 @@ export default function DailyTaskList() {
         loading: suggestionLoading,
         error: suggestionError,
     } = useDaySuggestion(selectedDate, isToday)
+
+    // Phase 4.3 — «ایجاد برنامه»: Generate/Apply سمت کلاینت (AI فقط advisory).
+    // proposal فقط in-memory است؛ mutation invalidation به‌صورت خودکار از planner:mutated می‌آید.
+    const {
+        proposal: planProposal,
+        isGenerating: isPlanGenerating,
+        isApplying: isPlanApplying,
+        error: planError,
+        generate: generatePlan,
+        apply: applyPlan,
+        clear: clearPlan,
+    } = usePlanProposal()
 
     const [tasks, setTasks] = useState<TaskItem[]>([])
     // Part 3/3 — مشاور شروع: از همان GET /api/tasks می‌آید (data.advisor) — فقط نمایش
@@ -277,6 +291,27 @@ export default function DailyTaskList() {
         }
     }
 
+    // Phase 4.3 — Generate: فقط روز فرستاده می‌شود؛ task/capacity/planVersion از کلاینت نمی‌آید.
+    const handleGeneratePlan = async () => {
+        const { proposal, message } = await generatePlan(selectedDate)
+        if (proposal) {
+            toast.info("پیشنهاد برنامه آماده شد — قبل از تأیید بازبینی کن")
+        } else if (message) {
+            toast.error(message)
+        }
+    }
+
+    // Phase 4.3 — Accept: فقط از تأیید صریح کاربر؛ proposal بدون بازسازی به Apply می‌رود.
+    // موفقیت → رفرش همان مسیر موجود + رویداد planner:mutated (allocations سمت سرور محاسبه می‌شود).
+    const handleAcceptPlan = async () => {
+        const outcome = await applyPlan(selectedDate)
+        if (outcome.status === "applied") {
+            await afterMutation("برنامه اعمال شد ✅")
+        } else if (outcome.message) {
+            toast.error(outcome.message)
+        }
+    }
+
     return (
         <section className={styles.section}>
             {tasks.length > 0 && (
@@ -369,11 +404,23 @@ export default function DailyTaskList() {
                 </ul>
             )}
 
-            <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} style={{ width: "fit-content" }}>
-                <button className={styles.btnPrimary} onClick={() => setCreateOpen(true)}>
-                    <LayersPlus /> کار جدید
-                </button>
-            </motion.div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} style={{ width: "fit-content" }}>
+                    <button
+                        className={styles.btnPrimary}
+                        onClick={handleGeneratePlan}
+                        disabled={isPlanGenerating}
+                        aria-disabled={isPlanGenerating}
+                    >
+                        <Sparkles /> {isPlanGenerating ? "در حال ایجاد برنامه…" : "ایجاد برنامه"}
+                    </button>
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} style={{ width: "fit-content" }}>
+                    <button className={styles.btnPrimary} onClick={() => setCreateOpen(true)}>
+                        <LayersPlus /> کار جدید
+                    </button>
+                </motion.div>
+            </div>
 
             <CreateTaskModal
                 open={createOpen}
@@ -443,6 +490,20 @@ export default function DailyTaskList() {
                 onClose={() => setEditReminderTask(null)}
                 onDone={() => afterMutation()}
             />
+
+            {/* Phase 4.3 — پیش‌نمایش پیشنهاد؛ فقط با تأیید صریح به Apply وصل می‌شود.
+                بستن (onClose=clearPlan) هیچ mutation ای نمی‌زند. */}
+            {planProposal && (
+                <PlanProposalModal
+                    open
+                    proposal={planProposal}
+                    tasks={tasks}
+                    isApplying={isPlanApplying}
+                    error={planError}
+                    onAccept={handleAcceptPlan}
+                    onClose={clearPlan}
+                />
+            )}
         </section>
     )
 }

@@ -142,6 +142,32 @@ export class PlanStaleError extends ServiceError {
     }
 }
 
+// ---------- Phase 2 — AI Daily Plan ----------
+// سه کد موردنیاز endpoint «ایجاد برنامه» (سند فاز ۲ §۱۳):
+// - DAY_PLAN_NOT_SET / NO_PLANNABLE_TASKS → حالت‌های expected دامنه (no valid day/plan state).
+// - AI_PLAN_INVALID → خروجی AI پس از parse از اعتبارسنجی نسبی رد شد (malformed/invalid AI output).
+
+/** 404 — روز ظرفیت/برنامه‌ای ندارد (هیچ بودجه‌ای برای تخصیص نیست) */
+export class DayPlanNotSetError extends ServiceError {
+    constructor() {
+        super(404, "DAY_PLAN_NOT_SET", "برای این روز ظرفیتی ثبت نشده است؛ اول ظرفیت روز را مشخص کن")
+    }
+}
+
+/** 404 — هیچ کار بازی برای برنامه‌ریزی وجود ندارد */
+export class NoPlannableTasksError extends ServiceError {
+    constructor() {
+        super(404, "NO_PLANNABLE_TASKS", "کاری برای برنامه‌ریزی در این روز وجود ندارد")
+    }
+}
+
+/** 502 — خروجی AI پس از parse از اعتبارسنجی رد شد؛ تأمین‌کننده محتوای قابل‌استفاده نداد */
+export class AiPlanInvalidError extends ServiceError {
+    constructor() {
+        super(502, "AI_PLAN_INVALID", "پیشنهاد هوش مصنوعی قابل استفاده نبود؛ دوباره تلاش کن", undefined, "EXTERNAL_SERVICE", "ERROR")
+    }
+}
+
 // ---------- Auth / Users ----------
 
 export class EmailTakenError extends ServiceError {

@@ -1,0 +1,151 @@
+/* Phase 4.3 — PlanProposalModal styles (preview/confirmation only)
+   ظاهر هم‌خانواده‌ی سایر مودال‌ها؛ محتوا اسکرول‌پذیر و دکمه‌ها ثابت. */
+
+/* ناحیهٔ محتوای اسکرول‌پذیر — مودال با تعداد زیاد کار هم روی صفحهٔ کوچک قابل استفاده می‌ماند */
+.content {
+    max-height: min(60vh, 520px);
+    overflow-y: auto;
+    padding-inline-end: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.notice {
+    margin: 0;
+    font-size: 0.82rem;
+    line-height: 1.9;
+    color: #475467;
+}
+
+.summaryBox {
+    border: 1px solid #eaecf0;
+    border-radius: 12px;
+    padding: 12px;
+    background: #fcfcfd;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.summaryGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    gap: 8px;
+}
+
+.summaryCell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: center;
+}
+
+.summaryLabel {
+    font-size: 0.72rem;
+    color: #667085;
+}
+
+.summaryValue {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #101828;
+}
+
+.sectionTitle {
+    margin: 4px 0 0;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #101828;
+}
+
+.list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid #eaecf0;
+    border-radius: 10px;
+    background: #fff;
+}
+
+.rowIndex {
+    flex: 0 0 auto;
+    min-width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: #f2f4f7;
+    color: #475467;
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.rowMain {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.rowTitle {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: #101828;
+    word-break: break-word;
+}
+
+.rowMeta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    font-size: 0.74rem;
+    color: #475467;
+}
+
+.tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: #f2f4f7;
+    color: #475467;
+    font-size: 0.72rem;
+}
+
+.partial {
+    background: #fef0c7;
+    color: #b54708;
+}
+
+.fallback {
+    background: #fee4e2;
+    color: #b42318;
+}
+
+.emptyNote {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #667085;
+}
+
+.hint {
+    margin: 0;
+    font-size: 0.76rem;
+    line-height: 1.9;
+    color: #667085;
+}

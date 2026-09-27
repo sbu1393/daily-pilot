@@ -3,7 +3,12 @@
 
 import { describe, expect, it } from "vitest"
 
-import { getMonthlyPeriod, resolvePlanPolicy } from "./planPolicy.service"
+import {
+    AI_FEATURE_UNITS,
+    getMonthlyPeriod,
+    resolveFeatureUnits,
+    resolvePlanPolicy,
+} from "./planPolicy.service"
 
 describe("resolvePlanPolicy", () => {
     it("FREE plan → 15 allowed units", () => {
@@ -157,6 +162,26 @@ describe("getMonthlyPeriod — user timezone (فاز ۱ §۶)", () => {
                 tz,
             )
             expect(nextPeriodStart.getTime()).toBeGreaterThan(periodStart.getTime())
+        }
+    })
+})
+
+// فاز ۱ (AI Daily Plan) — feature="plan" و هزینهٔ واحد آن
+describe("resolveFeatureUnits — logical AI features (فاز ۱)", () => {
+    it("resolves feature 'plan' to a defined unit cost", () => {
+        expect(AI_FEATURE_UNITS.plan).toBe(1)
+        expect(resolveFeatureUnits("plan")).toBe(1)
+    })
+
+    it("keeps the existing 'analyze' feature cost unchanged", () => {
+        expect(resolveFeatureUnits("analyze")).toBe(1)
+    })
+
+    it("models one complete plan generation as ONE unit — never per-task", () => {
+        // یک درخواست «ایجاد برنامه» = یک عملیات منطقی = ۱ unit، مستقل از تعداد تسک‌ها
+        for (const taskCount of [1, 2, 5, 50, 200]) {
+            expect(resolveFeatureUnits("plan")).toBe(1)
+            void taskCount
         }
     })
 })

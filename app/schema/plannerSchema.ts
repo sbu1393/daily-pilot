@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { isValidCanonicalDayKey } from "@/app/lib/canonicalDay"
+import { planPrioritySchema } from "@/app/lib/ai/planSchema"
 
 export const rolloverSchema = z.object({
     taskIds: z.array(z.number().int().positive()).min(1, "حداقل یک تسک انتخاب کنید"),
@@ -17,6 +18,115 @@ export const dayPlanSchema = z.object({
         .min(1, "بودجه‌ی روز باید حداقل ۱ دقیقه باشد")
         .max(1440, "حداکثر ۲۴ ساعت"),
 })
+// Phase 2 — POST /api/planner/plan: فقط انتخاب روز.
+// dayKey اختیاری است (پیش‌فرض «امروزِ» کاربر از timezone سرور)؛ مالکیت و ظرفیت سمت سرور resolve می‌شود.
+// هیچ task/availableMinutes ای از Client پذیرفته نمی‌شود (نه تحمیل task، نه override ظرفیت).
+export const planRequestSchema = z.object({
+    dayKey: z.string().refine(isValidCanonicalDayKey, "فرمت روز نامعتبر است").optional(),
+})
+
+// Phase 3 — POST /api/planner/plan/apply: اعمال یک proposal گذرا روی وضعیت روز.
+// -----------------------------------------------------------------------------
+// قرارداد ورودی (§۳ فاز ۳): { dayKey, expectedPlanVersion, proposal }.
+// proposal **untrusted** است (از client می‌آید) — حتی اگر قبلاً توسط /api/planner/plan ساخته شده،
+// اینجا فقط یک ورودی خام تلقی می‌شود. schema فقط چک‌های ساختاری/درون‌proposal را انجام می‌دهد
+// (دامنه‌ها، تکرار، هم‌پوشانی). چک‌های DBمحور (مالکیت task، روز، نسخه، حذف/اتمام بعد از Generate)
+// در سرویس انجام می‌شوند و به‌صورت 409 PLAN_STALE برمی‌گردند (§۴/§۱۲).
+//
+// نکته: هیچ estimatedMinutes/score/priority ای «مستقیم» به allocation تبدیل نمی‌شود؛ این فیلدها فقط
+// ورودی‌های وزن موتور قطعی‌اند (§۶).
+
+const planProposalPlannedItemSchema = z.object({
+    taskId: z.number().int().positive(),
+    // همان bounds موتور/AI schema
+    estimatedMinutes: z.number().int().min(5).max(480),
+    suggestedMinutes: z.number().int().nonnegative(),
+    // rank قطعی موتور — عدد صحیح مثبت و یکتا (چک پایین)
+    order: z.number().int().positive(),
+    aiOrder: z.number().int().positive().nullable(),
+    priority: planPrioritySchema.nullable(),
+    score: z.number().int().min(0).max(100).nullable(),
+    weight: z.number().nonnegative(),
+    partial: z.boolean(),
+})
+
+const planProposalUnfittedItemSchema = z.object({
+    taskId: z.number().int().positive(),
+    estimatedMinutes: z.number().int().min(5).max(480),
+    weight: z.number().nonnegative(),
+    aiOrder: z.number().int().positive().nullable(),
+    // Phase 4.2 — همان semantics/bounds آیتم‌های planned: بدون این دو، Apply نمی‌تواند
+    // metadata تسک‌های unfitted را persist کند و state پس از rebalance با proposal فرق می‌کند.
+    // (همان enum/range موجود — هیچ enum یا range جدیدی ساخته نشد.)
+    priority: planPrioritySchema.nullable(),
+    score: z.number().int().min(0).max(100).nullable(),
+})
+
+const planProposalSchema = z
+    .object({
+        basis: z.object({
+            dayKey: z.string(),
+            planVersion: z.number().int().nonnegative(),
+            rebalancedVersion: z.number().int().nonnegative().nullable(),
+            availableMinutes: z.number().int().nonnegative(),
+            taskCount: z.number().int().nonnegative(),
+            state: z.literal("fresh"),
+        }),
+        planned: z.array(planProposalPlannedItemSchema),
+        unfitted: z.array(planProposalUnfittedItemSchema),
+        plannedMinutes: z.number().int().nonnegative(),
+        remainingMinutes: z.number().int().nonnegative(),
+        // شناسه‌های advisory — یکتا
+        aiUnscheduledTaskIds: z.array(z.number().int().positive()),
+        source: z.enum(["1xai", "mock"]),
+        summary: z.string().max(600).optional(),
+    })
+    // taskId یکتا در planned
+    .refine((v) => new Set(v.planned.map((i) => i.taskId)).size === v.planned.length, {
+        message: "taskId تکراری در planned",
+        path: ["planned"],
+    })
+    // taskId یکتا در unfitted
+    .refine((v) => new Set(v.unfitted.map((i) => i.taskId)).size === v.unfitted.length, {
+        message: "taskId تکراری در unfitted",
+        path: ["unfitted"],
+    })
+    // یک task نمی‌تواند هم planned و هم unfitted باشد
+    .refine(
+        (v) => {
+            const planned = new Set(v.planned.map((i) => i.taskId))
+            return v.unfitted.every((i) => !planned.has(i.taskId))
+        },
+        { message: "یک تسک نمی‌تواند هم planned و هم unfitted باشد", path: ["unfitted"] },
+    )
+    // order یکتا در planned
+    .refine((v) => new Set(v.planned.map((i) => i.order)).size === v.planned.length, {
+        message: "order تکراری در planned",
+        path: ["planned"],
+    })
+    // aiUnscheduledTaskIds یکتا و ناهم‌پوشان با planned
+    .refine((v) => new Set(v.aiUnscheduledTaskIds).size === v.aiUnscheduledTaskIds.length, {
+        message: "شناسهٔ تکراری در aiUnscheduledTaskIds",
+        path: ["aiUnscheduledTaskIds"],
+    })
+    .refine(
+        (v) => {
+            const planned = new Set(v.planned.map((i) => i.taskId))
+            return v.aiUnscheduledTaskIds.every((id) => !planned.has(id))
+        },
+        { message: "aiUnscheduledTaskIds نمی‌تواند با planned هم‌پوشانی داشته باشد", path: ["aiUnscheduledTaskIds"] },
+    )
+
+// بدنه‌ی request Apply — dayKey و proposal.basis.dayKey هر دو معتبر و **هم‌روز**،
+// و expectedPlanVersion با basis.planVersion **هم‌ارز** (این‌ها پیش‌شرط تطابق‌اند؛
+// عدم تطابق = state نامعتبر → سرویس 409 PLAN_STALE می‌دهد، نه 400).
+// به همین دلیل در این schema «صرفاً معتبر بودن هر فیلد» را چک می‌کنیم.
+export const planApplyRequestSchema = z.object({
+    dayKey: z.string().refine(isValidCanonicalDayKey, "فرمت روز نامعتبر است"),
+    expectedPlanVersion: z.number().int().nonnegative(),
+    proposal: planProposalSchema,
+})
+
 export const reanalyzeTaskSchema = z.object({
     text: z
         .string()

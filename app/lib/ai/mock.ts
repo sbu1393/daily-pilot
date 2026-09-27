@@ -1,10 +1,18 @@
 import type { AiAnalysis } from "./aiSchema"
+import type { TaskCategoryKey } from "@/app/lib/categories"
 
 const URGENT_WORDS = ["فوری", "الان", "همین حالا", "مهم", "بحرانی", "اضطراری", "مهلت", "دکتر", "بیمارستان", "سررسید", "deadline"]
 const LONG_WORDS = ["پروژه", "گزارش", "تحقیق", "مقاله", "طراحی", "برنامه‌نویسی", "بازبینی", "مطالعه", "آموزش", "توسعه", "تحلیل", "جلسه", "مذاکره", "تدوین"]
 const QUICK_WORDS = ["خرید", "تماس", "ایمیل", "پیام", "پاسخ", "یادآوری", "هماهنگی", "نوبت"]
 const HEALTH_WORDS = ["دکتر", "بیمارستان", "دارو", "ورزش", "سلامت", "خواب", "رژیم", "آزمایش"]
 const WORK_WORDS = ["کار", "پروژه", "گزارش", "مشتری", "جلسه", "اداری", "رزومه", "مصاحبه", "تحویل"]
+// دسته‌های mock از همان واژگان canonical دسته‌بندی تسک می‌آیند (بدون Urgent:
+// فوریت در priority/score است، نه در دسته‌بندی).
+const HOME_WORDS = ["خانه", "جارو", "شست‌وشو", "ظرف", "لباس", "اتاق", "میز", "نظافت"]
+const TRANSPORT_WORDS = ["ماشین", "خودرو", "رفت‌وآمد", "سفر", "بنزین", "تعمیرگاه", "اسنپ", "تاکسی"]
+const SHOPPING_WORDS = ["خرید", "سوپرمارکت", "فروشگاه", "مغازه", "نان", "میوه", "اقلام"]
+const LEARNING_WORDS = ["یادگیری", "درس", "کتاب", "آموزش", "زبان", "تمرین", "دوره"]
+const LEISURE_WORDS = ["تفریح", "بازی", "فیلم", "موسیقی", "سفر", "استراحت", "کافه"]
 
 function hashText(text: string): number {
     let h = 0
@@ -43,9 +51,15 @@ export function mockAnalyze(text: string): AiAnalysis {
     const priority: AiAnalysis["priority"] =
         urgent || score >= 80 ? "HIGH" : score >= 60 ? "MEDIUM" : "LOW"
 
-    let category = "Personal"
-    if (hasAny(t, HEALTH_WORDS)) category = "Health"
-    else if (hasAny(t, WORK_WORDS)) category = "Work"
+    // ترتیب بررسی ثابت است تا mock قطعی بماند؛ هر مسیر یک کلید canonical برمی‌گرداند
+    let category: TaskCategoryKey = "personal"
+    if (hasAny(t, WORK_WORDS)) category = "work"
+    else if (hasAny(t, HEALTH_WORDS)) category = "health"
+    else if (hasAny(t, LEARNING_WORDS)) category = "learning"
+    else if (hasAny(t, TRANSPORT_WORDS)) category = "transport"
+    else if (hasAny(t, SHOPPING_WORDS)) category = "shopping"
+    else if (hasAny(t, LEISURE_WORDS)) category = "leisure"
+    else if (hasAny(t, HOME_WORDS)) category = "home"
 
     let reason: string
     if (urgent)

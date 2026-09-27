@@ -13,6 +13,7 @@ import {
     shiftCanonicalKey,
 } from "@/app/lib/canonicalDay"
 import type { Prisma, PrismaPromise, Task } from "@prisma/client"
+import { assertTaskCategoryKey, type TaskCategoryKey } from "@/app/lib/categories"
 import {
     TaskNotFoundError,
     MissingDayKeyError,
@@ -24,16 +25,24 @@ import {
 } from "./errors"
 
 // ---------- ساخت تسک (مستقل از AI — فیلدهای تحلیل null می‌مانند تا Analyze صریح) ----------
+// دسته‌بندی استثنا است: در این محصول **اجباری** است و همیشه از واژگان canonical
+// می‌آید. بقیهٔ فیلدهای AI (priority/score/reason/estimatedTime) همچنان null می‌مانند
+// تا «تحلیل مجدد» صریح آن‌ها را پر کند — این رفتار تغییری نکرده است.
 // §6.2.2.1: dayKey هرگز از Client پذیرفته نمی‌شود — از scheduledDate + user.timezone سمت سرور محاسبه می‌شود.
 // scheduledDate ذخیره‌شده هم به نیمه‌شب محلیِ همان روز (canonicalKeyToLocalMidnight) نرمال می‌شود.
 // A3: ساخت = mutation مؤثر بر برنامه → planVersion روز در همان transaction اتمیک افزایش می‌یابد.
 export async function createTask(
     userId: number,
     timezone: string,
-    input: { title: string; scheduledDate: Date },
+    input: { title: string; scheduledDate: Date; category: TaskCategoryKey },
 ): Promise<{ task: Task }> {
-    const { title, scheduledDate } = input
+    const { title, scheduledDate, category } = input
     const prisma = getPrisma()
+
+    // Fail-fast: سرویس هرگز نباید «دستهٔ غایب/نامعتبر» را به null تبدیل کند.
+    // این خط دفاعی است — schema مسیر HTTP قبلاً رد کرده، اما هر مسیر دیگری
+    // (مثلاً یک caller داخلی) نمی‌تواند بی‌صدا یک Task بدون دسته بسازد.
+    assertTaskCategoryKey(category)
 
     const dayKey = getCanonicalDayKey(scheduledDate, timezone)
     const localMidnight = canonicalKeyToLocalMidnight(dayKey, timezone)
@@ -45,6 +54,9 @@ export async function createTask(
                 dayKey,
                 scheduledDate: localMidnight,
                 userId,
+                // در همان transaction ذخیره می‌شود: Task یا با دسته ساخته می‌شود
+                // یا اصلاً ساخته نمی‌شود.
+                category,
             },
         })
 

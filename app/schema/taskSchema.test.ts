@@ -3,9 +3,11 @@ import { canonicalKeyToLocalMidnight, getCanonicalDayKey } from "@/app/lib/canon
 import { makeCreateTaskSchema } from "./taskSchema"
 
 const title = "تسک آزمایشی"
+// دسته در قرارداد create اجباری است؛ این تست‌ها فقط scheduledDate را می‌سنجند
+const category = "work"
 
 function parseScheduledDate(timezone: string, scheduledDate: unknown) {
-    const parsed = makeCreateTaskSchema(timezone).safeParse({ title, scheduledDate })
+    const parsed = makeCreateTaskSchema(timezone).safeParse({ title, scheduledDate, category })
     if (!parsed.success) throw new Error(parsed.error.message)
     return parsed.data.scheduledDate
 }
@@ -42,7 +44,11 @@ describe("taskSchema scheduledDate", () => {
     })
 
     it.each(["2026-02-30", "2026-1-1"])("rejects invalid date-only input %s", (value) => {
-        const parsed = makeCreateTaskSchema("America/New_York").safeParse({ title, scheduledDate: value })
+        const parsed = makeCreateTaskSchema("America/New_York").safeParse({
+            title,
+            scheduledDate: value,
+            category,
+        })
 
         expect(parsed.success).toBe(false)
     })

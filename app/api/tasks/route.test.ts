@@ -53,7 +53,7 @@ import { ServiceError } from "@/app/lib/services/errors"
 const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran" }
 const DAY_KEY = "2026-01-01"
 const SCHEDULED_DATE = "2026-01-01T00:00:00.000Z"
-const TASK = { id: 10, title: "خرید نان", dayKey: DAY_KEY, category: "Work", status: "TODO" }
+const TASK = { id: 10, title: "خرید نان", dayKey: DAY_KEY, category: "shopping", status: "TODO" }
 describe("POST /api/tasks", () => {
     beforeEach(() => {
         vi.clearAllMocks()
@@ -63,22 +63,23 @@ describe("POST /api/tasks", () => {
         mocks.getPrisma.mockReturnValue({})
     })
 
-    it("returns 201 with the ADR-04 envelope { ok: true, data: { task } } and forwards title + scheduledDate", async () => {
+    it("returns 201 with the ADR-04 envelope { ok: true, data: { task } } and forwards title + scheduledDate + category", async () => {
         mocks.createTask.mockResolvedValue({ task: TASK })
 
         const res = await POST(
             new NextRequest("http://localhost/api/tasks", {
                 method: "POST",
-                body: JSON.stringify({ title: TASK.title, scheduledDate: SCHEDULED_DATE }),
+                body: JSON.stringify({ title: TASK.title, scheduledDate: SCHEDULED_DATE, category: "shopping" }),
             }),
         )
 
         expect(res.status).toBe(201)
         await expect(res.json()).resolves.toEqual({ ok: true, data: { task: TASK } })
-        // dayKey از Client پذیرفته نمی‌شود (§6.2.2.1) — فقط title + scheduledDate به سرویس می‌رود
+        // dayKey از Client پذیرفته نمی‌شود (§6.2.2.1) — فقط title + scheduledDate + دستهٔ canonical
         expect(mocks.createTask).toHaveBeenCalledWith(1, "Asia/Tehran", {
             title: TASK.title,
             scheduledDate: new Date(SCHEDULED_DATE),
+            category: "shopping",
         })
     })
 
@@ -102,7 +103,11 @@ describe("POST /api/tasks", () => {
         const res = await POST(
             new NextRequest("http://localhost/api/tasks", {
                 method: "POST",
-                body: JSON.stringify({ title: "خرید نان", scheduledDate: "not-a-date" }),
+                body: JSON.stringify({
+                    title: "خرید نان",
+                    scheduledDate: "not-a-date",
+                    category: "shopping",
+                }),
             }),
         )
 
@@ -111,6 +116,51 @@ describe("POST /api/tasks", () => {
         expect(parsed.ok).toBe(false)
         expect(parsed.error.code).toBe("VALIDATION_ERROR")
         expect(mocks.createTask).not.toHaveBeenCalled()
+    })
+
+    /* ---------- دستهٔ اجباری: قرارداد API ---------- */
+
+    it.each([
+        ["missing", {}],
+        ["null", { category: null }],
+        ["empty", { category: "" }],
+        ["whitespace", { category: "   " }],
+        ["unknown key", { category: "universe" }],
+        ["legacy capitalized key", { category: "Work" }],
+        ["legacy Urgent", { category: "Urgent" }],
+    ])(
+        "returns 400 and never creates a Task when category is %s",
+        async (_label, extra) => {
+            const res = await POST(
+                new NextRequest("http://localhost/api/tasks", {
+                    method: "POST",
+                    body: JSON.stringify({
+                        title: "خرید نان",
+                        scheduledDate: SCHEDULED_DATE,
+                        ...extra,
+                    }),
+                }),
+            )
+
+            expect(res.status).toBe(400)
+            const parsed = await res.json()
+            expect(parsed.error.code).toBe("VALIDATION_ERROR")
+            // بدون دستهٔ معتبر هیچ Taskی ساخته نمی‌شود
+            expect(mocks.createTask).not.toHaveBeenCalled()
+        },
+    )
+
+    it("does not leak schema internals in the validation error", async () => {
+        const res = await POST(
+            new NextRequest("http://localhost/api/tasks", {
+                method: "POST",
+                body: JSON.stringify({ title: "خرید نان", scheduledDate: SCHEDULED_DATE }),
+            }),
+        )
+        const raw = JSON.stringify(await res.json())
+        expect(raw).not.toContain("zod")
+        expect(raw).not.toContain("ZodError")
+        expect(raw).not.toContain("INVALID_TASK_CATEGORY")
     })
 
     it("returns 400 VALIDATION_ERROR for malformed JSON (not 500) and never calls the service", async () => {
@@ -134,7 +184,7 @@ describe("POST /api/tasks", () => {
         const res = await POST(
             new NextRequest("http://localhost/api/tasks", {
                 method: "POST",
-                body: JSON.stringify({ title: "خرید نان", scheduledDate: SCHEDULED_DATE }),
+                body: JSON.stringify({ title: "خرید نان", scheduledDate: SCHEDULED_DATE, category: "shopping" }),
             }),
         )
 
@@ -152,7 +202,7 @@ describe("POST /api/tasks", () => {
         const res = await POST(
             new NextRequest("http://localhost/api/tasks", {
                 method: "POST",
-                body: JSON.stringify({ title: "خرید نان", scheduledDate: SCHEDULED_DATE }),
+                body: JSON.stringify({ title: "خرید نان", scheduledDate: SCHEDULED_DATE, category: "shopping" }),
             }),
         )
 
@@ -172,7 +222,7 @@ describe("POST /api/tasks", () => {
         const res = await POST(
             new NextRequest("http://localhost/api/tasks", {
                 method: "POST",
-                body: JSON.stringify({ title: "خرید نان", scheduledDate: SCHEDULED_DATE }),
+                body: JSON.stringify({ title: "خرید نان", scheduledDate: SCHEDULED_DATE, category: "shopping" }),
             }),
         )
 
@@ -188,7 +238,7 @@ describe("POST /api/tasks", () => {
             1,
             "task.created",
             // فقط allowlist — هیچ title/content
-            { taskId: 10, category: "Work", status: "TODO" },
+            { taskId: 10, category: "shopping", status: "TODO" },
             expect.objectContaining({ requestId: expect.any(String), feature: "tasks" }),
         )
         // هیچ محتوای حساسی در آرگومان‌های event نیست
@@ -202,7 +252,7 @@ describe("POST /api/tasks", () => {
         const res = await POST(
             new NextRequest("http://localhost/api/tasks", {
                 method: "POST",
-                body: JSON.stringify({ title: "خرید نان", scheduledDate: SCHEDULED_DATE }),
+                body: JSON.stringify({ title: "خرید نان", scheduledDate: SCHEDULED_DATE, category: "shopping" }),
             }),
         )
 
@@ -218,7 +268,7 @@ describe("POST /api/tasks", () => {
         const res = await POST(
             new NextRequest("http://localhost/api/tasks", {
                 method: "POST",
-                body: JSON.stringify({ title: "خرید نان", scheduledDate: SCHEDULED_DATE }),
+                body: JSON.stringify({ title: "خرید نان", scheduledDate: SCHEDULED_DATE, category: "shopping" }),
             }),
         )
 

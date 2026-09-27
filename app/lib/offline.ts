@@ -1,6 +1,7 @@
 "use client"
 
 import { clearLegacySettingsKeys } from "@/app/lib/reminder"
+import { assertTaskCategoryKey, isTaskCategoryKey, type TaskCategoryKey } from "@/app/lib/categories"
 import type { TaskItem } from "@/app/components/task/taskTypes"
 import type { DaySummary } from "@/app/hooks/useDaySummary"
 
@@ -58,6 +59,7 @@ const LEGACY_PREFIXES = ["dp:offline:v2:day:", "dp:offline:queue"]
 export type QueuedTask = {
     id: string // شناسه محلی موقت
     title: string
+    category: TaskCategoryKey // اجباری — دقیقاً مثل مسیر آنلاین
     dayKey: string // برای نمایش محلی تسک زیر روز درست
     scheduledDate: string // ISO instant نیمه‌شب محلی روز — قرارداد API (C1): سرور dayKey را از آن می‌سازد
     createdAt: string
@@ -229,9 +231,16 @@ function writeQueue(queue: QueuedTask[]) {
 }
 
 export function enqueueTask(item: Omit<QueuedTask, "id" | "createdAt">): QueuedTask {
+    // Fail-fast در مرز صف: یک آیتم بدون دستهٔ معتبر هرگز وارد صف نمی‌شود، پس
+    // مسیر آفلاین نمی‌تواند قاعدهٔ «دستهٔ اجباری» را دور بزند.
+    assertTaskCategoryKey(item.category)
+
     // H3 — deduplication: ارسال دوباره‌ی همان کار (دابل‌کلیک/ری‌ترای فرم) صف را دو برابر نمی‌کند
     const duplicate = readQueue().find(
-        (q) => q.title === item.title && q.scheduledDate === item.scheduledDate,
+        (q) =>
+            q.title === item.title &&
+            q.scheduledDate === item.scheduledDate &&
+            q.category === item.category,
     )
     if (duplicate) return duplicate
 
@@ -278,10 +287,17 @@ async function runSync(): Promise<number> {
         // ممکن است در همین حین (توسط اجرای دیگری) سینک/پاک شده باشد
         if (!readQueue().some((q) => q.id === item.id)) continue
         try {
+            // آیتم‌های صفِ پیش از این نسخه (بدون دسته) نباید بی‌صدا Task
+            // بدون دسته بسازند؛ کنار گذاشته می‌شوند تا کاربر متوجه شود.
+            if (!isTaskCategoryKey(item.category)) continue
             const res = await fetch("/api/tasks", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title: item.title, scheduledDate: item.scheduledDate }),
+                body: JSON.stringify({
+                    title: item.title,
+                    scheduledDate: item.scheduledDate,
+                    category: item.category,
+                }),
             })
             if (!res.ok) break // خطای سرور → بعداً دوباره تلاش می‌کنیم
             removeFromQueue(item.id)

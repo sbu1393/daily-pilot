@@ -30,6 +30,7 @@ const PROVIDER_OK = JSON.stringify({
         score: 90,
         estimatedMinutes: 45,
         reason: "توضیح تست",
+        // کلید legacy «Work» عمداً استفاده شده تا نرمال‌سازی به واژگان canonical آزموده شود
         category: "Work",
     }) } }],
 })
@@ -71,8 +72,32 @@ describe("analyzeTask (§7.8 — Failure & Degradation)", () => {
             score: 90,
             estimatedMinutes: 45,
             reason: "توضیح تست",
-            category: "Work",
+            // «Work» از مدل به کلید canonical «work» نگاشت می‌شود
+            category: "work",
         })
+    })
+
+    it("normalizes an unknown/legacy category to the canonical vocabulary", async () => {
+        vi.stubEnv("AIXAI_API_KEY", "test-key")
+        fetchMock.mockResolvedValueOnce(
+            new Response(
+                JSON.stringify({
+                    choices: [{ message: { content: JSON.stringify({
+                        priority: "MEDIUM",
+                        score: 50,
+                        estimatedMinutes: 30,
+                        reason: "توضیح",
+                        category: "Urgent", // دیگر دسته‌بندی نیست
+                    }) } }],
+                }),
+                { status: 200 },
+            ),
+        )
+
+        const result = await analyzeTask("کار فوری")
+
+        // هیچ دسته‌ای بیرون از واژگان canonical از AI عبور نمی‌کند
+        expect(result.analysis.category).toBe("personal")
     })
 
     it("retries a retryable 503 and succeeds on the next attempt", async () => {

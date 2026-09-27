@@ -64,7 +64,7 @@ describe("/api/tasks/[id] — X-Request-ID (فاز صفر §7)", () => {
 })
 
 const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran" }
-const TASK = { id: 5, title: "گزارش", dayKey: "2026-01-01", category: "Work" }
+const TASK = { id: 5, title: "گزارش", dayKey: "2026-01-01", category: "work" }
 const SUMMARY = { dayKey: "2026-01-01", availableMinutes: 120, spentMinutes: 40 }
 
 const callGET = (id = "5") =>
@@ -159,12 +159,12 @@ describe("PATCH /api/tasks/[id]", () => {
     it("forwards status and category edits to the service", async () => {
         mocks.updateTask.mockResolvedValue({ task: TASK })
 
-        const res = await callPATCH({ status: "IN_PROGRESS", category: "Health" })
+        const res = await callPATCH({ status: "IN_PROGRESS", category: "health" })
 
         expect(res.status).toBe(200)
         expect(mocks.updateTask).toHaveBeenCalledWith(1, "Asia/Tehran", 5, {
             status: "IN_PROGRESS",
-            category: "Health",
+            category: "health",
         })
     })
 
@@ -244,9 +244,9 @@ describe("PATCH /api/tasks/[id]", () => {
     })
 
     it("records task.updated for a category-only mutation with changedFields=[category]", async () => {
-        mocks.updateTask.mockResolvedValue({ task: { ...TASK, category: "Health" }, changed: true, changedFields: ["category"] })
+        mocks.updateTask.mockResolvedValue({ task: { ...TASK, category: "health" }, changed: true, changedFields: ["category"] })
 
-        const res = await callPATCH({ category: "Health" })
+        const res = await callPATCH({ category: "health" })
 
         expect(res.status).toBe(200)
         expect(mocks.recordProductEvent).toHaveBeenCalledWith(

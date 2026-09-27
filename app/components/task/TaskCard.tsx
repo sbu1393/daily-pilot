@@ -146,7 +146,7 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind }: Props) 
 
             <div className={styles.chips}>
                 <span className={styles.chip} style={{ color: cat.color, background: cat.bg }}>
-                    {cat.label}
+                    {cat.icon ? `${cat.icon} ${cat.label}` : cat.label}
                 </span>
                 {/* در حالت آفلاین (مقادیر null) به‌جای اطلاعات AI خط تیره نشان داده می‌شود */}
                 {task.score == null && task.reason == null && task.estimatedTime == null ? (

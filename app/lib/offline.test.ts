@@ -8,9 +8,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 /* fetch / Event ساخته می‌شود — نه یک محیط مرورگر کامل.                 */
 /*                                                                     */
 /* قراردادهای V1 آفلاین که این فایل قفل می‌کند: فقط Create، فقط        */
-/* {title, scheduledDate}، شناسه‌ی موقت local-*، حذف پس از سینک موفق،   */
-/* بدون conflict-resolution و بدون تضمین ترتیب/تحویل.                  */
+/* {title, scheduledDate, category}، شناسه‌ی موقت local-*، حذف پس از    */
+/* سینک موفق، بدون conflict-resolution و بدون تضمین ترتیب/تحویل.        */
+/*                                                                     */
+/* دستهٔ canonical اجباری است — دقیقاً مثل مسیر آنلاین، تا صف آفلاین    */
+/* نتواند قاعدهٔ «هر تسک یک دستهٔ معتبر دارد» را دور بزند.              */
 /* ------------------------------------------------------------------ */
+
+import type { TaskCategoryKey } from "@/app/lib/categories"
 
 type Listener = () => void
 
@@ -92,9 +97,15 @@ const TASK: TaskItem = {
     updatedAt: "2026-03-05T06:00:00.000Z",
 }
 
-const queuedItem = (title: string) => ({ title, dayKey: DAY_KEY, scheduledDate: SCHEDULED_DATE })
+// دستهٔ canonical — مسیر آفلاین دقیقاً مثل مسیر آنلاین به آن نیاز دارد
+const queuedItem = (title: string, category: TaskCategoryKey = "work") => ({
+    title,
+    category,
+    dayKey: DAY_KEY,
+    scheduledDate: SCHEDULED_DATE,
+})
 
-const bodyOf = (call: unknown[]): { title: string; scheduledDate: string } =>
+const bodyOf = (call: unknown[]): { title: string; scheduledDate: string; category: TaskCategoryKey } =>
     JSON.parse((call[1] as { body: string }).body)
 
 describe("offline layer (H2 — per-user scope)", () => {
@@ -261,7 +272,7 @@ describe("offline layer (H3 — sync guard)", () => {
         expect(fetchMock).not.toHaveBeenCalled()
     })
 
-    it("V1 contract: local-* ids and a Create-only { title, scheduledDate } payload (no dayKey)", async () => {
+    it("V1 contract: local-* ids and a Create-only { title, scheduledDate, category } payload (no dayKey)", async () => {
         const queued = enqueueTask(queuedItem("خرید"))
         expect(queued.id.startsWith("local-")).toBe(true)
 
@@ -274,9 +285,15 @@ describe("offline layer (H3 — sync guard)", () => {
         expect(bodyOf(fetchMock.mock.calls[0])).toEqual({
             title: "خرید",
             scheduledDate: SCHEDULED_DATE,
+            category: "work",
         })
-        // dayKey هرگز از صف به سرور فرستاده نمی‌شود (§6.2.2.1 — سمت سرور ساخته می‌شود)
-        expect(Object.keys(bodyOf(fetchMock.mock.calls[0]))).toEqual(["title", "scheduledDate"])
+        // dayKey هرگز از صف به سرور فرستاده نمی‌شود (§6.2.2.1 — سمت سرور ساخته می‌شود)،
+        // اما دستهٔ اجباری باید همراه برود تا مسیر آفلاین قاعده را دور نزند.
+        expect(Object.keys(bodyOf(fetchMock.mock.calls[0]))).toEqual([
+            "title",
+            "scheduledDate",
+            "category",
+        ])
     })
 
     it("deduplicates an identical task instead of queueing it twice", () => {
@@ -284,6 +301,40 @@ describe("offline layer (H3 — sync guard)", () => {
         enqueueTask(queuedItem("خرید"))
 
         expect(readQueue()).toHaveLength(1)
+    })
+
+    it("refuses to queue a task without a valid category — offline cannot bypass the rule", () => {
+        setOfflineUserId(1)
+        const bad = { title: "بدون دسته", dayKey: DAY_KEY, scheduledDate: SCHEDULED_DATE }
+        expect(() => enqueueTask(bad as never)).toThrow(/INVALID_TASK_CATEGORY/)
+        expect(readQueue()).toHaveLength(0)
+    })
+
+    it("keeps different categories as distinct queued items", () => {
+        setOfflineUserId(1)
+        enqueueTask(queuedItem("گزارش", "work"))
+        enqueueTask(queuedItem("گزارش", "home"))
+        expect(readQueue()).toHaveLength(2)
+    })
+
+    it("skips a legacy queued item that has no category instead of creating a category-less Task", async () => {
+        setOfflineUserId(1)
+        // شبیه‌سازی صفِ نوشته‌شده پیش از این نسخه: بدون دسته
+        storage["dp:offline:v3:queue:1"] = JSON.stringify([
+            {
+                id: "local-legacy",
+                title: "کار قدیمی",
+                dayKey: DAY_KEY,
+                scheduledDate: SCHEDULED_DATE,
+                createdAt: "2026-03-05T06:00:00.000Z",
+            },
+        ])
+
+        fetchMock.mockResolvedValue({ ok: true })
+        await syncQueue()
+
+        // هرگز POST نمی‌شود → هیچ Task بدون دسته‌ای ساخته نمی‌شود
+        expect(fetchMock).not.toHaveBeenCalled()
     })
 
     it("backfills local storage per user only (queue key carries the user id)", () => {

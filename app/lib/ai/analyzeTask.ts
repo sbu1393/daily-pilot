@@ -22,7 +22,7 @@ const SYSTEM_PROMPT = `تو دستیار تحلیل تسک در اپلیکیشن
   "score": عدد صحیح ۰ تا ۱۰۰ (اهمیت و فوریت ترکیبی),
   "estimatedMinutes": عدد صحیح ۵ تا ۴۸۰ (تخمین زمان لازم برای یک انسان معمولی به دقیقه),
   "reason": یک جمله فارسی کوتاه که چرایی اولویت و زمان را توضیح دهد,
-  "category": یکی از "Work" | "Personal" | "Urgent" | "Health" — اگر هیچ‌کدام مناسب نبود "Personal"
+  "category": یکی از "home" | "work" | "transport" | "shopping" | "learning" | "health" | "leisure" | "personal" — موضوع کار را توصیف کن؛ اگر هیچ‌کدام مناسب نبود "personal"
 }
 دقت کن خروجی حتماً JSON خام و قابل parse باشد.`
 

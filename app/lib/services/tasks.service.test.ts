@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { TASK_CATEGORY_KEYS } from "@/app/lib/categories"
+
 /* ------------------------------------------------------------------ */
 /* B1-lite — smoke tests لایه سرویس (tasks.service.ts)                 */
 /* Prisma و analyzeTask هر دو mock هستند: بدون DB زنده، بدون AI واقعی. */
@@ -92,7 +94,7 @@ describe("createTask", () => {
         }
         prismaMock.task.create.mockResolvedValue(createdTask)
 
-        const result = await createTask(1, TIMEZONE, { title, scheduledDate })
+        const result = await createTask(1, TIMEZONE, { title, scheduledDate, category: "work" })
 
         const createArgs = prismaMock.task.create.mock.calls[0][0]
         expect(createArgs.data).toMatchObject({
@@ -101,11 +103,12 @@ describe("createTask", () => {
             userId: 1,
             scheduledDate: expect.any(Date),
         })
-        // هیچ فیلد AI نباید در create نوشته شود (قانون 3.5)
+        // دستهٔ انتخابی کاربر در create ذخیره می‌شود (اجباری، canonical)
+        expect(createArgs.data).toMatchObject({ category: "work" })
+        // سایر فیلدهای AI نباید در create نوشته شوند (قانون 3.5 — بدون تغییر)
         expect(createArgs.data).not.toHaveProperty("priority")
         expect(createArgs.data).not.toHaveProperty("score")
         expect(createArgs.data).not.toHaveProperty("reason")
-        expect(createArgs.data).not.toHaveProperty("category")
         expect(createArgs.data).not.toHaveProperty("estimatedTime")
 
         // A3: bump اتمیک planVersion در همان transaction ساخت (§6.3.2)
@@ -151,7 +154,7 @@ describe("reanalyzeTask", () => {
         priority: "HIGH",
         score: 90,
         reason: "دلیل جدید",
-        category: "Urgent",
+        category: "health" as const,
         estimatedMinutes: 120,
     }
 
@@ -167,7 +170,7 @@ describe("reanalyzeTask", () => {
             title: "خرید",
             dayKey: today,
             status: "TODO",
-            category: "Work", // دسته‌بندی صریح کاربر
+            category: "work", // دسته‌بندی صریح کاربر
             priority: "MEDIUM",
             score: 40,
             reason: "قدیمی",
@@ -182,8 +185,8 @@ describe("reanalyzeTask", () => {
         const result = await reanalyzeTask(1, TIMEZONE, 1)
 
         const updateArgs = prismaMock.task.update.mock.calls[0][0]
-        // قانون 7.5: category کاربر بازنویسی نمی‌شود
-        expect(updateArgs.data.category).toBe("Work")
+        // قانون 7.5 + قاعدهٔ «کاربر authoritative است»: دستهٔ کاربر بازنویسی نمی‌شود
+        expect(updateArgs.data.category).toBe("work")
         // بقیه فیلدهای AI از تحلیل جدید می‌آیند
         expect(updateArgs.data.title).toBe("خرید")
         expect(updateArgs.data.priority).toBe("HIGH")
@@ -202,12 +205,12 @@ describe("reanalyzeTask", () => {
         })
 
         expect(result.aiSource).toBe("1xai")
-        expect(result.task.category).toBe("Work")
+        expect(result.task.category).toBe("work")
         // A3: بازتوزیع در زمان mutation اجرا نمی‌شود
         expect(result.summary).toBeNull()
     })
 
-    it("writes the category from analysis when the task category is null", async () => {
+    it("fills a legacy null category from the analysis (data-completion, not a create path)", async () => {
         const task = {
             id: 2,
             userId: 1,
@@ -229,8 +232,69 @@ describe("reanalyzeTask", () => {
         const result = await reanalyzeTask(1, TIMEZONE, 2)
 
         const updateArgs = prismaMock.task.update.mock.calls[0][0]
-        expect(updateArgs.data.category).toBe("Urgent") // از تحلیل
-        expect(result.task.category).toBe("Urgent")
+        expect(updateArgs.data.category).toBe("health") // از تحلیل
+        expect(result.task.category).toBe("health")
+    })
+})
+
+describe("createTask — دستهٔ canonical اجباری است", () => {
+    const scheduledDate = new Date("2026-03-05T10:00:00Z")
+
+    beforeEach(() => {
+        vi.clearAllMocks()
+        prismaMock.task.create.mockResolvedValue({ id: 99 })
+    })
+
+    it("persists the selected category atomically with the task", async () => {
+        await createTask(1, TIMEZONE, { title: "گزارش", scheduledDate, category: "work" })
+
+        const createArgs = prismaMock.task.create.mock.calls[0][0]
+        expect(createArgs.data).toMatchObject({ title: "گزارش", category: "work" })
+    })
+
+    it.each(["home", "work", "transport", "shopping", "learning", "health", "leisure", "personal"] as const)(
+        "persists canonical category %s",
+        async (category) => {
+            await createTask(1, TIMEZONE, { title: "کار", scheduledDate, category })
+            expect(prismaMock.task.create.mock.calls[0][0].data.category).toBe(category)
+        },
+    )
+
+    it("fails safely and creates nothing when the category is invalid (programming-error guard)", async () => {
+        // schema مسیر HTTP را قبلاً رد می‌کند؛ این گارد دفاعی سرویس است
+        await expect(
+            createTask(1, TIMEZONE, {
+                title: "کار",
+                scheduledDate,
+                category: null as unknown as (typeof TASK_CATEGORY_KEYS)[number],
+            }),
+        ).rejects.toThrow(/INVALID_TASK_CATEGORY/)
+
+        expect(prismaMock.task.create).not.toHaveBeenCalled()
+        expect(prismaMock.dailyPlan.updateMany).not.toHaveBeenCalled()
+        expect(prismaMock.taskEvent.create).not.toHaveBeenCalled()
+    })
+
+    it("never silently converts a missing category to null", async () => {
+        await expect(
+            createTask(1, TIMEZONE, {
+                title: "کار",
+                scheduledDate,
+                category: undefined as unknown as (typeof TASK_CATEGORY_KEYS)[number],
+            }),
+        ).rejects.toThrow(/INVALID_TASK_CATEGORY/)
+        expect(prismaMock.task.create).not.toHaveBeenCalled()
+    })
+
+    it("rejects a legacy free-text category instead of persisting it", async () => {
+        await expect(
+            createTask(1, TIMEZONE, {
+                title: "کار",
+                scheduledDate,
+                category: "Work" as unknown as (typeof TASK_CATEGORY_KEYS)[number],
+            }),
+        ).rejects.toThrow(/INVALID_TASK_CATEGORY/)
+        expect(prismaMock.task.create).not.toHaveBeenCalled()
     })
 })
 
@@ -623,7 +687,11 @@ describe("C4 — ADR-03 lazy wiring (read vs mutation)", () => {
     it("createTask (mutation) never triggers the rebalance engine", async () => {
         prismaMock.task.create.mockResolvedValue({ id: 9 })
 
-        await createTask(1, TIMEZONE, { title: "کار جدید", scheduledDate: new Date("2026-03-05T10:00:00Z") })
+        await createTask(1, TIMEZONE, {
+            title: "کار جدید",
+            scheduledDate: new Date("2026-03-05T10:00:00Z"),
+            category: "personal",
+        })
 
         expect(ensureDayRebalancedMock).not.toHaveBeenCalled()
     })

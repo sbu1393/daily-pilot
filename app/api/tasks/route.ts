@@ -18,7 +18,9 @@ import {
 } from "@/app/lib/apiResponse"
 
 // POST: ساخت تسک → ذخیره → bump (A3) — مستقل از AI
-// C1: بدنه { title, scheduledDate } — dayKey سمت سرور از user.timezone محاسبه می‌شود (§6.2.2.1)
+// C1: بدنه { title, scheduledDate, category } — dayKey سمت سرور از user.timezone محاسبه می‌شود (§6.2.2.1).
+// دسته‌بندی اجباری است و makeCreateTaskSchema آن را **قبل از فراخوانی سرویس** می‌سنجد؛
+// بنابراین هیچ مسیر موفقی با category غایب/null/ناشناخته وجود ندارد.
 export async function POST(req: NextRequest) {
     // فاز صفر Observability — requestId فقط سمت سرور تولید می‌شود (هرگز از کلاینت خوانده نمی‌شود)
     const context = createObservabilityContext("/api/tasks")
@@ -34,8 +36,12 @@ export async function POST(req: NextRequest) {
             return validationErrorResponse(parsed.error.flatten(), undefined, context.requestId)
         }
 
-        const { title, scheduledDate } = parsed.data
-        const { task } = await createTask(user.id, user.timezone, { title, scheduledDate })
+        const { title, scheduledDate, category } = parsed.data
+        const { task } = await createTask(user.id, user.timezone, {
+            title,
+            scheduledDate,
+            category,
+        })
 
         // فاز ۳ — گام ۷: تحلیل‌های موفقیت فقط بعد از verified success (ساخت تسک)،
         // خارج از business transaction؛ fail-open — هرگز response را تغییر نمی‌دهند (§17).

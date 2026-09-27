@@ -1,4 +1,5 @@
 import { canonicalKeyToLocalMidnight } from "@/app/lib/canonicalDay"
+import { CATEGORY_REQUIRED_MESSAGE, TASK_CATEGORY_KEYS } from "@/app/lib/categories"
 import { z } from "zod"
 
 // C1 — Task CRUD validation (Phase C1: Task CRUD Foundation)
@@ -35,6 +36,20 @@ function makeScheduledDateField(timezone: string) {
         .refine((d) => !Number.isNaN(d.getTime()), "تاریخ نامعتبر است")
 }
 
+/**
+ * دسته‌بندی تسک — **اجباری** و از واژگان canonical.
+ *
+ * `z.enum` روی آرایهٔ ثابت، هر ورودی خارج از واژگان را رد می‌کند: غایب
+ * (undefined)، null، رشتهٔ خالی/فقط‌فاصله، کلید ناشناخته و غیررشته. یعنی
+ * «هیچ مسیر create موفقی با category خالی وجود ندارد».
+ *
+ * این قید فقط در مرز create اعمال می‌شود؛ ستون DB همچنان nullable است تا
+ * داده‌های legacy از بین نروند (بازبینی: نبود migration عمدی).
+ */
+export const taskCategorySchema = z.enum(TASK_CATEGORY_KEYS, {
+    message: CATEGORY_REQUIRED_MESSAGE,
+})
+
 export function makeCreateTaskSchema(timezone: string) {
     return z.object({
         title: z
@@ -43,6 +58,8 @@ export function makeCreateTaskSchema(timezone: string) {
             .min(1, "عنوان نمی‌تواند خالی باشد")
             .max(200, "عنوان خیلی طولانی است"),
         scheduledDate: makeScheduledDateField(timezone),
+        // بدون `.optional()`/`.nullable()` — نبودن یا null عمداً خطاست
+        category: taskCategorySchema,
     })
 }
 
@@ -59,13 +76,10 @@ export function makeUpdateTaskSchema(timezone: string) {
                 .optional(),
             status: z.enum(["TODO", "IN_PROGRESS"]).optional(),
             scheduledDate: makeScheduledDateField(timezone).optional(),
-            category: z
-                .string()
-                .trim()
-                .min(1, "دسته‌بندی خالی است")
-                .max(30, "دسته‌بندی حداکثر ۳۰ کاراکتر است")
-                .nullable()
-                .optional(),
+            // ویرایش هم فقط از واژگان canonical می‌پذیرد — PATCH دیگر نمی‌تواند
+            // رشتهٔ دلخواه (مخالف create) تزریق کند. null یعنی «حذف دسته» و مجاز است
+            // تا کاربر بتواند یک تسک را به حالت بدون دسته برگرداند.
+            category: taskCategorySchema.nullable().optional(),
         })
         .refine(
             (d) =>

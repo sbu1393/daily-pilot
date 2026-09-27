@@ -7,7 +7,8 @@ import { describe, expect, it } from "vitest"
 /* ------------------------------------------------------------------ */
 
 import type { AiBatchPlan, AiPlanItem } from "@/app/lib/ai/planSchema"
-import { buildPlanProposal } from "./planProposal"
+import { planApplyRequestSchema, planProposalSchema } from "@/app/schema/plannerSchema"
+import { buildPlanProposal, type PlanProposal } from "./planProposal"
 import { suggestDay, type SuggestionTaskInput } from "./suggestion"
 
 const task = (
@@ -85,6 +86,117 @@ describe("buildPlanProposal — basis", () => {
             args([task(1), task(2)], plan([item(1, 1)], [2])),
         )
         expect(proposal.aiUnscheduledTaskIds).toEqual([2])
+    })
+})
+
+/* ------------------------------------------------------------------ */
+/* Producer/Schema parity — the false-VALIDATION_ERROR regression       */
+/*                                                                     */
+/* The production bug: buildPlanProposal kept AI-unscheduled tasks in */
+/* the deterministic engine's input (by design — the engine only      */
+/* knows estimate/score/priority), so the engine could schedule a     */
+/* task the AI had declared unscheduled. planApplyRequestSchema then  */
+/* rejected that overlap with                                        */
+/* «aiUnscheduledTaskIds نمی‌تواند با planned هم‌پوشانی داشته باشد»    */
+/* and Apply returned 400 on a perfectly valid proposal.               */
+/*                                                                     */
+/* Contract (ADR-08): AI is advisory, suggestDay/distribute is the    */
+/* sole scheduler. Disagreement between the two is a legitimate       */
+/* outcome, not a malformed proposal — so producer and consumer must  */
+/* agree that this output is valid.                                    */
+/* ------------------------------------------------------------------ */
+
+describe("buildPlanProposal — producer/schema parity (AI advisory vs engine authority)", () => {
+    it("emits an Apply-valid proposal when the engine schedules a task AI called unscheduled", () => {
+        // Exact shape of the reported production bug:
+        //   AI: items=[1], unscheduledTaskIds=[2]  |  availableMinutes=120
+        // Engine: task 2 has no AI item → keeps its own values (default estimate 30)
+        //         → fits comfortably → lands in `planned`.
+        const proposal = buildPlanProposal(
+            args([task(1), task(2)], plan([item(1, 1)], [2]), 120),
+        )
+
+        // The disagreement is real and must be preserved, not filtered away
+        expect(proposal.aiUnscheduledTaskIds).toEqual([2])
+        expect(proposal.planned.map((p) => p.taskId)).toEqual([1, 2])
+
+        // The invariant that was broken: producer output must satisfy BOTH schemas
+        expect(planProposalSchema.safeParse(proposal).success).toBe(true)
+        const applied = planApplyRequestSchema.safeParse({
+            dayKey: proposal.basis.dayKey,
+            expectedPlanVersion: proposal.basis.planVersion,
+            proposal,
+        })
+        expect(applied.success).toBe(true)
+    })
+
+    it("accepts the realistic production payload (7 planned, 3 of them AI-unscheduled)", () => {
+        // Regression fixture mirroring the reported day:
+        //   planned              = [34, 39, 47, 22, 23, 35, 21]
+        //   unfitted             = [19, 48, 20, 31, 32]
+        //   aiUnscheduledTaskIds = [23, 35, 48, 47]   ← 23/35/47 ∈ planned, 48 ∈ unfitted
+        // Overlap with BOTH engine buckets is allowed; it is a disagreement, not corruption.
+        const proposal: PlanProposal = {
+            basis: {
+                dayKey: "2026-09-27",
+                planVersion: 3,
+                rebalancedVersion: 3,
+                availableMinutes: 360,
+                taskCount: 12,
+                state: "fresh",
+            },
+            planned: [34, 39, 47, 22, 23, 35, 21].map((taskId, i) => ({
+                taskId,
+                estimatedMinutes: 45,
+                suggestedMinutes: 45,
+                order: i + 1,
+                aiOrder: taskId,
+                reason: null,
+                priority: "MEDIUM" as const,
+                score: 50,
+                weight: 56.25,
+                partial: false,
+            })),
+            unfitted: [19, 48, 20, 31, 32].map((taskId) => ({
+                taskId,
+                estimatedMinutes: 60,
+                weight: 75,
+                aiOrder: null,
+                reason: null,
+                priority: "LOW" as const,
+                score: 30,
+            })),
+            plannedMinutes: 315,
+            remainingMinutes: 45,
+            aiUnscheduledTaskIds: [23, 35, 48, 47],
+            source: "1xai",
+        }
+
+        const plannedIds = new Set(proposal.planned.map((p) => p.taskId))
+        const unfittedIds = new Set(proposal.unfitted.map((p) => p.taskId))
+        expect([23, 35, 47].every((id) => plannedIds.has(id))).toBe(true)
+        expect(unfittedIds.has(48)).toBe(true)
+
+        expect(planProposalSchema.safeParse(proposal).success).toBe(true)
+        const applied = planApplyRequestSchema.safeParse({
+            dayKey: proposal.basis.dayKey,
+            expectedPlanVersion: proposal.basis.planVersion,
+            proposal,
+        })
+        expect(applied.success).toBe(true)
+    })
+
+    it("keeps the engine authoritative: an AI-unscheduled task still lands in unfitted when it does not fit", () => {
+        // Mirror image of the first case — the advisory signal must not talk the
+        // engine into dropping something it can fit, nor into keeping something it can't.
+        const proposal = buildPlanProposal(
+            args([task(1), task(2)], plan([item(1, 1, { estimatedMinutes: 60 })], [2]), 20),
+        )
+        expect(proposal.aiUnscheduledTaskIds).toEqual([2])
+        expect(proposal.planned.map((p) => p.taskId)).toEqual([])
+        // هر دو زیرِ MIN_ALLOCATION(۱۵) می‌افتند؛ ۲ کم‌وزن‌تر است و اول می‌آید
+        expect(proposal.unfitted.map((u) => u.taskId)).toEqual([2, 1])
+        expect(planProposalSchema.safeParse(proposal).success).toBe(true)
     })
 })
 

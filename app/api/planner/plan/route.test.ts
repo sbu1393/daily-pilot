@@ -439,3 +439,91 @@ describe("POST /api/planner/plan — concurrent Generate", () => {
         expect(mocks.releaseQuota.mock.calls[0][3].failureCode).toBe("AI_PROVIDER_UNAVAILABLE")
     })
 })
+
+/* ------------------------------------------------------------------ */
+/* Producer/consumer contract guard                                    */
+/*                                                                     */
+/* The reported production bug returned a proposal that the sibling    */
+/* Apply endpoint rejected with 400 VALIDATION_ERROR. Generate now     */
+/* validates its own output against the canonical proposal schema, so  */
+/* a producer/consumer mismatch surfaces HERE (as an internal fault)   */
+/* rather than as a user-facing false rejection several clicks later.  */
+/* ------------------------------------------------------------------ */
+describe("POST /api/planner/plan — validates its own output against the canonical proposal schema", () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.getCurrentUser.mockResolvedValue(USER)
+        mocks.getPrisma.mockReturnValue(prismaMock)
+        mocks.isRateLimited.mockReturnValue(false)
+        mocks.getCanonicalToday.mockReturnValue(DAY_KEY)
+        mocks.getPlanGenerationContext.mockResolvedValue(CTX)
+        mocks.reserveQuota.mockResolvedValue(undefined)
+        mocks.completeQuota.mockResolvedValue(true)
+        mocks.releaseQuota.mockResolvedValue(true)
+        mocks.markReleaseFailed.mockResolvedValue(true)
+        mocks.recordError.mockResolvedValue(undefined)
+    })
+
+    it("returns 200 for a proposal whose AI-unscheduled ids overlap the engine's planned list", async () => {
+        // The exact production shape: AI declared task 2 unscheduled, the engine fit it anyway.
+        mocks.analyzeBatchPlan.mockResolvedValue({
+            source: "1xai",
+            plan: { items: [AI_PLAN.items[0]], unscheduledTaskIds: [2] },
+            attempts: 1,
+        })
+
+        const res = await callPOST({ dayKey: DAY_KEY })
+
+        expect(res.status).toBe(200)
+        const parsed = await res.json()
+        expect(parsed.ok).toBe(true)
+        expect(parsed.data.aiUnscheduledTaskIds).toEqual([2])
+        expect(parsed.data.planned.map((p: any) => p.taskId)).toContain(2)
+        expect(mocks.completeQuota).toHaveBeenCalledTimes(1)
+    })
+
+    it("emits a proposal that planApplyRequestSchema accepts (end-to-end contract parity)", async () => {
+        const { planApplyRequestSchema } = await import("@/app/schema/plannerSchema")
+        mocks.analyzeBatchPlan.mockResolvedValue({
+            source: "1xai",
+            plan: { items: [AI_PLAN.items[0]], unscheduledTaskIds: [2] },
+            attempts: 1,
+        })
+
+        const res = await callPOST({ dayKey: DAY_KEY })
+        const { data } = await res.json()
+
+        // همان body‌ای که کلاینت بعداً می‌سازد
+        const parsed = planApplyRequestSchema.safeParse({
+            dayKey: DAY_KEY,
+            expectedPlanVersion: data.basis.planVersion,
+            proposal: data,
+        })
+        expect(parsed.success).toBe(true)
+    })
+
+    it("fails closed on a malformed proposal: 500, quota released, nothing completed", async () => {
+        // شبیه‌سازی عیب داخلی producer: proposal ناسازگار با schema canonical.
+        // چنین چیزی یک خطای ۵۰۰ داخلی است، نه ورودی نامعتبر کاربر (نه ۴۰۰ و نه پیام فارسی
+        // دربارهٔ داده‌ها) — و نباید به‌عنوان quota مصرف‌شده از کاربر کسر شود.
+        mocks.getPlanGenerationContext.mockResolvedValue({
+            ...CTX,
+            // planVersion منفی در basis ناسازگار با schema canonical است
+            planVersion: -1,
+        })
+
+        const res = await callPOST({ dayKey: DAY_KEY })
+
+        expect(res.status).toBe(500)
+        const parsed = await res.json()
+        expect(parsed.ok).toBe(false)
+        expect(parsed.error.code).toBe("INTERNAL")
+        // جزئیات داخلی (پیام Zod) هرگز به کلاینت نمی‌رسد
+        expect(JSON.stringify(parsed)).not.toContain("aiUnscheduledTaskIds")
+        // quota آزاد شد، نه مصرف
+        expect(mocks.releaseQuota).toHaveBeenCalledTimes(1)
+        expect(mocks.completeQuota).not.toHaveBeenCalled()
+        // عیب داخلی برای اپراتور ثبت می‌شود
+        expect(mocks.recordError).toHaveBeenCalled()
+    })
+})

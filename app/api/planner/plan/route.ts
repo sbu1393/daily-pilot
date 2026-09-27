@@ -3,7 +3,7 @@ import { getCurrentUser } from "@/app/lib/getCurrentUser"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { isRateLimited } from "@/app/lib/rateLimit"
 import { getCanonicalToday } from "@/app/lib/canonicalDay"
-import { planRequestSchema } from "@/app/schema/plannerSchema"
+import { planRequestSchema, planProposalSchema } from "@/app/schema/plannerSchema"
 import { getPlanGenerationContext } from "@/app/lib/services/plan.service"
 import { analyzeBatchPlan } from "@/app/lib/ai/analyzeBatchPlan"
 import { validateBatchPlan, type PlanAnalysisResult } from "@/app/lib/ai/planContract"
@@ -155,6 +155,30 @@ export async function POST(req: NextRequest) {
             ai: aiResult.plan,
             tasks: planContext.suggestionTasks,
         })
+
+        // ── گاردِ قرارداد producer/consumer ───────────────────────────────────
+        // خروجی buildPlanProposal باید دقیقاً همان schema canonicalِی را پاس کند که
+        // planApplyRequestSchema در فاز Apply اعمال می‌کند. بدون این گارد، producer می‌تواند
+        // proposal‌ای بسازد که **خودِ سیستم** چند دقیقه/چند کلیک بعد آن را با
+        // VALIDATION_ERROR رد می‌کند (کلاسِ bugِ «Apply روی پیشنهادِ معتبر رد می‌شود»).
+        // ناهماهنگی producer/consumer باید همین‌جا در Generate کشف شود، نه در Apply.
+        //
+        // این یک **عیب داخلی** است، نه ورودی نامعتبر کاربر: پس پیام دامنه‌ای به کاربر داده
+        // نمی‌شود و فقط از مسیر عمومیِ catch (500 INTERNAL + recordError) عبور می‌کند —
+        // جزئیاتِ Zod فقط در لاگ سمت سرور می‌ماند.
+        const validated = planProposalSchema.safeParse(proposal)
+        if (!validated.success) {
+            try {
+                await releaseQuota(prisma, context.requestId, undefined, { periodStart })
+            } catch {
+                await markReleaseFailed(prisma, context.requestId)
+                await recordError(new QuotaUnavailableError(), context)
+                throw new QuotaUnavailableError()
+            }
+            // ZodError یک ServiceError نیست → از مسیر عمومی catch به 500 می‌رود و همان‌جا
+            // یک‌بار با context کامل record می‌شود.
+            throw validated.error
+        }
 
         // موفقیت → complete روی همان periodStart رزرو
         try {

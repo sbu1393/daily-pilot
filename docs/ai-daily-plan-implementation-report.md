@@ -203,6 +203,36 @@ overrides the engine's rank. `rebalance.ts` and `suggestion.ts` are unmodified.
 **`reason` does not participate in any decision.** A test asserts that the same input with and
 without `reason` produces an identical engine output.
 
+### `aiUnscheduledTaskIds` — advisory signal, not a constraint
+
+`aiUnscheduledTaskIds` is an echo of the AI's own opinion ("I did not think these tasks fit").
+It is **not** derived from, and does not constrain, the engine's decision.
+
+The engine receives every open task, including AI-unscheduled ones (which keep their existing
+`estimatedTime`/`score`/`priority`, since the AI gave no item for them). It may therefore
+schedule a task the AI called unscheduled. `planned ∩ aiUnscheduledTaskIds ≠ ∅` and
+`unfitted ∩ aiUnscheduledTaskIds ≠ ∅` are both **legitimate outcomes** — a disagreement between
+advisor and scheduler, not a malformed proposal. `unfitted` remains the engine's authoritative
+verdict; `aiUnscheduledTaskIds` is never merged into it, replaced by it, or filtered against it.
+
+> This was a real production bug. `planApplyRequestSchema` previously enforced
+> `aiUnscheduledTaskIds ∩ planned = ∅`, an invariant the producer legitimately violates by
+> design, so `POST /api/planner/plan/apply` returned `400 VALIDATION_ERROR`
+> (`«aiUnscheduledTaskIds نمی‌تواند با planned هم‌پوشانی داشته باشد»`) on a proposal the same
+> system had just generated. The refine was wrong, not the producer — filtering the overlap in
+> `buildPlanProposal` would have silently destroyed the signal and effectively let AI veto the
+> engine, violating ADR-08. Fixed by correcting the contract, not by silencing the signal.
+>
+> The field is currently **not rendered in the UI**. Surfacing it needs product copy (how to
+> explain to a user that the AI disagreed with the plan), so it was deliberately left out of
+> this fix. See §19.
+
+**Producer/consumer parity is now enforced, not assumed.** `planProposalSchema` is the single
+canonical contract shared by both sides, and `POST /api/planner/plan` validates its own
+`buildPlanProposal` output against it *before* completing quota. A producer/consumer mismatch is
+now caught at Generate time as an internal fault (500, quota released, never completed) instead
+of surfacing to the user later as a false validation error on Apply.
+
 ## 13. Frontend flow
 
 ```
@@ -307,6 +337,18 @@ policy.
 | 7 | §33: "your plan changed" indicator | Implemented as an invalidation banner with a regenerate CTA | The spec's intent (tell the user why the proposal disappeared) is met; the exact copy is the project's. |
 
 ## 19. Open decisions
+
+### UI for `aiUnscheduledTaskIds` — deferred, needs product copy
+
+The field is a valid advisory signal (see §12) but is currently **not displayed anywhere** in the
+UI. `planProposalView.ts` does not read it, and `PlanProposalModal` does not render it.
+
+Showing it is not a pure code change: the user would see "AI said this doesn't fit" on tasks that
+the plan then scheduled anyway, which requires new product copy to explain the disagreement
+rather than confusing the user. No such copy was invented here. Recommended follow-up: either
+(a) render it as a subtle per-task note on planned items that the AI marked unscheduled, or
+(b) drop the field from the proposal entirely if no consumer is planned. Either way, decide once
+with product — do not leave it silently carried.
 
 ### SPEC/ARCHITECTURE DECISION REQUIRED — Time Slot (§12)
 

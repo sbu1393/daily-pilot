@@ -47,6 +47,7 @@ import { parseAiPlanJson } from "@/app/lib/ai/planSchema"
 import { validateBatchPlan } from "@/app/lib/ai/planContract"
 import { buildPlanProposal } from "./planProposal"
 import { createPlanProposalOrchestrator } from "./planProposalFlow"
+import { planApplyRequestSchema, planProposalSchema } from "@/app/schema/plannerSchema"
 import { PlanStaleError, AiProviderUnavailableError } from "@/app/lib/services/errors"
 
 /* ------------------------------------------------------------------ */
@@ -355,6 +356,156 @@ describe("spec §24 — main lifecycle: generate → accept → add task → reg
         // روز هرگز بیش از ظرفیت واقعی کاربر برنامه‌ریزی نمی‌شود
         expect(proposal.plannedMinutes).toBeLessThanOrEqual(80)
         expect(proposal.plannedMinutes + proposal.remainingMinutes).toBeLessThanOrEqual(80)
+    })
+})
+
+/* ------------------------------------------------------------------ */
+/* Production regression: AI advisory unscheduled ∩ engine planned     */
+/*                                                                     */
+/* The reported failure: Generate returned a proposal in which tasks   */
+/* 23/35/47 were BOTH in `aiUnscheduledTaskIds` and in `planned`, and  */
+/* Apply rejected it with 400                                        */
+/* «aiUnscheduledTaskIds نمی‌تواند با planned هم‌پوشانی داشته باشد».     */
+/*                                                                     */
+/* This walks the REAL chain (AI parse → validateBatchPlan →          */
+/* buildPlanProposal → planProposalSchema → planApplyRequestSchema →   */
+/* applyPlan) with a provider that legitimately returns                 */
+/* unscheduledTaskIds, and asserts the whole round-trip succeeds.      */
+/* ------------------------------------------------------------------ */
+describe("regression — AI advisory unscheduled overlaps engine planned", () => {
+    it("generate → apply succeeds when the engine schedules a task AI called unscheduled", async () => {
+        // ظرفیت کافی: هر دو تسک جا می‌شوند، اما AI تسک ۲ را «جا نمی‌شود» اعلام کرده
+        day = createDay({ version: 3, availableMinutes: 360, tasks: [taskRow(23), taskRow(35)] })
+        mocks.fetchProviderRaw.mockResolvedValueOnce(
+            aiJson({
+                items: [
+                    { taskId: 23, estimatedMinutes: 60, score: 80, priority: "HIGH", order: 1 },
+                ],
+                unscheduledTaskIds: [35],
+            }),
+        )
+
+        const proposal = await generate()
+
+        // اختلاف نظر واقعی است و باید حفظ شود
+        expect(proposal.aiUnscheduledTaskIds).toEqual([35])
+        expect(proposal.planned.map((p) => p.taskId)).toContain(35)
+
+        // دقیقاً همان دو دروازه‌ای که قبلاً ناسازگار بودند
+        expect(planProposalSchema.safeParse(proposal).success).toBe(true)
+        const applyBody = {
+            dayKey: DAY,
+            expectedPlanVersion: proposal.basis.planVersion,
+            proposal,
+        }
+        const parsedApply = planApplyRequestSchema.safeParse(applyBody)
+        expect(parsedApply.success).toBe(true)
+
+        // و Apply واقعاً اجرا می‌شود (گارد نسخه می‌گذرد، metadata نوشته می‌شود)
+        const applied = await applyPlan(USER_ID, {
+            dayKey: DAY,
+            expectedPlanVersion: proposal.basis.planVersion,
+            proposal,
+        })
+        expect(applied.applied).toBe(true)
+        expect(applied.planVersion).toBe(4)
+        // هر دو تسک metadata گرفتند — از جمله آنکه AI جا نمی‌دانستش
+        expect(day.getTask(23)?.estimatedTime).toBe(60)
+        expect(day.getTask(35)?.estimatedTime).toBe(30)
+    })
+
+    it("round-trips the reported 7-planned / 3-overlapping production shape end to end", async () => {
+        // شکل گزارش‌شده: ۷ planned که سه‌تایشان (23/35/47) AI-unscheduled هم هستند،
+        // و یک unfitted (48) که آن هم AI-unscheduled است.
+        const ids = [34, 39, 47, 22, 23, 35, 21, 19, 48, 20, 31, 32]
+        day = createDay({
+            version: 3,
+            availableMinutes: 360,
+            tasks: ids.map((id) => taskRow(id)),
+        })
+        // AI برای هشت کار آیتم می‌دهد و چهار کار را جا نمی‌داند
+        const scored = [34, 39, 22, 21, 19, 20, 31, 32]
+        mocks.fetchProviderRaw.mockResolvedValueOnce(
+            aiJson({
+                items: scored.map((id, i) => ({
+                    taskId: id,
+                    estimatedMinutes: 45,
+                    score: 90 - i * 5,
+                    priority: "HIGH",
+                    order: i + 1,
+                })),
+                unscheduledTaskIds: [23, 35, 48, 47],
+            }),
+        )
+
+        const proposal = await generate()
+
+        // Advisory حفظ شده و دست‌کم یکی از آن‌ها واقعاً در planned نشسته است
+        expect(proposal.aiUnscheduledTaskIds).toEqual([23, 35, 48, 47])
+        const plannedIds = proposal.planned.map((p) => p.taskId)
+        expect(proposal.aiUnscheduledTaskIds.filter((id) => plannedIds.includes(id)).length)
+            .toBeGreaterThan(0)
+
+        // دروازه‌های قرارداد
+        expect(planProposalSchema.safeParse(proposal).success).toBe(true)
+        const parsedApply = planApplyRequestSchema.safeParse({
+            dayKey: DAY,
+            expectedPlanVersion: proposal.basis.planVersion,
+            proposal,
+        })
+        expect(parsedApply.success).toBe(true)
+
+        // کل روز قابل Apply است
+        const applied = await applyPlan(USER_ID, {
+            dayKey: DAY,
+            expectedPlanVersion: proposal.basis.planVersion,
+            proposal,
+        })
+        expect(applied.applied).toBe(true)
+        expect(applied.planVersion).toBe(4)
+    })
+
+    it("the advisory signal never changes what the engine scheduled", async () => {
+        // تسک ۲ در DB همان مقادیری را دارد که AI برایش می‌داد (۶۰/۱۰)، پس تنها
+        // متغیر واقعی این است که آیا AI آن را advisory-unscheduled اعلام کرده یا نه.
+        const row = (id: number) => taskRow(id, { estimatedTime: 60, score: 10 })
+        day = createDay({ version: 1, availableMinutes: 90, tasks: [row(1), row(2)] })
+        mocks.fetchProviderRaw.mockResolvedValueOnce(
+            aiJson({
+                items: [
+                    { taskId: 1, estimatedMinutes: 60, score: 80, priority: "HIGH", order: 1 },
+                    { taskId: 2, estimatedMinutes: 60, score: 10, priority: "LOW", order: 2 },
+                ],
+            }),
+        )
+        const scheduledByAi = await generate()
+
+        day = createDay({ version: 1, availableMinutes: 90, tasks: [row(1), row(2)] })
+        mocks.fetchProviderRaw.mockResolvedValueOnce(
+            aiJson({
+                items: [{ taskId: 1, estimatedMinutes: 60, score: 80, priority: "HIGH", order: 1 }],
+                unscheduledTaskIds: [2],
+            }),
+        )
+        const unscheduledByAi = await generate()
+
+        expect(unscheduledByAi.aiUnscheduledTaskIds).toEqual([2])
+        // سیگنال advisory هیچ اثری بر تصمیم موتور نگذاشت.
+        // فقط فیلدهای authoritative مقایسه می‌شوند: aiOrder/priority/reason ذاتاً
+        // به وجود/عدم آیتم AI وابسته‌اند و در تصمیم تخصیص/ترتیب دخالت ندارند.
+        const engineView = (p: typeof scheduledByAi) => ({
+            planned: p.planned.map(({ taskId, suggestedMinutes, order, partial, weight }) => ({
+                taskId,
+                suggestedMinutes,
+                order,
+                partial,
+                weight,
+            })),
+            unfitted: p.unfitted.map(({ taskId, weight }) => ({ taskId, weight })),
+            plannedMinutes: p.plannedMinutes,
+            remainingMinutes: p.remainingMinutes,
+        })
+        expect(engineView(unscheduledByAi)).toEqual(engineView(scheduledByAi))
     })
 })
 

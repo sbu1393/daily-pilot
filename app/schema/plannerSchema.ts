@@ -68,7 +68,31 @@ const planProposalUnfittedItemSchema = z.object({
     score: z.number().int().min(0).max(100).nullable(),
 })
 
-const planProposalSchema = z
+/**
+ * قرارداد canonical پیشنهاد روز — **مشترک بین producer و consumer**.
+ *
+ * `buildPlanProposal` (تولیدکننده، فاز Generate) و `planApplyRequestSchema` (مصرف‌کننده،
+ * فاز Apply) هر دو باید دقیقاً همین schema را اعمال کنند؛ وگرنه producer می‌تواند
+ * proposal‌ای بسازد که consumer خودش آن را رد می‌کند (کلاسِ bugِ
+ * «false VALIDATION_ERROR در Apply»).
+ *
+ * ── معناشناسی `aiUnscheduledTaskIds` (تصمیم معماری، ADR-08) ────────────────────
+ * این فیلد یک **سیگنال advisory از AI** است: «AI خودش این تسک‌ها را جا نمی‌دانست».
+ * `unfitted` حکم نهایی موتور قطعی است (authority) و `planned` هم حکم نهایی موتور است.
+ *
+ * چون AI مشاور است و scheduler نیست (ADR-08 / architecture §3.5)، موتور قطعی این تسک‌ها
+ * را با مقادیر موجود خودشان وارد تخصیص می‌کند و **ممکن است تصمیم بگیرد جا دهدشان** —
+ * حتی اگر AI گفته باشد جا نمی‌شوند. پس هم‌پوشانیِ `aiUnscheduledTaskIds` با `planned`
+ * یا با `unfitted` یک **اختلاف نظر بین AI و Planner** است، نه proposal معیوب.
+ *
+ * بنابراین اینجا عمداً هیچ قیدِ «عدم هم‌پوشانی»‌ای وجود ندارد. فیلتر کردن این هم‌پوشانی
+ * در producer هم خطاست: اطلاعاتِ «AI فکر می‌کرد جا نمی‌شود ولی Planner جا داد» را بی‌صدا
+ * نابود می‌کند و AI را عملاً veto می‌کند — نقض مستقیمِ «AI advisory / engine authority».
+ *
+ * قیدهای ساختاریِ معتبر (یکتایی، bounds، عدم تکرار task/order، عدم planned∩unfitted) عمداً
+ * حفظ شده‌اند؛ فقط invariantِ نادرستِ هم‌پوشانی حذف شده است.
+ */
+export const planProposalSchema = z
     .object({
         basis: z.object({
             dayKey: z.string(),
@@ -82,7 +106,8 @@ const planProposalSchema = z
         unfitted: z.array(planProposalUnfittedItemSchema),
         plannedMinutes: z.number().int().nonnegative(),
         remainingMinutes: z.number().int().nonnegative(),
-        // شناسه‌های advisory — یکتا
+        // شناسه‌های advisory — یکتا. هم‌پوشانی با planned/unfitted مجاز است
+        // (اختلاف نظر AI و Planner؛ بالا را ببینید).
         aiUnscheduledTaskIds: z.array(z.number().int().positive()),
         source: z.enum(["1xai", "mock"]),
         summary: z.string().max(600).optional(),
@@ -110,18 +135,11 @@ const planProposalSchema = z
         message: "order تکراری در planned",
         path: ["planned"],
     })
-    // aiUnscheduledTaskIds یکتا و ناهم‌پوشان با planned
+    // aiUnscheduledTaskIds یکتا — قید ساختاریِ معتبر (تنها قید این فیلد)
     .refine((v) => new Set(v.aiUnscheduledTaskIds).size === v.aiUnscheduledTaskIds.length, {
         message: "شناسهٔ تکراری در aiUnscheduledTaskIds",
         path: ["aiUnscheduledTaskIds"],
     })
-    .refine(
-        (v) => {
-            const planned = new Set(v.planned.map((i) => i.taskId))
-            return v.aiUnscheduledTaskIds.every((id) => !planned.has(id))
-        },
-        { message: "aiUnscheduledTaskIds نمی‌تواند با planned هم‌پوشانی داشته باشد", path: ["aiUnscheduledTaskIds"] },
-    )
 
 // بدنه‌ی request Apply — dayKey و proposal.basis.dayKey هر دو معتبر و **هم‌روز**،
 // و expectedPlanVersion با basis.planVersion **هم‌ارز** (این‌ها پیش‌شرط تطابق‌اند؛

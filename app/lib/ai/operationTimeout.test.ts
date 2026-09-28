@@ -3,11 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 /* ------------------------------------------------------------------ */
 /* مرحلهٔ ۳ — سقف زمانی کل عملیات (operation-level budget)              */
 /* ------------------------------------------------------------------ */
-/* هدف: وقتی fallback فعال است، «1xAI retries + OpenRouter» نباید از      */
+/* هدف: وقتی fallback فعال است، «OpenRouter retries + 1xai» نباید از        */
 /* تایماوت پلتفرم رد شود.                                                 */
 /*                                                                      */
 /* نکتهٔ کلیدی طراحی: وقتی fallback خاموش است (حالت پیش‌فرض production) */
-/* هیچ سقف کلی ساخته نمی‌شود تا رفتار فعلی 1xAI دست‌نخورده بماند.         */
+/* هیچ سقف کلی ساخته نمی‌شود تا رفتار فعلی provider دست‌نخورده بماند.      */
 /*                                                                      */
 /* چرا هر گروه یک ماژول تازه import می‌کند: مقادیر AI_MAX_ATTEMPTS و */
 /* AI_TIMEOUT_MS و AI_OPERATION_TIMEOUT_MS در سطح ماژول خوانده می‌شوند،   */
@@ -115,7 +115,7 @@ describe("operation timeout — محاسبهٔ بودجه و ایمنی پیش�
 
 /* --- A — success before the deadline --------------------------------- */
 
-describe("A — 1xAI succeeds before the operation deadline", () => {
+describe("A — OpenRouter succeeds before the operation deadline", () => {
     afterEach(globalAfterEach)
 
     it("returns the result and never consults the fallback", async () => {
@@ -130,11 +130,11 @@ describe("A — 1xAI succeeds before the operation deadline", () => {
 
         const result = await client.runAiOperation({ buildMessages: () => MESSAGES })
 
-        expect(result.providerId).toBe("1xai")
+        expect(result.providerId).toBe("openrouter")
         expect(result.fallbackUsed).toBe(false)
         expect(result.content).toBe("پاسخ")
-        expect(oneXaiCalls()).toBe(1)
-        expect(openRouterCalls()).toBe(0)
+        expect(openRouterCalls()).toBe(1)
+        expect(oneXaiCalls()).toBe(0)
     })
 
     it("leaves no pending timers behind on the success path", async () => {
@@ -161,7 +161,7 @@ describe("A — 1xAI succeeds before the operation deadline", () => {
 
 /* --- B — 1xAI times out → retried per policy ------------------------- */
 
-describe("B — 1xAI times out and is retried per policy", () => {
+describe("B — OpenRouter times out and is retried per policy", () => {
     afterEach(globalAfterEach)
 
     it("retries the same provider on a per-attempt timeout", async () => {
@@ -189,13 +189,13 @@ describe("B — 1xAI times out and is retried per policy", () => {
         vi.useFakeTimers()
         try {
             const pending = client.runAiOperation({ buildMessages: () => MESSAGES })
-            const assertion = expect(pending).resolves.toMatchObject({ providerId: "1xai" })
+            const assertion = expect(pending).resolves.toMatchObject({ providerId: "openrouter" })
             // تایماوت تلاش اول (۳ ثانیه) + بک‌اف + تلاش دوم موفق
             await vi.advanceTimersByTimeAsync(5000)
             await assertion
 
-            expect(oneXaiCalls()).toBe(2)
-            expect(openRouterCalls()).toBe(0)
+            expect(openRouterCalls()).toBe(2)
+            expect(oneXaiCalls()).toBe(0)
         } finally {
             vi.useRealTimers()
         }
@@ -233,9 +233,9 @@ describe("C — primary exhausted → fallback still runs inside the budget", ()
 
         const result = await client.runAiOperation({ buildMessages: () => MESSAGES })
 
-        expect(oneXaiCalls()).toBe(3)
-        expect(openRouterCalls()).toBe(1)
-        expect(result.providerId).toBe("openrouter")
+        expect(openRouterCalls()).toBe(3)
+        expect(oneXaiCalls()).toBe(1)
+        expect(result.providerId).toBe("1xai")
         expect(result.fallbackUsed).toBe(true)
     })
 })
@@ -256,7 +256,7 @@ describe("D — the operation deadline expires before fallback starts", () => {
         AI_OPERATION_TIMEOUT_MS: String(TIGHT_BUDGET_MS),
     }
 
-    it("never issues an OpenRouter request once the deadline is spent", async () => {
+    it("never issues a 1xai request once the deadline is spent", async () => {
         const client = await loadClient(tight)
         resetFetch()
         hangUntilAborted()
@@ -268,7 +268,7 @@ describe("D — the operation deadline expires before fallback starts", () => {
             await vi.advanceTimersByTimeAsync(TIGHT_BUDGET_MS)
             await assertion
 
-            expect(openRouterCalls()).toBe(0)
+            expect(oneXaiCalls()).toBe(0)
         } finally {
             vi.useRealTimers()
         }
@@ -303,7 +303,7 @@ describe("D — the operation deadline expires before fallback starts", () => {
             await assertion
 
             expect(urls().length).toBeLessThan(3)
-            expect(urls().every((u) => u.startsWith("https://1xai.ir"))).toBe(true)
+            expect(urls().every((u) => u.startsWith("https://openrouter.ai"))).toBe(true)
         } finally {
             vi.useRealTimers()
         }
@@ -330,7 +330,7 @@ describe("D — the operation deadline expires before fallback starts", () => {
 
 /* --- E — the fallback provider itself times out ---------------------- */
 
-describe("E — OpenRouter times out", () => {
+describe("E — the 1xai fallback itself times out", () => {
     afterEach(globalAfterEach)
 
     it("fails cleanly with the primary error, never with a success", async () => {
@@ -349,11 +349,11 @@ describe("E — OpenRouter times out", () => {
         vi.useFakeTimers()
         try {
             const pending = client.runAiOperation({ buildMessages: () => MESSAGES })
-            const assertion = expect(pending).rejects.toThrow("1xai HTTP 503")
+            const assertion = expect(pending).rejects.toThrow("openrouter HTTP 503")
             await vi.advanceTimersByTimeAsync(5000)
             await assertion
 
-            expect(openRouterCalls()).toBe(1)
+            expect(oneXaiCalls()).toBe(1)
         } finally {
             vi.useRealTimers()
         }
@@ -420,9 +420,9 @@ describe("G — with the fallback flag off, no operation deadline is applied", (
 
         const result = await client.runAiOperation({ buildMessages: () => MESSAGES })
 
-        expect(oneXaiCalls()).toBe(3)
-        expect(openRouterCalls()).toBe(0)
-        expect(result.providerId).toBe("1xai")
+        expect(openRouterCalls()).toBe(3)
+        expect(oneXaiCalls()).toBe(0)
+        expect(result.providerId).toBe("openrouter")
     })
 
     it("never reports a deadline error when the flag is off", async () => {
@@ -441,6 +441,6 @@ describe("G — with the fallback flag off, no operation deadline is applied", (
 
         expect(error).toBeInstanceOf(client.RetryableError)
         expect(error).not.toBeInstanceOf(client.OperationDeadlineError)
-        expect(error.message).toBe("1xai HTTP 503")
+        expect(error.message).toBe("openrouter HTTP 503")
     })
 })

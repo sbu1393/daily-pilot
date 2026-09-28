@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 /* ------------------------------------------------------------------ */
-/* انتخاب provider — قفل ایمنی مرحلهٔ ۱                               */
+/* انتخاب provider — قفل ترتیب معکوس‌شده                              */
 /* ------------------------------------------------------------------ */
-/* این تست عمداً «خاموش نگه‌داشتن fallback» را قفل می‌کند: تا وقتی تصمیمی */
-/* خلاف آن گرفته نشده، production باید فقط 1xai را صدا بزند و وجود کلید  */
-/* OpenRouter نباید هیچ اثری بر provider فعال یا مقصد درخواست بگذارد.   */
+/* قرارداد فعلی: OpenRouter پیش‌فرض است و 1xai فقط fallback. تا وقتی */
+/* fallback خاموش است production باید فقط OpenRouter را صدا بزند و    */
+/* وجود کلید 1xai نباید هیچ اثری بر provider فعال بگذارد.             */
 
 const fetchMock = vi.hoisted(() => vi.fn())
 vi.stubGlobal("fetch", fetchMock)
@@ -37,17 +37,17 @@ describe("provider registry — انتخاب پیش‌فرض", () => {
         clearEnv()
     })
 
-    it("declares 1xai as the default provider id", () => {
-        expect(getDefaultProvider().id).toBe("1xai")
+    it("declares openrouter as the default provider id", () => {
+        expect(getDefaultProvider().id).toBe("openrouter")
     })
 
-    it("resolves the default provider to the 1xai implementation", () => {
-        expect(getDefaultProvider()).toBe(oneXaiProvider)
+    it("resolves the default provider to the OpenRouter implementation", () => {
+        expect(getDefaultProvider()).toBe(openRouterProvider)
     })
 
-    it("keeps providerClient constants sourced from the 1xai defaults", () => {
-        expect(AI_BASE_URL).toBe("https://1xai.ir/v1")
-        expect(AI_MODEL).toBe("gpt-4o-mini")
+    it("keeps providerClient constants sourced from the OpenRouter defaults", () => {
+        expect(AI_BASE_URL).toBe("https://openrouter.ai/api/v1")
+        expect(AI_MODEL).toBe("qwen/qwen3.8-27b:free")
     })
 
     it("registers both providers with unique ids", () => {
@@ -56,14 +56,14 @@ describe("provider registry — انتخاب پیش‌فرض", () => {
         expect(new Set(ids).size).toBe(ids.length)
     })
 
-    it("looks providers up by id and never returns the inactive one as default", () => {
+    it("looks providers up by id and never returns the fallback one as default", () => {
         expect(getProvider("1xai")).toBe(oneXaiProvider)
         expect(getProvider("openrouter")).toBe(openRouterProvider)
-        expect(getProvider("openrouter")).not.toBe(getDefaultProvider())
+        expect(getProvider("1xai")).not.toBe(getDefaultProvider())
     })
 })
 
-describe("provider registry — OpenRouter نباید حتی با کلید فعال شود", () => {
+describe("provider registry — 1xai فقط fallback است و نباید حتی با کلید فعال شود", () => {
     beforeEach(() => {
         vi.clearAllMocks()
         clearEnv()
@@ -73,37 +73,37 @@ describe("provider registry — OpenRouter نباید حتی با کلید فع�
         clearEnv()
     })
 
-    it("stays on 1xai even when an OpenRouter key is present", () => {
-        vi.stubEnv("OPENROUTER_API_KEY", "or-key")
+    it("stays on OpenRouter even when a 1xai key is present", () => {
+        vi.stubEnv("AIXAI_API_KEY", "aixai-key")
 
-        expect(getDefaultProvider().id).toBe("1xai")
-        expect(getDefaultProvider()).toBe(oneXaiProvider)
+        expect(getDefaultProvider().id).toBe("openrouter")
+        expect(getDefaultProvider()).toBe(openRouterProvider)
     })
 
-    it("stays on 1xai even when both keys are present", () => {
+    it("stays on OpenRouter even when both keys are present", () => {
         vi.stubEnv("AIXAI_API_KEY", "aixai-key")
         vi.stubEnv("OPENROUTER_API_KEY", "or-key")
 
-        expect(getDefaultProvider().apiKeyEnv).toBe("AIXAI_API_KEY")
+        expect(getDefaultProvider().apiKeyEnv).toBe("OPENROUTER_API_KEY")
     })
 
-    it("reports the default provider as unconfigured when only the OpenRouter key exists", () => {
-        vi.stubEnv("OPENROUTER_API_KEY", "or-key")
+    it("reports the default provider as unconfigured when only the 1xai key exists", () => {
+        vi.stubEnv("AIXAI_API_KEY", "aixai-key")
 
         expect(getDefaultProvider().isConfigured()).toBe(false)
     })
 
-    it("does not read the OpenRouter key when resolving the default provider config", () => {
-        vi.stubEnv("AIXAI_API_KEY", "aixai-key")
-        vi.stubEnv("OPENROUTER_BASE_URL", "https://should-not-be-used.invalid")
+    it("does not read the 1xai key when resolving the default provider config", () => {
+        vi.stubEnv("OPENROUTER_API_KEY", "or-key")
+        vi.stubEnv("AIXAI_BASE_URL", "https://should-not-be-used.invalid")
 
         const resolved = getDefaultProvider().resolveConfig()
 
-        expect(resolved.baseUrl).toBe("https://1xai.ir/v1")
-        expect(resolved.apiKey).toBe("aixai-key")
+        expect(resolved.baseUrl).toBe("https://openrouter.ai/api/v1")
+        expect(resolved.apiKey).toBe("or-key")
     })
 
-    it("routes every real request to 1xai and never to OpenRouter", async () => {
+    it("routes every real request to OpenRouter and never to 1xai", async () => {
         vi.stubEnv("AIXAI_API_KEY", "aixai-key")
         vi.stubEnv("OPENROUTER_API_KEY", "or-key")
         fetchMock.mockResolvedValue(new Response(PROVIDER_OK, { status: 200 }))
@@ -111,17 +111,17 @@ describe("provider registry — OpenRouter نباید حتی با کلید فع�
         await fetchProviderRaw([{ role: "user", content: "سلام" }])
 
         expect(fetchMock).toHaveBeenCalledTimes(1)
-        expect(fetchMock.mock.calls[0][0]).toBe("https://1xai.ir/v1/chat/completions")
-        expect(fetchMock.mock.calls[0][0]).not.toContain("openrouter")
+        expect(fetchMock.mock.calls[0][0]).toBe("https://openrouter.ai/api/v1/chat/completions")
+        expect(fetchMock.mock.calls[0][0]).not.toContain("1xai")
     })
 
-    it("surfaces the missing 1xai key as a non-retryable error when only OpenRouter is set", async () => {
-        vi.stubEnv("OPENROUTER_API_KEY", "or-key")
+    it("surfaces the missing OpenRouter key as a non-retryable error when only 1xai is set", async () => {
+        vi.stubEnv("AIXAI_API_KEY", "aixai-key")
 
         const error: any = await fetchProviderRaw([{ role: "user", content: "سلام" }]).catch((e) => e)
 
         expect(error).toBeInstanceOf(NonRetryableError)
-        expect(error.message).toBe("AIXAI_API_KEY missing")
+        expect(error.message).toBe("OPENROUTER_API_KEY missing")
         expect(fetchMock).not.toHaveBeenCalled()
     })
 })
@@ -139,7 +139,7 @@ describe("provider registry — هویت کلاس خطا بین لایه‌ها 
     // callerها (analyzeTask/analyzeBatchPlan) با instanceof تصمیم می‌گیرند؛ اگر
     // provider جای دیگری کلاس خطا بسازد، retry semantics بی‌صدا خراب می‌شود.
     it("throws the exact same error class that providerClient re-exports", async () => {
-        vi.stubEnv("AIXAI_API_KEY", "aixai-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "or-key")
         fetchMock.mockResolvedValue(new Response("boom", { status: 400 }))
 
         const error: any = await fetchProviderRaw([{ role: "user", content: "سلام" }]).catch((e) => e)
@@ -150,7 +150,7 @@ describe("provider registry — هویت کلاس خطا بین لایه‌ها 
     })
 
     it("also shares the retryable error class across layers", async () => {
-        vi.stubEnv("AIXAI_API_KEY", "aixai-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "or-key")
         fetchMock.mockResolvedValue(new Response("boom", { status: 503 }))
 
         const error: any = await fetchProviderRaw([{ role: "user", content: "سلام" }]).catch((e) => e)

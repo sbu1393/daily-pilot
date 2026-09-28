@@ -113,7 +113,7 @@ describe("۴.۲ — ماندگاری duration/attempts در AiUsageEvent", () =>
         delete process.env.AIXAI_API_KEY
         delete process.env.OPENROUTER_API_KEY
         delete process.env.AI_ALLOW_FALLBACK
-        vi.stubEnv("AIXAI_API_KEY", "aixai-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "or-key")
     })
     afterEach(() => {
         vi.unstubAllEnvs()

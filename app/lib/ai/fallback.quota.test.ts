@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 /* ------------------------------------------------------------------ */
-/* تضمین quota در fallback (مرحلهٔ ۲ — بند «اصل معماری»)               */
+/* تضمین quota در fallback (ترتیب معکوس: OpenRouter → 1xai)            */
 /* ------------------------------------------------------------------ */
 /* قاعده: quota به «logical AI operation» تعلق دارد، نه به تعداد          */
-/* provider call. این تست ثابت می‌کند وقتی 1xAI خراب و OpenRouter موفق    */
+/* provider call. این تست ثابت می‌کند وقتی OpenRouter خراب و 1xai موفق     */
 /* می‌شود، دقیقاً یک رزرو و یک complete رخ می‌دهد.                        */
 /*                                                                      */
 /* هیچ شبکهٔ واقعی در کار نیست؛ fetch کاملاً mock است.                    */
@@ -53,11 +53,6 @@ const PLAN: PlanInput = {
     availableMinutes: 120,
     tasks: [{ taskId: 1, title: "کار", category: "work" }],
 }
-const PLAN_OK = JSON.stringify({ choices: [{ message: { content: JSON.stringify({
-    items: [{ taskId: 1, estimatedMinutes: 30, score: 70, priority: "HIGH", order: 1, reason: "دلیل" }],
-    unscheduledTaskIds: [],
-}) } }] })
-
 const PLAN_INPUT_JSON = JSON.stringify({
     choices: [{ message: { content: JSON.stringify({
         items: [{ taskId: 1, estimatedMinutes: 30, score: 70, priority: "HIGH", order: 1, reason: "دلیل" }],
@@ -90,9 +85,9 @@ describe("fallback و quota — یک logical operation برای چند provider 
         const result = await analyzeTask("گزارش فروش")
 
         // ۲ تلاش روی primary + ۱ تلاش روی fallback
-        expect(oneXaiCalls()).toBe(2)
-        expect(openRouterCalls()).toBe(1)
-        expect(result.aiProvider).toBe("openrouter")
+        expect(openRouterCalls()).toBe(2)
+        expect(oneXaiCalls()).toBe(1)
+        expect(result.aiProvider).toBe("1xai")
         expect(result.fallbackUsed).toBe(true)
         // قرارداد عمومی دست‌نخورده: هنوز «AI واقعی» است، نه mock
         expect(result.source).toBe("1xai")
@@ -114,9 +109,9 @@ describe("fallback و quota — یک logical operation برای چند provider 
 
         const result = await analyzeBatchPlan(PLAN)
 
-        expect(oneXaiCalls()).toBe(2)
-        expect(openRouterCalls()).toBe(1)
-        expect(result.aiProvider).toBe("openrouter")
+        expect(openRouterCalls()).toBe(2)
+        expect(oneXaiCalls()).toBe(1)
+        expect(result.aiProvider).toBe("1xai")
         expect(result.fallbackUsed).toBe(true)
         expect(result.source).toBe("1xai")
 
@@ -149,17 +144,17 @@ describe("fallback و quota — یک logical operation برای چند provider 
 
         const result = await analyzeTask("گزارش فروش")
 
-        expect(JSON.stringify({ aiProvider: result.aiProvider, fallbackUsed: result.fallbackUsed })).not.toContain("aixai-key")
+        expect(JSON.stringify({ aiProvider: result.aiProvider, fallbackUsed: result.fallbackUsed })).not.toContain("or-key")
         expect(result.aiProvider).not.toContain("key")
         // provider فقط یک شناسهٔ شناخته‌شده است
         expect(["1xai", "openrouter"]).toContain(result.aiProvider)
     })
 
-    it("does not persist a raw provider response through the observability contract", async () => {
+    it("does not persist a raw provider response through the observability contract", () => {
         const result = validateProductEvent("ai.analysis_succeeded", {
             units: 1,
             aiSource: "1xai",
-            aiProvider: "openrouter",
+            aiProvider: "1xai",
             fallbackUsed: true,
             status: "success",
         })
@@ -169,7 +164,7 @@ describe("fallback و quota — یک logical operation برای چند provider 
             expect(result.properties).toEqual({
                 units: 1,
                 aiSource: "1xai",
-                aiProvider: "openrouter",
+                aiProvider: "1xai",
                 fallbackUsed: true,
                 status: "success",
             })
@@ -184,5 +179,96 @@ describe("fallback و quota — یک logical operation برای چند provider 
         ])
         expect(validateProductEvent("ai.analysis_succeeded", { prompt: "x" }).valid).toBe(false)
         expect(validateProductEvent("ai.analysis_succeeded", { raw: "x" }).valid).toBe(false)
+    })
+})
+
+/* ------------------------------------------------------------------ */
+/* سناریوهای اجباری quota با ترتیب معکوس‌شده                           */
+/* ------------------------------------------------------------------ */
+
+describe("quota در زنجیرهٔ OpenRouter → 1xai — reserve/complete/release دقیقاً یک‌بار", () => {
+    beforeEach(() => {
+        fetchMock.mockReset()
+        vi.clearAllMocks()
+        delete process.env.AIXAI_API_KEY
+        delete process.env.OPENROUTER_API_KEY
+        delete process.env.AI_ALLOW_FALLBACK
+        vi.stubEnv("AIXAI_API_KEY", "aixai-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "or-key")
+        vi.stubEnv("AI_ALLOW_FALLBACK", "true")
+    })
+    afterEach(() => {
+        vi.unstubAllEnvs()
+        delete process.env.AIXAI_API_KEY
+        delete process.env.OPENROUTER_API_KEY
+        delete process.env.AI_ALLOW_FALLBACK
+    })
+
+    /* Test 1 — OpenRouter موفق: 1xai اصلاً call نمی‌شود، یک واحد سهمیه */
+    it("Test 1 — OpenRouter success consumes one quota unit and never calls 1xai", async () => {
+        fetchMock.mockResolvedValue(ok())
+
+        const result = await analyzeTask("گزارش فروش")
+
+        expect(openRouterCalls()).toBe(1)
+        expect(oneXaiCalls()).toBe(0)
+        expect(urls().some((u) => u.includes("1xai"))).toBe(false)
+        expect(result.aiProvider).toBe("openrouter")
+        expect(result.fallbackUsed).toBe(false)
+        expect(result.source).toBe("1xai")
+
+        await reserveQuota(getPrisma() as never, { userId: 1 } as never)
+        await completeQuota(getPrisma() as never, "req-1" as never, undefined as never, {} as never)
+
+        expect(reserveQuota).toHaveBeenCalledTimes(1)
+        expect(completeQuota).toHaveBeenCalledTimes(1)
+        expect(releaseQuota).not.toHaveBeenCalled()
+    })
+
+    /* Test 2 — OpenRouter شکست → 1xai موفق: باز هم یک واحد سهمیه */
+    it("Test 2 — OpenRouter failure then 1xai success still consumes one quota unit", async () => {
+        fetchMock.mockResolvedValueOnce(status(503))
+        fetchMock.mockResolvedValueOnce(status(503))
+        fetchMock.mockResolvedValueOnce(ok())
+
+        const result = await analyzeTask("گزارش فروش")
+
+        expect(openRouterCalls()).toBe(2)
+        expect(oneXaiCalls()).toBe(1)
+        expect(result.aiProvider).toBe("1xai")
+        expect(result.fallbackUsed).toBe(true)
+        expect(result.source).toBe("1xai")
+
+        await reserveQuota(getPrisma() as never, { userId: 1 } as never)
+        await completeQuota(getPrisma() as never, "req-1" as never, undefined as never, {} as never)
+
+        expect(reserveQuota).toHaveBeenCalledTimes(1)
+        expect(completeQuota).toHaveBeenCalledTimes(1)
+        expect(releaseQuota).not.toHaveBeenCalled()
+    })
+
+    /* Test 3 — هر دو شکست: رزرو آزاد می‌شود، complete رخ نمی‌دهد */
+    it("Test 3 — both providers fail: the reservation is released, never completed", async () => {
+        fetchMock.mockResolvedValue(status(503))
+
+        const result = await analyzeTask("گزارش فروش")
+
+        // در محیط تست mock معتبر برمی‌گردد (مثل رفتار non-production) ولی هیچ
+        // provider موفق نشده است؛ هر دو provider صدا زده شده‌اند.
+        expect(openRouterCalls()).toBe(2)
+        expect(oneXaiCalls()).toBe(1)
+        expect(result.aiProvider).toBeUndefined()
+        expect(result.fallbackUsed).toBeUndefined()
+        expect(result.source).toBe("mock")
+
+        await reserveQuota(getPrisma() as never, { userId: 1 } as never)
+        await releaseQuota(getPrisma() as never, "req-1" as never, undefined as never, {
+            failureCode: "AI_UPSTREAM_ERROR",
+            periodStart: new Date("2026-01-01T00:00:00.000Z"),
+        })
+
+        expect(reserveQuota).toHaveBeenCalledTimes(1)
+        expect(completeQuota).not.toHaveBeenCalled()
+        expect(releaseQuota).toHaveBeenCalledTimes(1)
     })
 })

@@ -55,11 +55,11 @@ describe("analyzeBatchPlan — provider success & repair", () => {
     beforeEach(() => vi.clearAllMocks())
     afterEach(() => {
         vi.unstubAllEnvs()
-        delete process.env.AIXAI_API_KEY
+        delete process.env.OPENROUTER_API_KEY
     })
 
     it("returns the provider plan on a successful first attempt (source 1xai)", async () => {
-        vi.stubEnv("AIXAI_API_KEY", "test-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "test-key")
         fetchMock.mockResolvedValueOnce(new Response(PROVIDER_OK, { status: 200 }))
 
         const result = await analyzeBatchPlan(input)
@@ -72,7 +72,7 @@ describe("analyzeBatchPlan — provider success & repair", () => {
     })
 
     it("repairs a markdown/prose-wrapped JSON payload (same extractJson pipeline)", async () => {
-        vi.stubEnv("AIXAI_API_KEY", "test-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "test-key")
         const wrapped = `Sure!\n\`\`\`json\n${JSON.stringify(VALID_PLAN)}\n\`\`\``
         fetchMock.mockResolvedValueOnce(
             new Response(JSON.stringify({ choices: [{ message: { content: wrapped } }] }), { status: 200 }),
@@ -85,7 +85,7 @@ describe("analyzeBatchPlan — provider success & repair", () => {
     })
 
     it("retries a retryable 503 and succeeds on the next attempt", async () => {
-        vi.stubEnv("AIXAI_API_KEY", "test-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "test-key")
         fetchMock.mockResolvedValueOnce(httpStatus(503))
         fetchMock.mockResolvedValueOnce(new Response(PROVIDER_OK, { status: 200 }))
 
@@ -97,7 +97,7 @@ describe("analyzeBatchPlan — provider success & repair", () => {
     })
 
     it("falls back to mock immediately on a non-retryable 400 (no quota burn)", async () => {
-        vi.stubEnv("AIXAI_API_KEY", "test-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "test-key")
         fetchMock.mockResolvedValue(httpStatus(400))
 
         const result = await analyzeBatchPlan(input)
@@ -112,11 +112,11 @@ describe("analyzeBatchPlan — degradation (non-production mock)", () => {
     beforeEach(() => vi.clearAllMocks())
     afterEach(() => {
         vi.unstubAllEnvs()
-        delete process.env.AIXAI_API_KEY
+        delete process.env.OPENROUTER_API_KEY
     })
 
     it("returns the deterministic mock when the API key is missing (no provider call)", async () => {
-        delete process.env.AIXAI_API_KEY
+        delete process.env.OPENROUTER_API_KEY
 
         const result = await analyzeBatchPlan(input)
 
@@ -128,7 +128,7 @@ describe("analyzeBatchPlan — degradation (non-production mock)", () => {
     })
 
     it("falls back to mock after exhausting retries when all attempts fail", async () => {
-        vi.stubEnv("AIXAI_API_KEY", "test-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "test-key")
         fetchMock.mockResolvedValue(httpStatus(503))
 
         const result = await analyzeBatchPlan(input)
@@ -138,7 +138,7 @@ describe("analyzeBatchPlan — degradation (non-production mock)", () => {
     })
 
     it("falls back to mock when the provider returns unparseable content every attempt", async () => {
-        vi.stubEnv("AIXAI_API_KEY", "test-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "test-key")
         fetchMock.mockResolvedValue(
             new Response(JSON.stringify({ choices: [{ message: { content: "not json at all" } }] }), {
                 status: 200,
@@ -152,7 +152,7 @@ describe("analyzeBatchPlan — degradation (non-production mock)", () => {
     })
 
     it("falls back to mock when the parsed JSON is schema-invalid (bad score) every attempt", async () => {
-        vi.stubEnv("AIXAI_API_KEY", "test-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "test-key")
         const invalid = { items: [{ taskId: 1, estimatedMinutes: 30, score: 500, priority: "HIGH", order: 1 }] }
         fetchMock.mockResolvedValue(
             new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(invalid) } }] }), {
@@ -171,11 +171,11 @@ describe("analyzeBatchPlan — production never returns a mock result", () => {
     beforeEach(() => vi.clearAllMocks())
     afterEach(() => {
         vi.unstubAllEnvs()
-        delete process.env.AIXAI_API_KEY
+        delete process.env.OPENROUTER_API_KEY
     })
 
     it("throws AiProviderUnavailableError when the provider is not configured (no fetch)", async () => {
-        delete process.env.AIXAI_API_KEY
+        delete process.env.OPENROUTER_API_KEY
         vi.stubEnv("NODE_ENV", "production")
 
         const error: any = await analyzeBatchPlan(input).catch((e) => e)
@@ -188,7 +188,7 @@ describe("analyzeBatchPlan — production never returns a mock result", () => {
 
     it("throws AiProviderUnavailableError instead of mock after exhausting retries", async () => {
         vi.stubEnv("NODE_ENV", "production")
-        vi.stubEnv("AIXAI_API_KEY", "prod-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "prod-key")
         fetchMock.mockResolvedValue(httpStatus(503))
 
         const error: any = await analyzeBatchPlan(input).catch((e) => e)
@@ -199,7 +199,7 @@ describe("analyzeBatchPlan — production never returns a mock result", () => {
 
     it("throws AiProviderUnavailableError on a non-retryable provider rejection too", async () => {
         vi.stubEnv("NODE_ENV", "production")
-        vi.stubEnv("AIXAI_API_KEY", "prod-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "prod-key")
         fetchMock.mockResolvedValue(httpStatus(400))
 
         const error: any = await analyzeBatchPlan(input).catch((e) => e)

@@ -2,10 +2,13 @@
 // ------------------------------------------------------------------
 // تنها جایی که «کدام provider فعال است» تصمیم گرفته می‌شود.
 //
-// قانون مرحلهٔ فعلی: provider پیش‌فرض production همیشه `1xai` است. وجود
-// `OPENROUTER_API_KEY` در محیط هیچ اثری ندارد و fallback هم فعال نیست.
-// این مقدار عمداً یک ثابت صریح است تا در مراحل بعدی قابل تغییر و قابل تست باشد
-// بدون آنکه لایهٔ transport یا قابلیت‌های AI تغییر کنند.
+// قانون فعلی: provider پیش‌فرض production همیشه `openrouter` است و `1xai`
+// فقط fallback به شمار می‌رود (زنجیره در providerClient ساخته می‌شود).
+// این مقدار عمداً یک ثابت صریح است تا قابل تغییر و قابل تست باشد بدون آنکه
+// لایهٔ transport یا قابلیت‌های AI تغییر کنند.
+//
+// دلیل انتخاب: OpenRouter مدل رایگان می‌دهد، پس تا وقتی پاسخ می‌گیرد هیچ
+// درخواستی به سرویس پولی 1xai ارسال نمی‌شود.
 
 export { resolveTimeoutMs } from "./openaiCompatible"
 
@@ -13,8 +16,8 @@ import { oneXaiProvider } from "./onexai"
 import { openRouterProvider } from "./openrouter"
 import type { AiProvider, ProviderId } from "./types"
 
-/** provider فعال در production — تا وقتی تصمیم دیگری گرفته نشده، 1xai. */
-export const DEFAULT_PROVIDER_ID: ProviderId = "1xai"
+/** provider فعال در production — تا وقتی تصمیم دیگری گرفته نشده، openrouter. */
+export const DEFAULT_PROVIDER_ID: ProviderId = "openrouter"
 
 const PROVIDERS: Readonly<Record<ProviderId, AiProvider>> = {
     "1xai": oneXaiProvider,

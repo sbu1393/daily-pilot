@@ -51,8 +51,8 @@ describe("analyzeTask (§7.8 — Failure & Degradation)", () => {
         vi.unstubAllEnvs()
     })
 
-    it("returns clearly-identifiable mock output when AIXAI_API_KEY is missing (no provider call)", async () => {
-        delete process.env.AIXAI_API_KEY
+    it("returns clearly-identifiable mock output when the default provider key is missing (no provider call)", async () => {
+        delete process.env.OPENROUTER_API_KEY
 
         const result = await analyzeTask("گزارش فوری پروژه مشتری")
 
@@ -65,7 +65,7 @@ describe("analyzeTask (§7.8 — Failure & Degradation)", () => {
     })
 
     it("returns the provider analysis on a successful first attempt", async () => {
-        vi.stubEnv("AIXAI_API_KEY", "test-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "test-key")
         fetchMock.mockResolvedValueOnce(new Response(PROVIDER_OK, { status: 200 }))
 
         const result = await analyzeTask("گزارش فروش")
@@ -84,7 +84,7 @@ describe("analyzeTask (§7.8 — Failure & Degradation)", () => {
     })
 
     it("normalizes an unknown/legacy category to the canonical vocabulary", async () => {
-        vi.stubEnv("AIXAI_API_KEY", "test-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "test-key")
         fetchMock.mockResolvedValueOnce(
             new Response(
                 JSON.stringify({
@@ -107,7 +107,7 @@ describe("analyzeTask (§7.8 — Failure & Degradation)", () => {
     })
 
     it("retries a retryable 503 and succeeds on the next attempt", async () => {
-        vi.stubEnv("AIXAI_API_KEY", "test-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "test-key")
         fetchMock.mockResolvedValueOnce(httpStatus(503))
         fetchMock.mockResolvedValueOnce(new Response(PROVIDER_OK, { status: 200 }))
 
@@ -119,7 +119,7 @@ describe("analyzeTask (§7.8 — Failure & Degradation)", () => {
     })
 
     it("falls back to mock immediately on a non-retryable 400 (no quota burn)", async () => {
-        vi.stubEnv("AIXAI_API_KEY", "test-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "test-key")
         fetchMock.mockResolvedValue(httpStatus(400))
 
         const result = await analyzeTask("گزارش فروش")
@@ -130,7 +130,7 @@ describe("analyzeTask (§7.8 — Failure & Degradation)", () => {
     })
 
     it("falls back to mock after exhausting retries when all attempts fail", async () => {
-        vi.stubEnv("AIXAI_API_KEY", "test-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "test-key")
         fetchMock.mockResolvedValue(httpStatus(503))
 
         const result = await analyzeTask("گزارش فروش")
@@ -141,7 +141,7 @@ describe("analyzeTask (§7.8 — Failure & Degradation)", () => {
     })
 
     it("falls back to mock when the provider returns unparseable content on every attempt", async () => {
-        vi.stubEnv("AIXAI_API_KEY", "test-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "test-key")
         fetchMock.mockResolvedValue(new Response(JSON.stringify({
             choices: [{ message: { content: "not json at all" } }],
         }), { status: 200 }))
@@ -164,11 +164,11 @@ describe("analyzeTask — production never returns a mock result (فاز ۱ §۲
     })
     afterEach(() => {
         vi.unstubAllEnvs()
-        delete process.env.AIXAI_API_KEY
+        delete process.env.OPENROUTER_API_KEY
     })
 
     it("throws AiProviderUnavailableError when the provider is not configured (no mock, no fetch)", async () => {
-        delete process.env.AIXAI_API_KEY
+        delete process.env.OPENROUTER_API_KEY
         vi.stubEnv("NODE_ENV", "production")
 
         const error: any = await analyzeTask("گزارش فروش").catch((e) => e)
@@ -181,7 +181,7 @@ describe("analyzeTask — production never returns a mock result (فاز ۱ §۲
 
     it("throws AiProviderUnavailableError instead of mock after exhausting retries", async () => {
         vi.stubEnv("NODE_ENV", "production")
-        vi.stubEnv("AIXAI_API_KEY", "prod-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "prod-key")
         fetchMock.mockResolvedValue(httpStatus(503))
 
         const error: any = await analyzeTask("گزارش فروش").catch((e) => e)
@@ -194,7 +194,7 @@ describe("analyzeTask — production never returns a mock result (فاز ۱ §۲
 
     it("throws AiProviderUnavailableError on a non-retryable provider rejection too", async () => {
         vi.stubEnv("NODE_ENV", "production")
-        vi.stubEnv("AIXAI_API_KEY", "prod-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "prod-key")
         fetchMock.mockResolvedValue(httpStatus(400))
 
         const error: any = await analyzeTask("گزارش فروش").catch((e) => e)

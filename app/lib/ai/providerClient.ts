@@ -14,8 +14,9 @@
 //    retry همان provider شروع می‌شود.
 // 3) خطای قطعیِ خود درخواست (400/404) هرگز fallback نمی‌گیرد.
 //
-// رفتار پیش‌فرض production (بدون تغییر نسبت به قبل از این مرحله):
-// provider = 1xai · fallback خاموش · AI_MAX_ATTEMPTS تلاش · backoff با jitter.
+// رفتار پیش‌فرض production (ترتیب معکوس‌شده):
+// provider = openrouter · fallback = 1xai (فقط با AI_ALLOW_FALLBACK="true")
+// · AI_MAX_ATTEMPTS تلاش · backoff با jitter.
 
 import { getDefaultProvider, getProvider, resolveTimeoutMs, providerFailurePolicy, isOperationDeadlineError, NonRetryableError, OperationDeadlineError, ProviderUnusableError, RetryableError, type ChatMessage, type ProviderId } from "./providers"
 
@@ -23,11 +24,14 @@ import { getDefaultProvider, getProvider, resolveTimeoutMs, providerFailurePolic
 // عمداً صریح تعریف شده؛ تغییر آن یک تصمیم آگاهانه است، نه یک اثر جانبی.
 const DEFAULT_PROVIDER = getDefaultProvider()
 
-// ترتیب قطعی fallback: primary → openrouter. هرگز برعکس.
-const FALLBACK_PROVIDER_ID: ProviderId = "openrouter"
+// ترتیب قطعی fallback: openrouter (primary) → 1xai. هرگز برعکس.
+// دلیل: 1xai سرویس پولی است و تا وقتی OpenRouter پاسخ می‌دهد نباید صدا زده شود.
+const FALLBACK_PROVIDER_ID: ProviderId = "1xai"
 
-export const AI_BASE_URL = process.env.AIXAI_BASE_URL ?? DEFAULT_PROVIDER.defaultBaseUrl
-export const AI_MODEL = process.env.AIXAI_MODEL ?? DEFAULT_PROVIDER.defaultModel
+// ثابت‌های سازگار با provider پیش‌فرض: نام env از خودِ provider خوانده می‌شود تا
+// با تعویض provider (مثلاً openrouter) به‌طور ناخواسته به env یک سرویس دیگر اشاره نکنند.
+export const AI_BASE_URL = process.env[DEFAULT_PROVIDER.baseUrlEnv] ?? DEFAULT_PROVIDER.defaultBaseUrl
+export const AI_MODEL = process.env[DEFAULT_PROVIDER.modelEnv] ?? DEFAULT_PROVIDER.defaultModel
 
 // حداکثر تلاش: پیشفرض ۳ (اول + ۲ تلاش مجدد)
 export const AI_MAX_ATTEMPTS = Math.max(1, Number(process.env.AI_MAX_ATTEMPTS ?? 3))
@@ -147,7 +151,7 @@ export async function runAiOperation<T = string>(options: {
 
     // سقف زمانی کل عملیات فقط وقتی اعمال می‌شود که fallback واقعاً در زنجیره باشد.
     // با پیش‌فرض فعلی (fallback خاموش) این کد اصلاً اجرا نمی‌شود تا semantics
-    // مسیر 1xAI بی‌دلیل تغییر نکند.
+    // مسیر primary بی‌دلیل تغییر نکند.
     const deadlineController = chain.length > 1 ? new AbortController() : null
     const deadlineTimer =
         deadlineController !== null

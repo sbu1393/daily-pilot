@@ -17,6 +17,7 @@ import { attachAiCallTelemetry, startAiCallTimer } from "./aiDuration"
 import { mockBatchPlan } from "./planMock"
 import { parseAiPlanJson } from "./planSchema"
 import { AI_MAX_ATTEMPTS, runAiOperation, type ProviderId } from "./providerClient"
+import { getDefaultProvider } from "./providers"
 import type { PlanAnalysisResult, PlanInput } from "./planContract"
 
 // پرامپت سیستم — AI فقط تحلیل/پیشنهاد می‌دهد و scheduler نهایی نیست (architecture §3.5 / ADR-008).
@@ -86,7 +87,10 @@ export async function analyzeBatchPlan(input: PlanInput): Promise<PlanAnalysisRe
     // mock فقط در non-production مجاز است (سند فاز ۱ §۲ — محیط‌محور)
     const allowMockFallback = process.env.NODE_ENV !== "production"
 
-    if (!process.env.AIXAI_API_KEY) {
+    // کلید provider **پیش‌فرض** (اکنون openrouter) ملاک است، نه یک سرویس خاص.
+    // نام env از خودِ provider خوانده می‌شود تا تعویض ترتیب provider این گارد را
+    // بی‌صدا از کار نیندازد. رفتار fail-closed عیناً حفظ می‌شود.
+    if (!getDefaultProvider().isConfigured()) {
         if (!allowMockFallback) throw new AiProviderUnavailableError()
         return { source: "mock", plan: mockBatchPlan(input), attempts: 0 }
     }

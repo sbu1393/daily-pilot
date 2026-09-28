@@ -1,4 +1,4 @@
-# AI Provider Fallback — 1xAI (primary) → OpenRouter (fallback)
+# AI Provider Fallback — OpenRouter (primary) → 1xAI (fallback)
 
 **Status:** implemented in code, **disabled in production** (`AI_ALLOW_FALLBACK` defaults to off).
 **Scope:** AI transport/orchestration only. No schema, no migration, no change to quota accounting.
@@ -14,10 +14,11 @@ prompts, Zod schemas, repair/contract pipeline.
 
 | Provider | Role | Model | Base URL |
 |---|---|---|---|
-| **1xAI** | primary — the only provider used in normal operation | `gpt-4o-mini` | `https://1xai.ir/v1` |
-| **OpenRouter** | fallback — used **only** after the primary has failed | `qwen/qwen3.8-27b:free` | `https://openrouter.ai/api/v1` |
+| **OpenRouter** | primary — the provider used in normal operation | `qwen/qwen3.8-27b:free` | `https://openrouter.ai/api/v1` |
+| **1xAI** | fallback — used **only** after the primary has failed | `gpt-4o-mini` | `https://1xai.ir/v1` |
 
-The order is fixed and deterministic: `1xAI → OpenRouter`. It is never reversed.
+The order is fixed and deterministic: `OpenRouter → 1xAI`. It is never reversed.
+The goal is cost: while OpenRouter answers, **no request is sent to the paid 1xAI service**.
 Both are OpenAI-compatible, so both use the same `POST /chat/completions` transport.
 
 ---
@@ -28,15 +29,15 @@ All of these are **server-side only**. None of them may ever be exposed to the c
 Copy the names into Settings → Environment (or a local `.env`); fill the values yourself.
 
 ```bash
-# ── Primary provider (existing) ────────────────────────────────────────
-AIXAI_API_KEY=
-# AIXAI_BASE_URL=https://1xai.ir/v1
-# AIXAI_MODEL=gpt-4o-mini
-
-# ── Fallback provider (new, optional) ──────────────────────────────────
+# ── Primary provider ───────────────────────────────────────────────────
 OPENROUTER_API_KEY=
 # OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 # OPENROUTER_MODEL=qwen/qwen3.8-27b:free
+
+# ── Fallback provider (paid; optional) ──────────────────────────────────
+AIXAI_API_KEY=
+# AIXAI_BASE_URL=https://1xai.ir/v1
+# AIXAI_MODEL=gpt-4o-mini
 
 # Optional attribution headers — only sent when set, never hardcoded.
 # OPENROUTER_REFERER=
@@ -62,19 +63,19 @@ AI_ALLOW_FALLBACK=false
 `AI_ALLOW_FALLBACK` is **fail-closed**: only the exact string `"true"` turns fallback on.
 `"1"`, `"TRUE"`, `"yes"`, or a missing value all mean **off**.
 
-With the flag off, behaviour is byte-identical to the pre-fallback implementation:
-1xAI only, `AI_MAX_ATTEMPTS` attempts, no operation-level deadline, same error messages.
+With the flag off, only the primary (OpenRouter) is used, with `AI_MAX_ATTEMPTS`
+attempts and no operation-level deadline.
 
 Two conditions must both hold before a fallback call is ever issued:
 1. the flag is `"true"`, and
-2. `OPENROUTER_API_KEY` is set (otherwise the fallback is simply not in the chain —
+2. `AIXAI_API_KEY` is set (otherwise the fallback is simply not in the chain —
    the primary is unaffected).
 
 ---
 
 ## 4. Fallback policy
 
-| Failure | Retry same provider | Try OpenRouter |
+| Failure | Retry same provider | Try 1xAI |
 |---|---|---|
 | 408 / 429 / 5xx, network error, timeout, empty content | yes, up to its budget | after the budget is spent |
 | 401 / 403, missing API key | no | yes, immediately |
@@ -109,7 +110,7 @@ With the defaults this yields `53000` ms. A malformed value is ignored and the d
 default is used. An explicit value is floored at one full attempt (so the fallback is never
 starved) and capped at 60 s.
 
-Once the budget is spent the operation stops immediately — OpenRouter is **not** called.
+Once the budget is spent the operation stops immediately — 1xAI is **not** called.
 
 ---
 
@@ -127,9 +128,9 @@ so this required **no migration**.
 
 ## 7. Activating in production
 
-1. Add `OPENROUTER_API_KEY` in Settings → Environment.
+1. Add `OPENROUTER_API_KEY` in Settings → Environment (it is now required — the primary).
 2. Optionally set `OPENROUTER_BASE_URL` / `OPENROUTER_MODEL` if the defaults should change.
-3. Start with `AI_ALLOW_FALLBACK=false` and confirm 1xAI-only behaviour is unchanged.
+3. Start with `AI_ALLOW_FALLBACK=false` and confirm OpenRouter-only behaviour is as expected.
 4. Set `AI_ALLOW_FALLBACK=true`, then watch the `fallbackUsed` rate on
    `ai.analysis_succeeded` before leaving it on.
 5. Tune `AI_OPERATION_TIMEOUT_MS` to stay inside the platform's request limit.

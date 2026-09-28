@@ -24,11 +24,11 @@ const httpStatus = (status: number) => new Response("boom", { status })
 describe("providerClient — قرارداد بدون تغییر", () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        vi.stubEnv("AIXAI_API_KEY", "test-key")
+        vi.stubEnv("OPENROUTER_API_KEY", "test-key")
     })
     afterEach(() => {
         vi.unstubAllEnvs()
-        delete process.env.AIXAI_API_KEY
+        delete process.env.OPENROUTER_API_KEY
     })
 
     it("keeps the same retry budget and timeout defaults", () => {

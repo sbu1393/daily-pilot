@@ -1,10 +1,8 @@
-// provider پیش‌فرض production — 1xai (OpenAI-compatible)
+// provider جایگزین production — 1xai (OpenAI-compatible)
 // ------------------------------------------------------------------
-// این provider رفتار قبلی `providerClient` را بدون هیچ تغییری نگه می‌دارد:
-// همان base URL، همان envها، همان مدل، همان endpoint و همان متن خطا.
-//
-// توجه: انتخاب این provider در production در registry (./index) ثابت است و
-// صرفاً وجود داشتن کلید OpenRouter هرگز provider فعال را عوض نمی‌کند.
+// این provider فقط **fallback** است: تا وقتی provider پیش‌فرض (OpenRouter) پاسخ
+// می‌دهد، هیچ درخواستی به این سرویس پولی ارسال نمی‌شود. انتخاب آن در registry
+// (./index) و ترتیب زنجیره در providerClient تعریف شده است.
 
 import { createOpenAiCompatibleProvider } from "./openaiCompatible"
 

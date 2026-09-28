@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest"
 
 import { assertTestDatabase, checkDatabaseUrl, newTestRunId, testMarker } from "./dbTestEnv"
 
-/** URL واقعیِ پروداکشن روزشاز (Neon) — باید همیشه رد شود. */
+/** URL واقعیِ پروداکشن روزساز (Neon) — باید همیشه رد شود. */
 const PROD_URL =
     "postgresql://user:pw@ep-gentle-sky-b1zvg5w5-pooler.c-5.eu-central-1.aws.neon.tech/neondb?sslmode=require"
 

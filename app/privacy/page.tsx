@@ -159,7 +159,7 @@ export default async function PrivacyPage() {
 
                 <p className={styles.footNote}>
                     برای آشنایی با خود سرویس،{" "}
-                    <Link href="/about">چرا روزشاز؟</Link> و{" "}
+                    <Link href="/about">چرا روزساز؟</Link> و{" "}
                     <Link href="/faq">پرسش‌های متداول</Link> را ببینید.
                 </p>
             </main>

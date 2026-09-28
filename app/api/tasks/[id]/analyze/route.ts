@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/app/lib/getCurrentUser"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { isRateLimited } from "@/app/lib/rateLimit"
 import { reanalyzeTask } from "@/app/lib/services/tasks.service"
+import { readAiCallTelemetry, type AiCallTelemetry } from "@/app/lib/ai/aiDuration"
 import { reanalyzeTaskSchema } from "@/app/schema/plannerSchema"
 import { createObservabilityContext } from "@/src/lib/observability/context"
 import { recordError } from "@/src/lib/observability/recordError"
@@ -94,7 +95,13 @@ export async function PATCH(
             throw error
         }
 
-        let result: { task: unknown; aiSource: string }
+        let result: {
+            task: unknown
+            aiSource: string
+            aiProvider?: string
+            fallbackUsed?: boolean
+            aiTelemetry?: AiCallTelemetry
+        }
         try {
             // AI call — خارج از transaction کووتا (سند §10)
             result = await reanalyzeTask(user.id, user.timezone, taskId, textOverride)
@@ -103,15 +110,28 @@ export async function PATCH(
             // فاز ۱ — شکست نهایی provider یک رویداد عملیاتی است و باید failureCode بگیرد؛
             // خطاهای دیگر (مثل TASK_NOT_FOUND) مثل قبل و بدون failureCode آزاد می‌شوند.
             const providerFailure = error instanceof AiProviderUnavailableError ? error : null
+            // مرحلهٔ ۴.۲ — مدت واقعی همان عملیات، از کنارِ خودِ خطا خوانده می‌شود؛
+            // نبودنش یعنی AI اصلاً اجرا نشده (مثلاً TASK_NOT_FOUND) و آن‌وقت
+            // instrumentation هیچ چیز اضافه نمی‌کند.
+            const telemetry = readAiCallTelemetry(error)
             try {
                 if (providerFailure) {
                     // failureCode = همان کد taxonomy که به کلاینت برمی‌گردد (سند §۱۲/§۲۰)
-                    await releaseQuota(prisma, context.requestId, undefined, {
-                        failureCode: providerFailure.code,
-                        periodStart,
-                    })
+                    await releaseQuota(
+                        prisma,
+                        context.requestId,
+                        undefined,
+                        { failureCode: providerFailure.code, periodStart },
+                        telemetry,
+                    )
                 } else {
-                    await releaseQuota(prisma, context.requestId, undefined, { periodStart })
+                    await releaseQuota(
+                        prisma,
+                        context.requestId,
+                        undefined,
+                        { periodStart },
+                        telemetry,
+                    )
                 }
             } catch {
                 // سند §13: release failure → رزرو باقی می‌ماند، event در RESERVED می‌ماند،
@@ -133,7 +153,13 @@ export async function PATCH(
         // موفقیت → complete (سند §11) — روی همان periodStart رزرو
         // P1-5 (سند §21/§32): شکست complete یک infrastructure failure است → ثبت دقیقاً یک‌بار.
         try {
-            await completeQuota(prisma, context.requestId, undefined, { periodStart })
+            await completeQuota(
+                prisma,
+                context.requestId,
+                undefined,
+                { periodStart },
+                result.aiTelemetry,
+            )
         } catch (error) {
             if (error instanceof QuotaUnavailableError) await recordError(error, context)
             throw error
@@ -147,8 +173,15 @@ export async function PATCH(
                 await recordProductEvent(
                     user.id,
                     "ai.analysis_succeeded",
-                    // فقط allowlist گام ۳ — هرگز prompt/response/provider payload/user content (§8)
-                    { units: 1, aiSource: result.aiSource, status: "success" },
+                    // فقط allowlist گام ۳ — هرگز prompt/response/provider payload/user content (§8).
+                    // aiProvider/fallbackUsed فقط شناسهٔ سرویس‌دهنده و یک boolean هستند.
+                    {
+                        units: 1,
+                        aiSource: result.aiSource,
+                        ...(result.aiProvider ? { aiProvider: result.aiProvider } : {}),
+                        ...(result.fallbackUsed !== undefined ? { fallbackUsed: result.fallbackUsed } : {}),
+                        status: "success",
+                    },
                     {
                         requestId: context.requestId,
                         endpoint: "/api/tasks/[id]/analyze",

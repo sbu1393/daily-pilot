@@ -57,8 +57,12 @@ const TASK_ROLLED_OVER = ["taskId", "toDayKey"] as const
 /**
  * ai.analysis_succeeded — فقط متادیتای safe که هم‌اکنون در context در دسترس است.
  * هرگز prompt/response/provider payload/داده‌ی خام AI.
+ *
+ * `aiProvider` و `fallbackUsed` فقط شناسهٔ سرویس‌دهنده و یک boolean هستند (مرحلهٔ ۲
+ * fallback)؛ نه نام دامنه، نه کلید، نه متن پاسخ. `aiSource` بدون تغییر باقی مانده
+ * تا قرارداد عمومی و رکوردهای ذخیره‌شده دست‌نخورده بمانند.
  */
-const AI_ANALYSIS_SUCCEEDED = ["units", "aiSource", "status"] as const
+const AI_ANALYSIS_SUCCEEDED = ["units", "aiSource", "aiProvider", "fallbackUsed", "status"] as const
 
 /** planner.* — هیچ propertyی. */
 const PLANNER_DAY_VIEWED = [] as const

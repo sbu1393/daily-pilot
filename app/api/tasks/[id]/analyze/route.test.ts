@@ -298,6 +298,9 @@ describe("PATCH /api/tasks/[id]/analyze", () => {
             expect.any(String),
             undefined,
             { periodStart: expect.any(Date) },
+            // مرحلهٔ ۴.۲ — آرگومان پنجم telemetry است؛ در این خطا (که پیش از
+            // اجرای AI رخ داده) هیچ مدتی اندازه‌گیری نشده، پس undefined است.
+            undefined,
         )
         expect(mocks.completeQuota).not.toHaveBeenCalled()
     })
@@ -355,6 +358,7 @@ describe("PATCH /api/tasks/[id]/analyze", () => {
             expect.any(String),
             undefined,
             { failureCode: "AI_PROVIDER_UNAVAILABLE", periodStart: expect.any(Date) },
+            undefined,
         )
         // هیچ consumptionی رخ نمی‌دهد
         expect(mocks.completeQuota).not.toHaveBeenCalled()
@@ -400,6 +404,7 @@ describe("PATCH /api/tasks/[id]/analyze", () => {
             expect.any(String),
             undefined,
             { periodStart: expect.any(Date) },
+            undefined,
         )
         expect(mocks.recordError).not.toHaveBeenCalled()
     })

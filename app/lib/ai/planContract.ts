@@ -58,6 +58,17 @@ export type PlanAnalysisResult = {
     plan: AiBatchPlan
     raw?: string
     attempts: number
+    /**
+     * provider مؤثر + آیا fallback رخ داده — فقط برای observability.
+     * اختیاری است تا قرارداد عمومی و همهٔ call siteهای موجود بدون تغییر بمانند.
+     */
+    aiProvider?: string
+    fallbackUsed?: boolean
+    /**
+     * مدت واقعی همین عملیات AI + شمارندهٔ تلاش — فقط برای observability
+     * (مرحلهٔ ۴.۲). اختیاری، پس همهٔ call siteهای موجود بدون تغییر می‌مانند.
+     */
+    aiTelemetry?: import("./aiDuration").AiCallTelemetry
 }
 
 /**

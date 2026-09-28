@@ -1,5 +1,6 @@
 import { getPrisma } from "@/app/lib/getPrisma"
 import { analyzeTask, type AiSource } from "@/app/lib/ai/analyzeTask"
+import { attachAiCallTelemetry, type AiCallTelemetry } from "@/app/lib/ai/aiDuration"
 import {
     ensureDayRebalanced,
     markDayStale,
@@ -371,7 +372,16 @@ export async function reanalyzeTask(
     timezone: string,
     taskId: number,
     textOverride?: string,
-): Promise<{ task: Task; aiSource: AiSource; summary: RebalanceOutput | null }> {
+): Promise<{
+    task: Task
+    aiSource: AiSource
+    /** provider مؤثر + آیا fallback رخ داده — فقط برای observability. */
+    aiProvider?: string
+    fallbackUsed?: boolean
+    /** مدت واقعی عملیات AI + شمارندهٔ تلاش (مرحلهٔ ۴.۲) — فقط برای observability. */
+    aiTelemetry?: AiCallTelemetry
+    summary: RebalanceOutput | null
+}> {
     const prisma = getPrisma()
     const task = await prisma.task.findFirst({ where: { id: taskId, userId } })
     if (!task) throw new TaskNotFoundError()
@@ -389,32 +399,40 @@ export async function reanalyzeTask(
     }
 
     const newText = (textOverride ?? task.title).trim()
-    const { source, analysis } = await analyzeTask(newText)
+    const { source, analysis, aiProvider, fallbackUsed, aiTelemetry } = await analyzeTask(newText)
 
     // A3: Analyze = mutation مؤثر بر برنامه (7.7 Analyze ≠ Rebalance) →
     // روز در همان transaction stale می‌شود؛ بازتوزیع lazy است.
-    const [updated] = await prisma.$transaction([
-        prisma.task.update({
-            where: { id: task.id },
-            data: {
-                title: newText,
-                priority: analysis.priority,
-                score: analysis.score,
-                reason: analysis.reason,
-                category: task.category ?? analysis.category, // قانون 7.5: فقط وقتی null باشد مقداردهی می‌شود
-                estimatedTime: analysis.estimatedMinutes,
-            },
-        }),
-        prisma.dailyPlan.updateMany({
-            where: { userId, dayKey: task.dayKey },
-            data: { planVersion: { increment: 1 } },
-        }),
-        // A2: رویداد ANALYZED در همان transaction (§6.3.6 / 7.12 gap 3)
-        prisma.taskEvent.create({ data: { taskId: task.id, type: "ANALYZED" } }),
-    ])
+    let updated: Task
+    try {
+        ;[updated] = await prisma.$transaction([
+            prisma.task.update({
+                where: { id: task.id },
+                data: {
+                    title: newText,
+                    priority: analysis.priority,
+                    score: analysis.score,
+                    reason: analysis.reason,
+                    category: task.category ?? analysis.category, // قانون 7.5: فقط وقتی null باشد مقداردهی می‌شود
+                    estimatedTime: analysis.estimatedMinutes,
+                },
+            }),
+            prisma.dailyPlan.updateMany({
+                where: { userId, dayKey: task.dayKey },
+                data: { planVersion: { increment: 1 } },
+            }),
+            // A2: رویداد ANALYZED در همان transaction (§6.3.6 / 7.12 gap 3)
+            prisma.taskEvent.create({ data: { taskId: task.id, type: "ANALYZED" } }),
+        ])
+    } catch (error) {
+        // مرحلهٔ ۴.۲ — AI موفق بوده ولی نوشتن DB شکست خورده است. مدت اندازه‌گیری‌شده
+        // بیرون از خودِ شیء خطا نگه داشته می‌شود تا route آن را کنار failureCode
+        // بنویسد؛ خودِ خطا دقیقاً همان شیء قبلی است و رفتار تغییر نمی‌کند.
+        throw attachAiCallTelemetry(error, aiTelemetry)
+    }
 
     // A3: بازتوزیع در زمان mutation اجرا نمی‌شود — read بعدی آن را lazy اجرا می‌کند
-    return { task: updated, aiSource: source, summary: null }
+    return { task: updated, aiSource: source, aiProvider, fallbackUsed, aiTelemetry, summary: null }
 }
 
 // ---------- ویرایش تسک (A1 — کلاس‌های Content و Planning-only، §6.3.5) ----------

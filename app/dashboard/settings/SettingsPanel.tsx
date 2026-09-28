@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "react-toastify"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { AnimatePresence, motion } from "framer-motion"
 import Avatar from "@/app/components/Avatar"
 import AvatarUpload from "@/app/components/AvatarUpload"
@@ -23,6 +24,7 @@ import {
 } from "@/app/lib/pushSubscription"
 import moment from "moment-jalaali"
 import { faDigits } from "@/app/lib/time"
+import { SETTINGS_PRIVACY_PARAGRAPHS } from "@/app/lib/privacyContent"
 import InstallCard from "@/app/components/pwa/InstallCard"
 import styles from "./settings.module.css"
 import { AlarmClock, BellRing, LaptopMinimalCheck, LibraryBig, LockKeyholeOpen, MonitorCog, Moon, Palette, Settings, SunMedium, UserRound } from "lucide-react"
@@ -687,22 +689,20 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                         {infoTab === "privacy" && (
                             <div className={styles.card}>
                                 <h3 className={styles.cardTitle}>سیاست حفظ حریم خصوصی</h3>
-                                <p className={styles.text}>
-                                    اطلاعات حساب شما (نام، ایمیل و تنظیمات) فقط برای ارائه‌ی سرویس برنامه‌ریزی
-                                    استفاده می‌شود و هرگز به اشخاص ثالث فروخته یا واگذار نمی‌شود.
-                                </p>
-                                <p className={styles.text}>
-                                    وظایف روزانه و برنامه‌های شما خصوصی نگه داشته می‌شوند و تنها خودتان به آن‌ها
-                                    دسترسی دارید.
-                                </p>
-                                <p className={styles.text}>
-                                    تنظیمات ظاهر و صدا به‌صورت محلی در مرورگر شما ذخیره می‌شوند و به سرور ارسال
-                                    نمی‌شوند.
-                                </p>
-                                <p className={styles.text}>
-                                    برای هرگونه سؤال درباره‌ی حریم خصوصی، از طریق بخش «انتقادات و پیشنهادات»
-                                    با ما در تماس باشید.
-                                </p>
+                                {/* متن از app/lib/privacyContent.ts خوانده می‌شود تا با صفحه‌ی
+                                    /privacy یکی باشد. این نسخه دو ادعای نادرستِ نسخه‌ی قبلی را
+                                    اصلاح می‌کند: «هرگز به اشخاص ثالث واگذار نمی‌شود» (درست
+                                    نبود — عنوان کار به 1xai.ir و ایمیل به Resend می‌رود) و
+                                    «تنظیمات به سرور ارسال نمی‌شوند» (یادآور روزانه روی سرور
+                                    ذخیره می‌شود تا Push ارسال شود). */}
+                                {SETTINGS_PRIVACY_PARAGRAPHS.map((paragraph) => (
+                                    <p key={paragraph} className={styles.text}>
+                                        {paragraph}
+                                    </p>
+                                ))}
+                                <Link href="/privacy" className={styles.text}>
+                                    متن کامل سیاست حریم خصوصی
+                                </Link>
                             </div>
                         )}
                     </motion.section>

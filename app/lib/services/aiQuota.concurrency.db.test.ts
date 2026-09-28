@@ -30,6 +30,7 @@ import {
     QuotaExceededError,
     QuotaUnavailableError,
 } from "./errors"
+import { assertTestDatabase, testMarker } from "@/app/lib/testing/dbTestEnv"
 
 // --- route imports برای سناریوی production guard §16 باید mock شوند تا ماژول لود شود ---
 // (در production guard هیچ‌کدام از این‌ها فراخوانی نمی‌شوند؛ صرفاً import-time safety)
@@ -37,8 +38,12 @@ vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: vi.fn() }))
 vi.mock("@/app/lib/rateLimit", () => ({ isRateLimited: vi.fn(() => false) }))
 vi.mock("@/app/lib/services/analysis.service", () => ({ runAiSamples: vi.fn() }))
 
-/** marker اختصاصی Phase 1 quota — هرگز به داده‌ی واقعی دست نمی‌زند. */
-const MARKER_EMAIL = "phase1-quota-concurrency-test@quota.internal"
+/**
+ * marker یکتا برای **هر اجرا** — نه یک مقدار ثابت. اگر پروسه‌ای وسط کار قطع
+ * شود، اجرای بعدی با marker تازه به رکورد یتیم برنمی‌خورد و خودش هم نمی‌شکند.
+ */
+const RUN_ID = testMarker("phase1-quota")
+const MARKER_EMAIL = RUN_ID
 const MARKER_USERNAME = "phase1-quota-concurrency-test"
 
 const FREE_ALLOWED_UNITS = 15 // §5
@@ -99,6 +104,10 @@ function codeOf(error: unknown): string | undefined {
 }
 
 beforeAll(async () => {
+    // 🔒 fail-closed: **پیش از هر write** (حتی پیش از connect). روی مقصد
+    // پروداکشن، تست همین‌جا متوقف می‌شود و هیچ رکوردی ساخته نمی‌شود.
+    assertTestDatabase()
+
     prisma = new PrismaClient()
     try {
         await prisma.$queryRaw`SELECT 1`
@@ -109,7 +118,8 @@ beforeAll(async () => {
 
     if (!dbAvailable) return
 
-    // پاک‌سازی باقی‌مانده‌ی اجراهای قبلی (cascade ردیف‌های quota را هم حذف می‌کند)
+    // پاک‌سازی هدفمندِ باقی‌مانده‌ی اجرای قبلی (فقط همین marker — نه پاک‌سازی
+    // عمومی). cascade ردیف‌های quota را هم حذف می‌کند.
     await prisma.user.deleteMany({
         where: { OR: [{ email: MARKER_EMAIL }, { username: MARKER_USERNAME }] },
     })

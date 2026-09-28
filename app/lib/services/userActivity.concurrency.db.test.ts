@@ -15,13 +15,21 @@
 // REAL_POSTGRESQL_UNAVAILABLE fail می‌شود — هرگز سبزِ جعلی یا skip خاموش نیست.
 // اجرای صریح تکی: `npx vitest run app/lib/services/userActivity.concurrency.db.test.ts`
 
-import { afterAll, beforeEach, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { PrismaClient } from "@prisma/client"
 
 import { touchAuthenticatedActivity } from "./userActivity.service"
+import { assertTestDatabase, testMarker } from "@/app/lib/testing/dbTestEnv"
 
-/** فاصله‌ی ایمن از رکوردهای واقعی — پیشوند اختصاصی Step 11. */
-const MARKER_EMAIL = "step11-concurrency-test@concurrency.internal"
+/**
+ * marker یکتا برای **هر اجرا** (نه یک مقدار ثابت).
+ *
+ * چرا: اگر پروسه‌ای وسط کار قطع شود و cleanup اجرا نشود، یک مقدار ثابت باعث
+ * می‌شود اجرای بعدی با `Unique constraint failed` بشکند و رکورد یتیم جمع شود.
+ * با UUID، هر اجرا داده‌ی خودش را دارد و cleanup هم دقیقاً همان را هدف می‌گیرد.
+ */
+const RUN_ID = testMarker("step11")
+const MARKER_EMAIL = RUN_ID
 const MARKER_USERNAME = "step11-concurrency-test"
 
 /**
@@ -33,13 +41,36 @@ const MARKER_USERNAME = "step11-concurrency-test"
 let prisma: PrismaClient
 let dbAvailable = false
 
-beforeEach(async () => {
-    if (!prisma) {
-        prisma = new PrismaClient()
-    }
+beforeAll(async () => {
+    // 🔒 fail-closed: **پیش از هر write** (حتی پیش از connect). اگر DATABASE_URL
+    // به دیتابیس واقعی/پروداکشن اشاره کند، تست همین‌جا و پیش از دست‌زدن به
+    // داده متوقف می‌شود.
+    assertTestDatabase()
+
+    prisma = new PrismaClient()
     try {
         await prisma.$queryRaw`SELECT 1`
         dbAvailable = true
+    } catch {
+        dbAvailable = false
+    }
+
+    if (!dbAvailable) return
+
+    // پاک‌سازی باقی‌مانده‌ی اجرای قبلیِ همین suite (فقط ردیف‌های تستی خودمان).
+    // marker یکتا است، پس این معمولاً هیچ ردیفی را نمی‌بیند؛ وجودش به این دلیل
+    // است که اگر یک اجرای قدیمی با marker ثابت در DB مانده باشد، دست‌کم این
+    // اجرا دوباره شکست نمی‌خورد.
+    await prisma.user.deleteMany({
+        where: { OR: [{ email: MARKER_EMAIL }, { username: MARKER_USERNAME }] },
+    })
+})
+
+beforeEach(async () => {
+    if (!prisma) return
+    if (!dbAvailable) return
+    try {
+        await prisma.$queryRaw`SELECT 1`
     } catch {
         dbAvailable = false
     }

@@ -19,6 +19,7 @@ import { persistError, setRealPersistenceEnabled } from "../persistError"
 import { recordError } from "../recordError"
 import { resolveEnvironment } from "../environment"
 import { QuotaUnavailableError } from "@/app/lib/services/errors"
+import { assertTestDatabase, testMarker } from "@/app/lib/testing/dbTestEnv"
 import type { NormalizedErrorRecord } from "../normalizeError"
 import type { ObservabilityContext } from "../types"
 
@@ -44,7 +45,12 @@ vi.mock("@/app/lib/services/tasks.service", async () => {
     }
 })
 
-const MARKER_EMAIL = "phase2-observability-db-test@observability.internal"
+/**
+ * marker یکتا برای **هر اجرا** — نه یک مقدار ثابت. اگر پروسه‌ای وسط کار قطع
+ * شود، اجرای بعدی با marker تازه شروع می‌شود و با رکورد یتیم برخورد نمی‌کند.
+ */
+const RUN_ID = testMarker("phase2-observability")
+const MARKER_EMAIL = RUN_ID
 const MARKER_USERNAME = "phase2-observability-db-test"
 /** کاربر ناموجود → خطای واقعی DB (FK) در reserveQuota → QUOTA_UNAVAILABLE واقعی در route */
 const NONEXISTENT_USER_ID = 2147483000
@@ -96,6 +102,10 @@ async function rowByRequestId(requestId: string) {
 }
 
 beforeAll(async () => {
+    // 🔒 fail-closed: **پیش از هر write** (حتی پیش از connect). روی مقصد
+    // پروداکشن، تست همین‌جا متوقف می‌شود و هیچ رکوردی ساخته نمی‌شود.
+    assertTestDatabase()
+
     prisma = new PrismaClient()
     try {
         await prisma.$queryRaw`SELECT 1`
@@ -109,7 +119,9 @@ beforeAll(async () => {
     // F10 هر دو مسیر را می‌خواهد: (۱) insert واقعی با create تزریق‌شده، (۲) مسیر default در routeها.
     setRealPersistenceEnabled(true)
 
-    // پاک‌سازی باقی‌مانده‌ی اجراهای قبلی همین suite (هیچ داده‌ی دیگری لمس نمی‌شود)
+    // پاک‌سازی هدفمندِ باقی‌مانده‌ی اجرای قبلی همین suite. دامنه محدود است:
+    // فقط ردیف‌هایی که خودِ این تست می‌سازد (endpoint و requestId با پیشوند
+    // اختصاصی) و کاربرِ همین marker — نه هیچ داده‌ی دیگری.
     await prisma.errorLog.deleteMany({
         where: {
             OR: [{ endpoint: { startsWith: "/api/p2-db" } }, { requestId: { startsWith: "p2-db-" } }],

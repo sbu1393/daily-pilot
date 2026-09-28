@@ -94,12 +94,14 @@
   --primary-2: #a78bfa;
   --primary-soft: rgba(99, 102, 241, .18);
 
-  --ink: #e6edf6;
-  --ink-rgb: 230, 237, 246;
-  --text-strong: #f5f8ff;
-  --ink-2: #c4cfdd;
-  --muted: #9fb2c9;
-  --muted-2: #6b7c95;
+  /* متن اصلی و ثانویه/فرعی روشن‌تر شده تا کنتراست با پس‌زمینه‌ی تیره کافی باشد.
+     پس‌زمینه‌ها (--bg/--surface/--surface-solid/--border/--chip-bg) دست‌نخورده. */
+  --ink: #eef3fa;
+  --ink-rgb: 238, 243, 250;
+  --text-strong: #f8faff;
+  --ink-2: #d3dceb;
+  --muted: #b0c1d6;
+  --muted-2: #8798b0;
   --bg: #0b1222;
   --surface: rgba(15, 22, 42, .82);
   --surface-solid: #111a2e;

@@ -336,8 +336,11 @@
 
 /* ====== موبایل: دکمههای کارت هموزن با آیتمهای ظریف تنظیمات ====== */
 @media (max-width: 640px) {
+    /* دکمه‌ها در موبایل نباید در یک خط فشرده شوند؛ اجازه‌ی شکستن به خطوط بعد
+       + فاصله‌ی کافی بین دکمه‌ها (قبلاً gap به 6px کم می‌شد و دکمه‌ها می‌چسبیدند) */
     .actions {
-        gap: 6px;
+        flex-wrap: wrap;
+        gap: 8px 6px;
     }
 
     .btnPrimary,
@@ -353,6 +356,13 @@
 
     .btnGhost {
         border-width: 1px;
+    }
+
+    /* بدون shrink/nowrap دکمه‌ها دوباره در همان خط له می‌شوند */
+    .actions .btnPrimary,
+    .actions .btnGhost {
+        flex: 0 0 auto;
+        white-space: nowrap;
     }
 
     .lblLong {

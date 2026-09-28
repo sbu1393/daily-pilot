@@ -27,18 +27,62 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/app/lib/services/tasks.service", () => ({ getDayTasks: mocks.getDayTasks }))
 
-// شبکهٔ provider فاکتوری است؛ بقیهٔ خط (prompt → parse → validate) واقعی می‌ماند
-vi.mock("@/app/lib/ai/providerClient", () => ({
-    AI_BASE_URL: "https://test.invalid/v1",
-    AI_MODEL: "test-model",
-    AI_MAX_ATTEMPTS: 1,
-    AI_TIMEOUT_MS: 12000,
-    RetryableError: class RetryableError extends Error {},
-    NonRetryableError: class NonRetryableError extends Error {},
-    fetchProviderRaw: mocks.fetchProviderRaw,
-    retryBackoffMs: () => 0,
-    sleep: async () => {},
-}))
+// شبکهٔ provider فاکتوری است؛ بقیهٔ خط (prompt → parse → validate) واقعی می‌ماند.
+// نکته: analyzeBatchPlan از runAiOperation استفاده می‌کند (fallback orchestration)،
+// پس mock باید همان entry point را ارائه دهد. درون آن، fetchProviderRaw همان seam
+// قدیمی و تنها نقطهٔ فاکتوری‌شدن شبکه باقی می‌ماند تا این تست‌ها تغییر نکنند.
+vi.mock("@/app/lib/ai/providerClient", () => {
+    class RetryableError extends Error {}
+    class NonRetryableError extends Error {}
+    class ProviderUnusableError extends NonRetryableError {}
+
+    return {
+        AI_BASE_URL: "https://test.invalid/v1",
+        AI_MODEL: "test-model",
+        AI_MAX_ATTEMPTS: 1,
+        AI_FALLBACK_MAX_ATTEMPTS: 1,
+        AI_TIMEOUT_MS: 12000,
+        RetryableError,
+        NonRetryableError,
+        ProviderUnusableError,
+        providerFailurePolicy: (error: unknown) =>
+            error instanceof ProviderUnusableError
+                ? "unusable"
+                : error instanceof NonRetryableError
+                  ? "fatal"
+                  : "retry-same-then-fallback",
+        fetchProviderRaw: mocks.fetchProviderRaw,
+        isAiFallbackEnabled: () => false,
+        retryBackoffMs: () => 0,
+        sleep: async () => {},
+        // orchestration ساده و تک‌provider: fallback در این تست وجود ندارد
+        runAiOperation: async ({
+            buildMessages,
+            transform,
+        }: {
+            buildMessages: (attemptNumber: number) => { role: string; content: string }[]
+            transform?: (content: string) => unknown
+        }) => {
+            let lastError: unknown = null
+            for (let attempt = 1; attempt <= 1; attempt++) {
+                try {
+                    const content = await mocks.fetchProviderRaw(buildMessages(attempt))
+                    return {
+                        value: transform ? transform(content) : content,
+                        content,
+                        providerId: "1xai",
+                        attempts: attempt,
+                        fallbackUsed: false,
+                    }
+                } catch (error) {
+                    lastError = error
+                    if (error instanceof NonRetryableError) break
+                }
+            }
+            throw lastError
+        },
+    }
+})
 
 import { getPlanGenerationContext } from "@/app/lib/services/plan.service"
 import { applyPlan } from "@/app/lib/services/planApply.service"

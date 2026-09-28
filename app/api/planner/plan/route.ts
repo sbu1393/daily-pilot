@@ -6,6 +6,7 @@ import { getCanonicalToday } from "@/app/lib/canonicalDay"
 import { planRequestSchema, planProposalSchema } from "@/app/schema/plannerSchema"
 import { getPlanGenerationContext } from "@/app/lib/services/plan.service"
 import { analyzeBatchPlan } from "@/app/lib/ai/analyzeBatchPlan"
+import { readAiCallTelemetry } from "@/app/lib/ai/aiDuration"
 import { validateBatchPlan, type PlanAnalysisResult } from "@/app/lib/ai/planContract"
 import { buildPlanProposal } from "@/app/lib/planner/planProposal"
 import {
@@ -105,14 +106,28 @@ export async function POST(req: NextRequest) {
         } catch (error) {
             // شکست AI → آزادسازی رزرو با همان semantics فعلی (failureCode برای شکست provider)
             const providerFailure = error instanceof AiProviderUnavailableError ? error : null
+            // مرحلهٔ ۴.۲ — مدت واقعی همان عملیات، از کنارِ خودِ خطا خوانده می‌شود
+            const telemetry = readAiCallTelemetry(error)
             try {
                 if (providerFailure) {
-                    await releaseQuota(prisma, context.requestId, undefined, {
-                        failureCode: providerFailure.code,
-                        periodStart,
-                    })
+                    await releaseQuota(
+                        prisma,
+                        context.requestId,
+                        undefined,
+                        {
+                            failureCode: providerFailure.code,
+                            periodStart,
+                        },
+                        telemetry,
+                    )
                 } else {
-                    await releaseQuota(prisma, context.requestId, undefined, { periodStart })
+                    await releaseQuota(
+                        prisma,
+                        context.requestId,
+                        undefined,
+                        { periodStart },
+                        telemetry,
+                    )
                 }
             } catch {
                 // release failure → رزرو باقی می‌ماند، event در RESERVED علامت می‌خورد، fail-closed
@@ -132,10 +147,18 @@ export async function POST(req: NextRequest) {
         if (issues.length > 0) {
             const invalid = new AiPlanInvalidError()
             try {
-                await releaseQuota(prisma, context.requestId, undefined, {
-                    failureCode: invalid.code,
-                    periodStart,
-                })
+                await releaseQuota(
+                    prisma,
+                    context.requestId,
+                    undefined,
+                    {
+                        failureCode: invalid.code,
+                        periodStart,
+                    },
+                    // AI موفق بوده و فقط اعتبارسنجیِ نسبی شکست خورده → مدت همان
+                    // عملیات موفق همراه RELEASED ثبت می‌شود (مرحلهٔ ۴.۲)
+                    aiResult.aiTelemetry,
+                )
             } catch {
                 await markReleaseFailed(prisma, context.requestId)
                 await recordError(new QuotaUnavailableError(), context)
@@ -169,7 +192,14 @@ export async function POST(req: NextRequest) {
         const validated = planProposalSchema.safeParse(proposal)
         if (!validated.success) {
             try {
-                await releaseQuota(prisma, context.requestId, undefined, { periodStart })
+                await releaseQuota(
+                    prisma,
+                    context.requestId,
+                    undefined,
+                    { periodStart },
+                    // AI موفق بوده و فقط گارد producer/consumer شکست خورده
+                    aiResult.aiTelemetry,
+                )
             } catch {
                 await markReleaseFailed(prisma, context.requestId)
                 await recordError(new QuotaUnavailableError(), context)
@@ -182,7 +212,13 @@ export async function POST(req: NextRequest) {
 
         // موفقیت → complete روی همان periodStart رزرو
         try {
-            await completeQuota(prisma, context.requestId, undefined, { periodStart })
+            await completeQuota(
+                prisma,
+                context.requestId,
+                undefined,
+                { periodStart },
+                aiResult.aiTelemetry,
+            )
         } catch (error) {
             if (error instanceof QuotaUnavailableError) await recordError(error, context)
             throw error

@@ -13,9 +13,10 @@
 import { AiProviderUnavailableError } from "@/app/lib/services/errors"
 import { recordError } from "@/src/lib/observability/recordError"
 
+import { attachAiCallTelemetry, startAiCallTimer } from "./aiDuration"
 import { mockBatchPlan } from "./planMock"
 import { parseAiPlanJson } from "./planSchema"
-import { AI_MAX_ATTEMPTS, NonRetryableError, fetchProviderRaw, retryBackoffMs, sleep } from "./providerClient"
+import { AI_MAX_ATTEMPTS, runAiOperation, type ProviderId } from "./providerClient"
 import type { PlanAnalysisResult, PlanInput } from "./planContract"
 
 // پرامپت سیستم — AI فقط تحلیل/پیشنهاد می‌دهد و scheduler نهایی نیست (architecture §3.5 / ADR-008).
@@ -47,6 +48,15 @@ const SYSTEM_PROMPT = `تو «تحلیل‌گر برنامهٔ روزانه» د
 
 const SYSTEM_PROMPT_STRICT = `${SYSTEM_PROMPT}
 هشدار: خروجی قبلی قابل parse یا مطابق ساختار نبود. این بار فقط و فقط یک آبجکت JSON خام و معتبر برگردان؛ بدون توضیح، بدون markdown، بدون کاراکتر اضافه.`
+
+/** پیام‌ها برای یک تلاش — تشدید prompt فقط از تلاش دوم به بعد. */
+const buildMessages = (input: PlanInput, strict: boolean) => [
+    {
+        role: "system",
+        content: strict ? SYSTEM_PROMPT_STRICT : SYSTEM_PROMPT,
+    },
+    { role: "user", content: buildUserMessage(input) },
+]
 
 /** پیام کاربر — فقط دادهٔ لازم برای انتخاب روز/کارها/ظرفیت (بدون داده حساس). */
 function buildUserMessage(input: PlanInput): string {
@@ -81,37 +91,39 @@ export async function analyzeBatchPlan(input: PlanInput): Promise<PlanAnalysisRe
         return { source: "mock", plan: mockBatchPlan(input), attempts: 0 }
     }
 
-    let lastError: unknown = null
+    // مرحلهٔ ۴.۲ — فقط خودِ عملیات provider اندازه‌گیری می‌شود (fail-Open)
+    const stopTimer = startAiCallTimer()
 
-    for (let attemptNumber = 1; attemptNumber <= AI_MAX_ATTEMPTS; attemptNumber++) {
-        try {
-            const raw = await fetchProviderRaw([
-                {
-                    role: "system",
-                    content: attemptNumber > 1 ? SYSTEM_PROMPT_STRICT : SYSTEM_PROMPT,
-                },
-                { role: "user", content: buildUserMessage(input) },
-            ])
+    try {
+        // orchestration مشترک با تحلیل تک‌تسکی — هیچ fallback جداگانه‌ای اینجا نیست
+        const result = await runAiOperation({
+            buildMessages: (attemptNumber) => buildMessages(input, attemptNumber > 1),
             // parseAiPlanJson = extractJson (repair) + zod (strict + cross-field)
-            const plan = parseAiPlanJson(raw)
-            return { source: "1xai", plan, raw, attempts: attemptNumber }
-        } catch (error) {
-            lastError = error
-            if (error instanceof NonRetryableError) break // صرف‌نظر از تلاش مجدد
-            if (attemptNumber < AI_MAX_ATTEMPTS) {
-                await sleep(retryBackoffMs(attemptNumber))
-            }
+            transform: parseAiPlanJson,
+        })
+        return {
+            source: "1xai",
+            plan: result.value,
+            raw: result.content,
+            attempts: result.attempts,
+            aiProvider: result.providerId,
+            fallbackUsed: result.fallbackUsed,
+            aiTelemetry: stopTimer(result.attempts),
+        } as PlanAnalysisResult
+    } catch (error) {
+        // production — شکست نهایی provider هرگز mock/success نیست (سند فاز ۱ §۱۲).
+        // مدت اندازه‌گیری‌شده بیرون از شیء خطا نگه داشته می‌شود تا route آن را
+        // کنار failureCode بنویسد؛ خودِ خطا و کد آن کاملاً دست‌نخورده است.
+        if (!allowMockFallback) {
+            throw attachAiCallTelemetry(new AiProviderUnavailableError(), stopTimer())
         }
+
+        // non-production — همان رفتار تحلیل تک‌تسکی: گزارش امن + mock قطعی
+        await recordError(error, {
+            requestId: "unknown",
+            endpoint: "analyzeBatchPlan",
+            feature: "ai",
+        })
+        return { source: "mock", plan: mockBatchPlan(input), attempts: AI_MAX_ATTEMPTS }
     }
-
-    // production — شکست نهایی provider هرگز mock/success نیست (سند فاز ۱ §۱۲)
-    if (!allowMockFallback) throw new AiProviderUnavailableError()
-
-    // non-production — همان رفتار تحلیل تک‌تسکی: گزارش امن + mock قطعی
-    await recordError(lastError ?? new Error("AI provider unavailable after retries"), {
-        requestId: "unknown",
-        endpoint: "analyzeBatchPlan",
-        feature: "ai",
-    })
-    return { source: "mock", plan: mockBatchPlan(input), attempts: AI_MAX_ATTEMPTS }
 }

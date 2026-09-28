@@ -15,6 +15,8 @@ import {
     QuotaExceededError,
     QuotaUnavailableError,
 } from "./errors"
+import type { AiCallTelemetry } from "@/app/lib/ai/aiDuration"
+
 import {
     assertTransitionAllowed,
     createReservedEvent,
@@ -176,6 +178,8 @@ export async function completeQuota(
     units: number | undefined,
     /** periodStart دقیقِ همان رزرو (اجباری — بدون آن complete مبهم است) */
     options: { periodStart: Date },
+    /** مدت/شمارندهٔ واقعی عملیات AI (مرحلهٔ ۴.۲) — اختیاری و بدون اثر بر منطق */
+    telemetry?: AiCallTelemetry,
 ): Promise<boolean> {
     if (!options?.periodStart) throw new QuotaUnavailableError()
 
@@ -188,7 +192,7 @@ export async function completeQuota(
         return await prisma.$transaction(async (tx: any) => {
             // transition مالکیت aiUsage است (سند §18) — با همان `tx` تراکنش کووتا:
             // read event → conditional event update → (در ادامه) quota-row update
-            const event = await transitionEventToConsumed(tx, requestId)
+            const event = await transitionEventToConsumed(tx, requestId, telemetry)
             if (event === null) return false
 
             const delta = event.units ?? units ?? 0
@@ -235,6 +239,8 @@ export async function releaseQuota(
     units: number | undefined,
     /** periodStart دقیقِ همان رزرو (اجباری) + failureCode اختیاری */
     options: { failureCode?: string; periodStart: Date },
+    /** مدت/شمارندهٔ واقعی عملیات AI (مرحلهٔ ۴.۲) — اختیاری و بدون اثر بر منطق */
+    telemetry?: AiCallTelemetry,
 ): Promise<boolean> {
     if (!options?.periodStart) throw new QuotaUnavailableError()
 
@@ -246,7 +252,12 @@ export async function releaseQuota(
     try {
         return await prisma.$transaction(async (tx: any) => {
             // transition مالکیت aiUsage است (سند §18/§13) — با همان `tx` تراکنش کووتا
-            const event = await transitionEventToReleased(tx, requestId, options.failureCode)
+            const event = await transitionEventToReleased(
+                tx,
+                requestId,
+                options.failureCode,
+                telemetry,
+            )
             if (event === null) return false
 
             const delta = event.units ?? units ?? 0

@@ -10,6 +10,12 @@ vi.hoisted(() => {
     process.env.AI_MAX_ATTEMPTS = "2"
     process.env.AI_TIMEOUT_MS = "3000"
     delete process.env.AIXAI_API_KEY
+    // این فایل پیش از معرفی fallback نوشته شده و زنجیرهٔ provider آن‌وقت تک‌عضوی بود.
+    // اگر این دو کلید از محیط (یا فایل .env) به تست نشت کند، زنجیره یک عضو دوم
+    // می‌گیرد و «تعداد تلاش» در assertهای زیر دیگر معتبر نیست. پس اینجا صریحاً
+    // پاک می‌شوند تا نتیجهٔ تست به محیط ماشین وابسته نباشد.
+    delete process.env.AI_ALLOW_FALLBACK
+    delete process.env.OPENROUTER_API_KEY
 })
 
 const fetchMock = vi.hoisted(() => vi.fn())

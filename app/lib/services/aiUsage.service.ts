@@ -10,11 +10,42 @@
 
 import type { AiUsageEvent, AiUsageEventStatus, PrismaClient } from "@prisma/client"
 
+import type { AiCallTelemetry } from "@/app/lib/ai/aiDuration"
+
 import {
     AiUsageConflictError,
     IdempotencyConflictError,
     QuotaUnavailableError,
 } from "./errors"
+
+/**
+ * instrumentation اختیاری (مرحلهٔ ۴.۲) — فقط دو ستونِ از قبل موجود در مدل
+ * `AiUsageEvent` نوشته می‌شوند:
+ *
+ *   durationMs — مدت واقعی logical AI operation (شامل همهٔ تلاش‌ها و backoffها)
+ *   attempts   — تعداد واقعی provider callها؛ پیش از این مرحله همیشه ۱ بود
+ *
+ * هیچ migration و هیچ تغییر schema در کار نیست. اگر telemetry نبود یا نامعتبر
+ * بود، شیء خالی برمی‌گردد و update دقیقاً مثل قبل اجرا می‌شود.
+ */
+function toTelemetryData(telemetry: AiCallTelemetry | undefined): {
+    durationMs?: number
+    attempts?: number
+} {
+    if (telemetry === undefined || telemetry === null) return {}
+    const data: { durationMs?: number; attempts?: number } = {}
+    if (Number.isFinite(telemetry.durationMs) && telemetry.durationMs >= 0) {
+        data.durationMs = Math.round(telemetry.durationMs)
+    }
+    if (
+        telemetry.attempts !== undefined &&
+        Number.isFinite(telemetry.attempts) &&
+        telemetry.attempts >= 1
+    ) {
+        data.attempts = Math.round(telemetry.attempts)
+    }
+    return data
+}
 
 // تشخیص unique-constraint violation بدون import از @prisma/client runtime (مرز §9.11 — duck-typing)
 function isUniqueViolation(error: unknown): boolean {
@@ -99,6 +130,7 @@ export async function createReservedEvent(
 export async function transitionEventToConsumed(
     client: PrismaClientLike,
     requestId: string,
+    telemetry?: AiCallTelemetry,
 ): Promise<{ units: number; userId: number } | null> {
     try {
         const event = await client.aiUsageEvent.findUnique({
@@ -110,7 +142,7 @@ export async function transitionEventToConsumed(
         // conditional update: فقط اگر هنوز RESERVED باشد — اتمیک، دوباره‌transition ناممکن (سند §11)
         const updated = await client.aiUsageEvent.updateMany({
             where: { requestId, status: "RESERVED" },
-            data: { status: "CONSUMED" },
+            data: { status: "CONSUMED", ...toTelemetryData(telemetry) },
         })
         if (updated.count === 0) return null
 
@@ -134,6 +166,7 @@ export async function transitionEventToReleased(
     client: PrismaClientLike,
     requestId: string,
     failureCode?: string,
+    telemetry?: AiCallTelemetry,
 ): Promise<{ units: number; userId: number } | null> {
     try {
         const event = await client.aiUsageEvent.findUnique({
@@ -148,6 +181,7 @@ export async function transitionEventToReleased(
                 status: "RELEASED",
                 // failureCode فقط وقتی ارائه شده باشد نوشته می‌شود (بدون تغییر رفتار قبلی)
                 ...(failureCode ? { failureCode } : {}),
+                ...toTelemetryData(telemetry),
             },
         })
         if (updated.count === 0) return null

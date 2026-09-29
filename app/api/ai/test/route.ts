@@ -1,13 +1,8 @@
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
-import { getPrisma } from "@/app/lib/getPrisma"
 import { isRateLimited } from "@/app/lib/rateLimit"
 import { runAiSamples } from "@/app/lib/services/analysis.service"
 import { createObservabilityContext } from "@/src/lib/observability/context"
 import { recordError } from "@/src/lib/observability/recordError"
-import { resolvePlanPolicy, getMonthlyPeriod } from "@/app/lib/services/planPolicy.service"
-import { reserveQuota, completeQuota, releaseQuota } from "@/app/lib/services/aiQuota.service"
-import { markReleaseFailed } from "@/app/lib/services/aiUsage.service"
-import { QuotaUnavailableError } from "@/app/lib/services/errors"
 import {
     errorResponse,
     okResponse,
@@ -15,26 +10,35 @@ import {
     unauthorizedResponse,
 } from "@/app/lib/apiResponse"
 
-// فاز ۱ — سند §16:
-// Production → گارد محیط اولین business action است: 404، بدون rate limit/quota/AI.
-// Dev/Staging → rate limit فعلی 1/hour حفظ می‌شود؛ invocation = 3 logical AI operations
-// → reserve = 3 units (all-or-nothing)؛ AI هرگز داخل transaction کووتا نیست.
-
-const AI_TEST_UNITS = 3 // سند §16: invocation برابر ۳ logical AI operation
+// Endpoint تشخیصی داخلی (debug/QA) — **هیچ quota واقعی مصرف نمی‌کند**.
+//
+// تصمیم قطعی: `ai-test` یک قابلیت محصول نیست، پس نه سهمیه‌ای از `AiQuotaPolicy`
+// می‌خواند، نه reservation می‌سازد و نه از ledger (BASE/PROMO) کم می‌کند. دلیل‌ها:
+//  1) در production از همان اولین statement با 404 بسته است و user-facing نیست.
+//  2) UI/caller ندارد و ProductEvent/activity عمداً برایش ثبت نمی‌شود.
+//  3) در dev بدون provider key به mock می‌افتد ⇒ **صفر** AI call واقعی، ولی quota مصرف
+//     می‌کرد؛ یعنی سهمیهٔ کاربر بابت کاری که انجام نشده بود کم می‌شد.
+//  4) `AI_TEST_UNITS = 3` فقط تعداد sampleهای داخلی بود، نه هزینهٔ محصول.
+//
+// در نتیجه V2 دقیقاً همان چهار ترکیب سیاست محصول را نگه می‌دارد:
+//   FREE: ANALYZE=15, PLAN=2   ·   PRO: ANALYZE=270, PLAN=50
+//
+// آنچه عمداً حفظ شده: احراز هویت، rate limit خودِ این endpoint، اجرای sampleها و
+// ثبت خطا. فقط quota حذف شده است.
 
 export async function GET() {
-    // Production guard — اولین business action (سند §16)
+    // Production guard — اولین business action
     if (process.env.NODE_ENV === "production") {
         return errorResponse(404, "NOT_FOUND", "Not found")
     }
 
     const context = createObservabilityContext("/api/ai/test", "ai-test")
     try {
-        // این اندپوینت هر بار چند فراخوانی AI انجام می‌دهد → فقط برای کاربران واردشده
         const user = await getCurrentUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 
+        // rate limit داخلی این endpoint (۱ بار در ساعت برای هر کاربر) — مستقل از quota
         const limited = isRateLimited(
             `ai-test:user:${user.id}`,
             1,
@@ -50,57 +54,12 @@ export async function GET() {
             )
         }
 
-        const prisma = getPrisma()
+        // این endpoint فقط debug است و **نباید** activity تولید کند:
+        // هیچ `touchAuthenticatedActivity` (lastSeenAt) و هیچ ProductEvent این‌جا ثبت
+        // نمی‌شود.
 
-        // فاز ۳ §۶/§۲۵ — این endpoint فقط debug است و **نباید** activity تولید کند:
-        // هیچ `touchAuthenticatedActivity` (lastSeenAt) و هیچ ProductEvent این‌جا ثبت نمی‌شود.
-        // (Phase 1 §17 برای مسیرهای meaningful است؛ این مسیر صراحتاً Exclude شده است.)
-
-        // فاز ۱ — plan policy + period محلی کاربر (سند §۶) + reserve 3 units all-or-nothing (سند §16)
-        const policy = resolvePlanPolicy({ plan: user.plan })
-        const periodStart = getMonthlyPeriod(new Date(), user.timezone).periodStart
-        // P1-5 (سند §19/§20/§21/§32): شکست زیرساخت quota ثبت می‌شود؛
-        // QUOTA_EXCEEDED خطای expected است و هرگز record نمی‌شود.
-        try {
-            await reserveQuota(prisma, {
-                userId: user.id,
-                requestId: context.requestId,
-                allowedUnits: policy.allowedUnits,
-                units: AI_TEST_UNITS,
-                feature: "ai-test",
-                periodStart,
-            })
-        } catch (error) {
-            if (error instanceof QuotaUnavailableError) await recordError(error, context)
-            throw error
-        }
-
-        let results
-        try {
-            // AI calls — خارج از transaction کووتا (سند §10)
-            results = await runAiSamples()
-        } catch (error) {
-            // شکست نهایی → release (سند §12) — روی همان periodStart رزرو
-            try {
-                await releaseQuota(prisma, context.requestId, undefined, { periodStart })
-            } catch {
-                // سند §13/§21: release failure → reservation باقی می‌ماند، event در RESERVED می‌ماند،
-                // failureCode=RELEASE_FAILED برای reconciliation ثبت می‌شود (best-effort، بدون throw) و
-                // observability دقیقاً یک‌بار ثبت می‌کند؛ provider دوباره صدا زده نمی‌شود.
-                await markReleaseFailed(prisma, context.requestId)
-                await recordError(new QuotaUnavailableError(), context)
-                throw new QuotaUnavailableError()
-            }
-            throw error
-        }
-
-        // موفقیت → complete (سند §11) — روی همان periodStart رزرو
-        try {
-            await completeQuota(prisma, context.requestId, undefined, { periodStart })
-        } catch (error) {
-            if (error instanceof QuotaUnavailableError) await recordError(error, context)
-            throw error
-        }
+        // AI callها بدون هیچ رزرو سهمیه‌ای اجرا می‌شوند.
+        const results = await runAiSamples()
 
         // C8 — ADR-04: Envelope استاندارد { ok, data } (§3.11)
         return okResponse(results, { requestId: context.requestId })

@@ -299,7 +299,16 @@ describe("ErrorLog persistence — real PostgreSQL (§7/§14)", () => {
 })
 
 describe("ErrorLog persistence — route integration (§17)", () => {
-    it("QUOTA_UNAVAILABLE: a real quota DB failure in GET /api/ai/test writes exactly one correlated row", async () => {
+    /**
+     * این تست عمداً روی `PATCH /api/tasks/[id]/analyze` است، نه `GET /api/ai/test`.
+     *
+     * دلیل: `ai-test` یک endpoint تشخیصی است و **هیچ quota واقعی مصرف نمی‌کند**،
+     * پس دیگر نمی‌توان از آن برای اثبات ثبت `QUOTA_UNAVAILABLE` استفاده کرد. قرارداد
+     * پایداریِ مورد نظر این تست — «شکست زیرساخت quota دقیقاً یک رکورد همبسته
+     * می‌نویسد، نه دو تا (outer catch نباید تکرار کند)» — کاملاً مستقل از endpoint
+     * است و در `analyze` (که هنوز quota واقعی دارد) همان‌طور که بود حفظ می‌شود.
+     */
+    it("QUOTA_UNAVAILABLE: a real quota DB failure in PATCH /api/tasks/[id]/analyze writes exactly one correlated row", async () => {
         requireDb()
 
         // کاربر موجود نیست → reserveQuota با خطای واقعی DB (FK) fail-closed می‌شود (§19 فاز ۱)
@@ -309,8 +318,14 @@ describe("ErrorLog persistence — route integration (§17)", () => {
             timezone: "Asia/Tehran",
         }
 
-        const { GET } = await import("@/app/api/ai/test/route")
-        const res = await GET()
+        const { PATCH } = await import("@/app/api/tasks/[id]/analyze/route")
+        const req = new Request("http://localhost/api/tasks/1/analyze", {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({}),
+        }) as unknown as NextRequest
+
+        const res = await PATCH(req, { params: Promise.resolve({ id: "1" }) })
 
         expect(res.status).toBe(503)
         const requestId = res.headers.get("X-Request-ID")
@@ -322,7 +337,7 @@ describe("ErrorLog persistence — route integration (§17)", () => {
         expect(rows).toHaveLength(1)
         expect(rows[0]).toMatchObject({
             requestId,
-            endpoint: "/api/ai/test",
+            endpoint: "/api/tasks/[id]/analyze",
             errorCode: "QUOTA_UNAVAILABLE",
             statusCode: 503,
             category: "DATABASE",

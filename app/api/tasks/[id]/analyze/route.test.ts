@@ -19,6 +19,12 @@ const mocks = vi.hoisted(() => ({
     releaseQuota: vi.fn(),
     markReleaseFailed: vi.fn(),
     getPrisma: vi.fn(),
+    // Phase 4 — route دیگر خودش قاعدهٔ cutover را نمی‌خواند؛ `runAiOperation` می‌خواند.
+    readCutoverAt: vi.fn(),
+    reserveBucketQuota: vi.fn(),
+    completeBucketQuota: vi.fn(),
+    releaseBucketQuota: vi.fn(),
+    recordProviderOutcome: vi.fn(),
 }))
 
 vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: mocks.getCurrentUser }))
@@ -36,10 +42,27 @@ vi.mock("@/app/lib/services/aiQuota.service", () => ({
     releaseQuota: mocks.releaseQuota,
 }))
 // D2 — سند §13: علامت‌گذاری release failure باید بدون I/O واقعی قابل assert باشد.
-vi.mock("@/app/lib/services/aiUsage.service", () => ({
+// Phase 4 — `recordProviderOutcome` هم از همین ماژول می‌آید (ثبت provider واقعی).
+vi.mock("@/app/lib/services/aiUsage.service", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/lib/services/aiUsage.service")>()),
     markReleaseFailed: mocks.markReleaseFailed,
+    recordProviderOutcome: mocks.recordProviderOutcome,
 }))
 vi.mock("@/app/lib/getPrisma", () => ({ getPrisma: mocks.getPrisma }))
+// Phase 4 — lifecycle داخل `runAiOperation` است. قاعدهٔ LEGACY/V2 و سرویس‌های
+// ledger جدید mock می‌شوند تا مسیر legacy (رفتار فعلی) تست شود؛ تست‌های اختصاصیِ
+// V2 در `aiOperation.service.test.ts` و `aiQuotaV2.*.test.ts` هستند.
+vi.mock("@/app/lib/services/aiQuotaCutover.service", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/lib/services/aiQuotaCutover.service")>()),
+    // فقط خواندن cutover از DB mock می‌شود؛ خودِ قاعدهٔ LEGACY/NEW واقعی می‌ماند
+    // تا تست، تصمیم دوره را واقعاً بسنجد (نه یک stub که همیشه یکی برمی‌گرداند).
+    readCutoverAt: mocks.readCutoverAt,
+}))
+vi.mock("@/app/lib/services/aiQuotaV2.service", () => ({
+    reserveBucketQuota: mocks.reserveBucketQuota,
+    completeBucketQuota: mocks.completeBucketQuota,
+    releaseBucketQuota: mocks.releaseBucketQuota,
+}))
 // فاز ۱ — سند §۲۱: شکست نهایی provider/release باید در observability ثبت شود (بدون I/O واقعی).
 vi.mock("@/src/lib/observability/recordError", () => ({ recordError: mocks.recordError }))
 // planPolicy واقعی استفاده می‌شود (خالص و بدون DB) — FREE=15/PRO=300 در تست خودش پوشش دارد
@@ -74,6 +97,9 @@ describe("PATCH /api/tasks/[id]/analyze", () => {
         mocks.completeQuota.mockResolvedValue(true)
         mocks.releaseQuota.mockResolvedValue(true)
         mocks.getPrisma.mockReturnValue({})
+        // cutover در آینده ⇒ این دوره LEGACY است (رفتار فعلیِ محصول)
+        mocks.readCutoverAt.mockResolvedValue(new Date("2026-10-01T00:00:00.000Z"))
+        mocks.recordProviderOutcome.mockResolvedValue(true)
     })
 
     it("returns 200 with { ok: true, data: { task, aiSource } } and no summary key (A6)", async () => {

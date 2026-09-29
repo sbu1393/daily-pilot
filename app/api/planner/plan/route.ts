@@ -6,16 +6,9 @@ import { getCanonicalToday } from "@/app/lib/canonicalDay"
 import { planRequestSchema, planProposalSchema } from "@/app/schema/plannerSchema"
 import { getPlanGenerationContext } from "@/app/lib/services/plan.service"
 import { analyzeBatchPlan } from "@/app/lib/ai/analyzeBatchPlan"
-import { readAiCallTelemetry } from "@/app/lib/ai/aiDuration"
-import { validateBatchPlan, type PlanAnalysisResult } from "@/app/lib/ai/planContract"
+import { validateBatchPlan } from "@/app/lib/ai/planContract"
 import { buildPlanProposal } from "@/app/lib/planner/planProposal"
-import {
-    getMonthlyPeriod,
-    resolveFeatureUnits,
-    resolvePlanPolicy,
-} from "@/app/lib/services/planPolicy.service"
-import { reserveQuota, completeQuota, releaseQuota } from "@/app/lib/services/aiQuota.service"
-import { markReleaseFailed } from "@/app/lib/services/aiUsage.service"
+import { runAiOperation } from "@/app/lib/services/aiOperation.service"
 import {
     AiPlanInvalidError,
     AiProviderUnavailableError,
@@ -77,152 +70,94 @@ export async function POST(req: NextRequest) {
         const planContext = await getPlanGenerationContext(user.id, dayKey)
 
         const prisma = getPrisma()
-
-        // plan policy (سقف ماهانه فقط از سرویس) + period محلی کاربر
-        const policy = resolvePlanPolicy({ plan: user.plan })
-        const periodStart = getMonthlyPeriod(new Date(), user.timezone).periodStart
-        // feature="plan": یک تولید کامل پلن = یک عملیات منطقی = ۱ unit (نه per-task)
-        const units = resolveFeatureUnits("plan")
-
-        // quota reserve — اتمیک/idempotent/fail-closed (سند فاز ۱ §۸)
-        try {
-            await reserveQuota(prisma, {
-                userId: user.id,
-                requestId: context.requestId,
-                allowedUnits: policy.allowedUnits,
-                units,
-                feature: "plan",
-                periodStart,
-            })
-        } catch (error) {
-            if (error instanceof QuotaUnavailableError) await recordError(error, context)
-            throw error
-        }
-
-        // AI call — خارج از هر transaction کووتا (سند فاز ۱ §۱۰)
-        let aiResult: PlanAnalysisResult
-        try {
-            aiResult = await analyzeBatchPlan(planContext.input)
-        } catch (error) {
-            // شکست AI → آزادسازی رزرو با همان semantics فعلی (failureCode برای شکست provider)
-            const providerFailure = error instanceof AiProviderUnavailableError ? error : null
-            // مرحلهٔ ۴.۲ — مدت واقعی همان عملیات، از کنارِ خودِ خطا خوانده می‌شود
-            const telemetry = readAiCallTelemetry(error)
-            try {
-                if (providerFailure) {
-                    await releaseQuota(
-                        prisma,
-                        context.requestId,
-                        undefined,
-                        {
-                            failureCode: providerFailure.code,
-                            periodStart,
-                        },
-                        telemetry,
-                    )
-                } else {
-                    await releaseQuota(
-                        prisma,
-                        context.requestId,
-                        undefined,
-                        { periodStart },
-                        telemetry,
-                    )
-                }
-            } catch {
-                // release failure → رزرو باقی می‌ماند، event در RESERVED علامت می‌خورد، fail-closed
-                await markReleaseFailed(prisma, context.requestId)
-                await recordError(new QuotaUnavailableError(), context)
-                throw new QuotaUnavailableError()
-            }
-            if (providerFailure) await recordError(providerFailure, context)
-            throw error
-        }
-
-        // اعتبارسنجی نسبی: هر taskId برگشتی باید در ورودی باشد و همهٔ کارها پوشش داده شوند
-        const issues = validateBatchPlan(
-            aiResult.plan,
-            planContext.input.tasks.map((task) => task.taskId),
-        )
-        if (issues.length > 0) {
-            const invalid = new AiPlanInvalidError()
-            try {
-                await releaseQuota(
-                    prisma,
-                    context.requestId,
-                    undefined,
-                    {
-                        failureCode: invalid.code,
-                        periodStart,
-                    },
-                    // AI موفق بوده و فقط اعتبارسنجیِ نسبی شکست خورده → مدت همان
-                    // عملیات موفق همراه RELEASED ثبت می‌شود (مرحلهٔ ۴.۲)
-                    aiResult.aiTelemetry,
-                )
-            } catch {
-                await markReleaseFailed(prisma, context.requestId)
-                await recordError(new QuotaUnavailableError(), context)
-                throw new QuotaUnavailableError()
-            }
-            await recordError(invalid, context)
-            throw invalid
-        }
-
-        // proposal گذرا — فقط scheduler قطعی می‌سازد؛ هیچ persist/mutation
-        const proposal = buildPlanProposal({
-            dayKey,
-            planVersion: planContext.planVersion,
-            rebalancedVersion: planContext.rebalancedVersion,
-            availableMinutes: planContext.availableMinutes,
-            source: aiResult.source,
-            ai: aiResult.plan,
-            tasks: planContext.suggestionTasks,
-        })
-
-        // ── گاردِ قرارداد producer/consumer ───────────────────────────────────
-        // خروجی buildPlanProposal باید دقیقاً همان schema canonicalِی را پاس کند که
-        // planApplyRequestSchema در فاز Apply اعمال می‌کند. بدون این گارد، producer می‌تواند
-        // proposal‌ای بسازد که **خودِ سیستم** چند دقیقه/چند کلیک بعد آن را با
-        // VALIDATION_ERROR رد می‌کند (کلاسِ bugِ «Apply روی پیشنهادِ معتبر رد می‌شود»).
-        // ناهماهنگی producer/consumer باید همین‌جا در Generate کشف شود، نه در Apply.
+        // ── lifecycle کامل quota در یک نقطه ──────────────────────────────────
+        // `runAiOperation` تنها entry point مجاز است: خودش LEGACY/V2 را انتخاب
+        // می‌کند و reserve → execute → complete/release را اداره می‌کند.
         //
-        // این یک **عیب داخلی** است، نه ورودی نامعتبر کاربر: پس پیام دامنه‌ای به کاربر داده
-        // نمی‌شود و فقط از مسیر عمومیِ catch (500 INTERNAL + recordError) عبور می‌کند —
-        // جزئیاتِ Zod فقط در لاگ سمت سرور می‌ماند.
-        const validated = planProposalSchema.safeParse(proposal)
-        if (!validated.success) {
-            try {
-                await releaseQuota(
-                    prisma,
-                    context.requestId,
-                    undefined,
-                    { periodStart },
-                    // AI موفق بوده و فقط گارد producer/consumer شکست خورده
-                    aiResult.aiTelemetry,
-                )
-            } catch {
-                await markReleaseFailed(prisma, context.requestId)
-                await recordError(new QuotaUnavailableError(), context)
-                throw new QuotaUnavailableError()
-            }
-            // ZodError یک ServiceError نیست → از مسیر عمومی catch به 500 می‌رود و همان‌جا
-            // یک‌بار با context کامل record می‌شود.
-            throw validated.error
-        }
+        // چرا `execute` این‌جا بزرگ است: هر چیزی که **بعد** از AI و **قبل** از
+        // complete می‌افتد باید رزرو را آزاد کند، و این‌ها عمداً داخل همان پنجرهٔ
+        // رزرو هستند:
+        //   • validateBatchPlan → AiPlanInvalidError
+        //   • گارد producer/consumer (planProposalSchema)
+        // بیرون‌کشیدنشان از `execute` باعث می‌شد آن خطاها **بعد از complete** رخ
+        // دهند، یعنی سهمیه‌ای که باید آزاد می‌شد مصرف می‌شد.
+        //
+        // ترتیب: reserve **قبل** از `analyzeBatchPlan` ⇒ هیچ provider call بدون
+        // reservation انجام نمی‌شود.
+        //
+        // failureCode این route با analyze فرق دارد: علاوه بر شکست provider،
+        // شکست اعتبارسنجیِ خروجی AI هم `AI_PLAN_INVALID` ثبت می‌شود (AI پاسخ داده
+        // ولی خروجی‌اش قابل استفاده نبوده). قاعده در خودِ سرویس متمرکز می‌ماند.
+        const { result: proposal } = await runAiOperation({
+            prisma,
+            user,
+            feature: "plan",
+            requestId: context.requestId,
+            releaseFailureCode: (error) => {
+                if (error instanceof AiProviderUnavailableError) return error.code
+                if (error instanceof AiPlanInvalidError) return error.code
+                return undefined
+            },
+            execute: async () => {
+                const aiResult = await analyzeBatchPlan(planContext.input)
 
-        // موفقیت → complete روی همان periodStart رزرو
-        try {
-            await completeQuota(
-                prisma,
-                context.requestId,
-                undefined,
-                { periodStart },
-                aiResult.aiTelemetry,
-            )
-        } catch (error) {
-            if (error instanceof QuotaUnavailableError) await recordError(error, context)
+                // provider/fallback واقعی ثبت می‌شوند (پیش از این wiring هرگز ثبت
+                // نمی‌شدند). `model` عمداً خالی است: لایهٔ AI آن را برنمی‌گرداند.
+                const provider = aiResult.aiProvider
+                    ? { provider: aiResult.aiProvider, fallbackUsed: aiResult.fallbackUsed }
+                    : undefined
+
+                // اعتبارسنجی نسبی: هر taskId برگشتی باید در ورودی باشد و همهٔ کارها پوشش داده شوند
+                const issues = validateBatchPlan(
+                    aiResult.plan,
+                    planContext.input.tasks.map((task) => task.taskId),
+                )
+                if (issues.length > 0) throw new AiPlanInvalidError()
+
+                // proposal گذرا — فقط scheduler قطعی می‌سازد؛ هیچ persist/mutation
+                const built = buildPlanProposal({
+                    dayKey,
+                    planVersion: planContext.planVersion,
+                    rebalancedVersion: planContext.rebalancedVersion,
+                    availableMinutes: planContext.availableMinutes,
+                    source: aiResult.source,
+                    ai: aiResult.plan,
+                    tasks: planContext.suggestionTasks,
+                })
+
+                // ── گاردِ قرارداد producer/consumer ───────────────────────────────
+                // خروجی buildPlanProposal باید دقیقاً همان schema canonicalِی را پاس
+                // کند که planApplyRequestSchema در فاز Apply اعمال می‌کند. بدون این
+                // گارد، producer می‌تواند proposal‌ای بسازد که **خودِ سیستم** چند
+                // دقیقه بعد آن را با VALIDATION_ERROR رد می‌کند (کلاسِ bugِ «Apply روی
+                // پیشنهادِ معتبر رد می‌شود»). ناهماهنگی باید همین‌جا کشف شود.
+                //
+                // یک **عیب داخلی** است، نه ورودی نامعتبر کاربر: پیام دامنه‌ای
+                // نمی‌گیرد و از مسیر عمومیِ catch (500 INTERNAL + recordError) عبور
+                // می‌کند — جزئیات Zod فقط در لاگ سمت سرور می‌ماند.
+                //
+                // ZodErrorServiceError نیست ⇒ `releaseFailureCode` برایش `undefined`
+                // می‌دهد، یعنی release بدون failureCode — عیناً رفتار پیشین.
+                const validated = planProposalSchema.safeParse(built)
+                if (!validated.success) throw validated.error
+
+                return { result: built, telemetry: aiResult.aiTelemetry, provider }
+            },
+        }).catch(async (error: unknown) => {
+            // رزرو آزاد شده (یا اگر آزاد نشد، 503 با markReleaseFailed آمده).
+            // اینجا فقط ثبت observabilityِ همان خطاهایی است که پیش از این wiring
+            // صریحاً record می‌شدند: شکست provider و خروجی نامعتبر AI. بقیهٔ خطاها
+            // (از جمله ZodError) از outer catch عبور می‌کنند و آنجا یک‌بار ثبت
+            // می‌شوند — پس جمعِ recordها دقیقاً یکی می‌ماند.
+            if (
+                error instanceof AiProviderUnavailableError ||
+                error instanceof AiPlanInvalidError ||
+                error instanceof QuotaUnavailableError
+            ) {
+                await recordError(error, context)
+            }
             throw error
-        }
+        })
 
         // ADR-04: { ok, data: proposal }
         return okResponse(proposal, { requestId: context.requestId })

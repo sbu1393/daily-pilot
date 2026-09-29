@@ -22,6 +22,7 @@ const fetchMock = vi.hoisted(() => vi.fn())
 vi.stubGlobal("fetch", fetchMock)
 
 import { AiProviderUnavailableError } from "@/app/lib/services/errors"
+import { pinProviderEnv } from "./testing/pinProviderEnv"
 
 import { analyzeBatchPlan } from "./analyzeBatchPlan"
 import { mockBatchPlan } from "./planMock"
@@ -52,7 +53,10 @@ const PROVIDER_OK = JSON.stringify({
 const httpStatus = (status: number) => new Response("boom", { status })
 
 describe("analyzeBatchPlan — provider success & repair", () => {
-    beforeEach(() => vi.clearAllMocks())
+    beforeEach(() => {
+        vi.clearAllMocks()
+        pinProviderEnv()
+    })
     afterEach(() => {
         vi.unstubAllEnvs()
         delete process.env.OPENROUTER_API_KEY
@@ -109,7 +113,10 @@ describe("analyzeBatchPlan — provider success & repair", () => {
 })
 
 describe("analyzeBatchPlan — degradation (non-production mock)", () => {
-    beforeEach(() => vi.clearAllMocks())
+    beforeEach(() => {
+        vi.clearAllMocks()
+        pinProviderEnv()
+    })
     afterEach(() => {
         vi.unstubAllEnvs()
         delete process.env.OPENROUTER_API_KEY
@@ -168,7 +175,10 @@ describe("analyzeBatchPlan — degradation (non-production mock)", () => {
 })
 
 describe("analyzeBatchPlan — production never returns a mock result", () => {
-    beforeEach(() => vi.clearAllMocks())
+    beforeEach(() => {
+        vi.clearAllMocks()
+        pinProviderEnv()
+    })
     afterEach(() => {
         vi.unstubAllEnvs()
         delete process.env.OPENROUTER_API_KEY

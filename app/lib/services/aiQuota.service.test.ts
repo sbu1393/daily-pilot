@@ -89,7 +89,7 @@ describe("reserveQuota", () => {
         expect(args.data.reservedUnits).toEqual({ increment: 1 })
     })
 
-    it("reserves multiple units (ai-test = 3 units, all-or-nothing)", async () => {
+    it("reserves multiple units all-or-nothing (legacy ledger still supports units > 1)", async () => {
         prisma.aiUsage.findUnique.mockResolvedValue({ reservedUnits: 0, consumedUnits: 0 })
 
         await reserveQuota(prisma, makeInput({ units: 3, allowedUnits: 300 }))

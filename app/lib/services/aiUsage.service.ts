@@ -61,11 +61,33 @@ export type PrismaClientLike = PrismaClient | any
 export interface AiUsageEventInput {
     requestId: string
     userId: number
-    /** نام فیچر مصرف‌کننده (مثلاً "analyze" یا "ai-test") — هرگز شامل داده‌ی کاربر نیست */
+    /** نام فیچر مصرف‌کننده (مثلاً "analyze" یا "plan") — هرگز شامل داده‌ی کاربر نیست */
     feature: string
     units: number
     /** نام مدل provider — اختیاری و فقط متادیتای امن */
     model?: string
+    /**
+     * ── فیلدهای audit نسخهٔ ۲ (تصمیم D5/D6) ──────────────────────────────────
+     * همه اختیاری‌اند تا مسیر legacy دقیقاً مثل قبل کار کند.
+     *
+     * `quotaSource` + `bucketId` با هم می‌آیند/می‌روند (DB CHECK این را تضمین
+     * می‌کند) و می‌گویند مصرف از کدام ledger (BASE یا PROMO) آمده.
+     *
+     * `policyAllowedUnits` snapshot ظرفیت مؤثر در **لحظهٔ رزرو** است. بدون آن،
+     * تغییر ادمینِ سقف وسطِ ماه (مثلاً ۱۵ → ۵) رکوردهای قبلی را غیرقابل‌تفسیر
+     * می‌کرد؛ با آن، audit می‌تواند بگوید هر عملیات زیر چه ظرفیتی مجاز بوده.
+     */
+    quotaSource?: "BASE" | "PROMO" | null
+    policyAllowedUnits?: number | null
+    bucketId?: number | null
+}
+
+/** متادیتای واقعی provider که **بعد** از اجرای AI معلوم می‌شود (تصمیم D6). */
+export interface ProviderOutcome {
+    /** شناسه‌ی provider واقعاً استفاده‌شده — هرگز hard-code (مثلاً "1xai") */
+    provider: string
+    model?: string | null
+    fallbackUsed?: boolean | null
 }
 
 /**
@@ -105,6 +127,9 @@ export async function createReservedEvent(
                 units: input.units,
                 status: "RESERVED",
                 attempts: 1,
+                quotaSource: input.quotaSource ?? null,
+                policyAllowedUnits: input.policyAllowedUnits ?? null,
+                bucketId: input.bucketId ?? null,
             },
         })
     } catch (error) {
@@ -116,6 +141,36 @@ export async function createReservedEvent(
 }
 
 /**
+ * ثبت provider/model/fallback **واقعی** روی همان رویداد (تصمیم D6).
+ *
+ * چرا جدا از reserve: در لحظهٔ رزرو هنوز provider صدا زده نشده و معلوم نیست
+ * fallback رخ می‌دهد یا نه. پس نتیجهٔ واقعی provider client بعداً روی همان
+ * `requestId` نوشته می‌شود. `null` باقی ماندن یعنی «provider نهایی ثبت نشد» که
+ * برای عملیات‌های mock/بدون AI قابل استناد است.
+ *
+ * best-effort: هیچ‌وقت throw نمی‌کند و نتیجهٔ AI را خراب نمی‌کند.
+ */
+export async function recordProviderOutcome(
+    prisma: PrismaClientLike,
+    requestId: string,
+    outcome: ProviderOutcome,
+): Promise<boolean> {
+    try {
+        const result = await prisma.aiUsageEvent.updateMany({
+            where: { requestId },
+            data: {
+                provider: outcome.provider,
+                model: outcome.model ?? null,
+                fallbackUsed: outcome.fallbackUsed ?? null,
+            },
+        })
+        return result.count > 0
+    } catch {
+        return false
+    }
+}
+
+/**
  * transitionEventToConsumed — RESERVED → CONSUMED و بازگرداندن هویت event (سند §11/§18).
  *
  * مالکیت state transition طبق §18 در همین سرویس است؛ aiQuota فقط orchestration و mutation
@@ -123,19 +178,20 @@ export async function createReservedEvent(
  * (همان ترتیبی که قبلاً در aiQuota اجرا می‌شد) تا رفتار تراکنشی/rollback تغییر نکند.
  *
  * @param client کلاینت Prisma یا `tx` همان transaction کووتا (در مسیر تراکنشی هرگز root prisma)
- * @returns `{ units, userId }` اگر transition انجام شد؛ `null` اگر event نبود یا دیگر RESERVED نبود
- *          (تشخیص idempotent/conflict در لایه‌ی aiQuota است)
+ * @returns `{ units, userId, bucketId }` اگر transition انجام شد؛ `null` اگر event نبود یا دیگر RESERVED نبود
+ *          (تشخیص idempotent/conflict در لایه‌ی aiQuota است). `bucketId` برای ledger نسخهٔ ۲
+ *          (BASE/PROMO) لازم است و در مسیر legacy `null` می‌ماند.
  * @throws QuotaUnavailableError در خطای DB (fail-closed) — بدون افشای خطای خام
  */
 export async function transitionEventToConsumed(
     client: PrismaClientLike,
     requestId: string,
     telemetry?: AiCallTelemetry,
-): Promise<{ units: number; userId: number } | null> {
+): Promise<{ units: number; userId: number; bucketId: number | null } | null> {
     try {
         const event = await client.aiUsageEvent.findUnique({
             where: { requestId },
-            select: { units: true, userId: true },
+            select: { units: true, userId: true, bucketId: true },
         })
         if (!event) return null
 
@@ -146,7 +202,7 @@ export async function transitionEventToConsumed(
         })
         if (updated.count === 0) return null
 
-        return { units: event.units, userId: event.userId }
+        return { units: event.units, userId: event.userId, bucketId: event.bucketId }
     } catch (error) {
         throw new QuotaUnavailableError()
     }
@@ -159,7 +215,7 @@ export async function transitionEventToConsumed(
  * همان failureCode موفقِ provider یا RELEASE_FAILED در همین transition می‌نشیند.
  *
  * @param client کلاینت Prisma یا `tx` همان transaction کووتا (در مسیر تراکنشی هرگز root prisma)
- * @returns `{ units, userId }` اگر transition انجام شد؛ `null` اگر event نبود یا دیگر RESERVED نبود
+ * @returns `{ units, userId, bucketId }` اگر transition انجام شد؛ `null` اگر event نبود یا دیگر RESERVED نبود
  * @throws QuotaUnavailableError در خطای DB (fail-closed) — بدون افشای خطای خام
  */
 export async function transitionEventToReleased(
@@ -167,11 +223,11 @@ export async function transitionEventToReleased(
     requestId: string,
     failureCode?: string,
     telemetry?: AiCallTelemetry,
-): Promise<{ units: number; userId: number } | null> {
+): Promise<{ units: number; userId: number; bucketId: number | null } | null> {
     try {
         const event = await client.aiUsageEvent.findUnique({
             where: { requestId },
-            select: { units: true, userId: true },
+            select: { units: true, userId: true, bucketId: true },
         })
         if (!event) return null
 
@@ -186,7 +242,7 @@ export async function transitionEventToReleased(
         })
         if (updated.count === 0) return null
 
-        return { units: event.units, userId: event.userId }
+        return { units: event.units, userId: event.userId, bucketId: event.bucketId }
     } catch (error) {
         throw new QuotaUnavailableError()
     }

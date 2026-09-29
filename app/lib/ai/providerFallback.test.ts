@@ -29,6 +29,14 @@ import {
 const MESSAGES = [{ role: "user", content: "سلام" }]
 const OK = JSON.stringify({ choices: [{ message: { content: "پاسخ" } }] })
 const ok = () => new Response(OK, { status: 200 })
+/**
+ * پاسخ ۲۰۰ **تازه** برای هر فراخوانی.
+ *
+ * یک `Response` فقط یک‌بار خوانده می‌شود؛ اگر همان شیء برای همه‌ی callها برگردد،
+ * فراخوانی دوم با «Body is unusable» شکست می‌خورد و در عمل داریم transport را
+ * به‌جای parse می‌آزماییم. برای سناریوی «parse خراب» حتماً از این استفاده کن.
+ */
+const okEachTime = () => vi.fn(() => new Response(OK, { status: 200 }))
 const status = (code: number) => new Response("boom", { status: code })
 
 /** پاسخ 200 که محتوای خالی دارد → خطای «empty content» (قابل تلاش مجدد). */
@@ -468,5 +476,142 @@ describe("سناریوهای اجباری — OpenRouter پیش‌فرض، 1xai 
             fallbackUsed: true,
             content: "پاسخ",
         })
+    })
+})
+
+/* ================================================================== */
+/*  باگ‌های تأییدشده‌ی providerClient:                                 */
+/*   A) `attempts` دوبار شمرده می‌شد (یک‌بار قبل از complete، یک‌بار در  */
+/*      catch) ⇒ گزارش نادرست از تعداد واقعی call.                      */
+/*   B) خطای parse/transform زنجیره را به provider بعدی می‌برد ⇒ یک    */
+/*      خطای محلیِ schema می‌توانست provider پولی را هم صدا بزند.       */
+/* ================================================================== */
+
+describe("A — attempts = تعداد واقعی provider call", () => {
+    beforeEach(setup)
+    afterEach(teardown)
+
+    it("موفقیت در اولین تلاش ⇒ attempts = 1", async () => {
+        fetchMock.mockResolvedValueOnce(ok())
+
+        const result = await rawOperation()
+
+        expect(result.attempts).toBe(1)
+        expect(openRouterCalls()).toBe(1)
+    })
+
+    it("یک خطای transport + یک موفقیت ⇒ attempts = 2 (نه ۳)", async () => {
+        fetchMock.mockResolvedValueOnce(status(503))
+        fetchMock.mockResolvedValueOnce(ok())
+
+        const result = await rawOperation()
+
+        expect(result.attempts).toBe(2)
+        expect(openRouterCalls()).toBe(2)
+    })
+
+    it("parse failure با retry ⇒ attempts = تعداد واقعی call، نه دوبرابر", async () => {
+        // HTTP 200 ولی transform همیشه throw می‌کند. AI_MAX_ATTEMPTS = 2.
+        fetchMock.mockImplementation(okEachTime())
+        const parseError = new Error("schema mismatch")
+
+        const error: any = await runAiOperation({
+            buildMessages: () => MESSAGES,
+            transform: () => {
+                throw parseError
+            },
+        }).catch((e) => e)
+
+        // ۲ call واقعی انجام شده، ۴ بار شمرده نمی‌شود
+        expect(openRouterCalls()).toBe(2)
+        expect(error).toBe(parseError)
+    })
+
+    it("fallback به provider دوم ⇒ attempts = مجموع واقعی هر دو provider", async () => {
+        // ۲ خطای transport روی primary (سقف retry خودش) + ۱ موفقیت روی 1xai
+        fetchMock.mockResolvedValueOnce(status(503))
+        fetchMock.mockResolvedValueOnce(status(503))
+        fetchMock.mockResolvedValueOnce(ok())
+
+        const result = await rawOperation()
+
+        expect(result.fallbackUsed).toBe(true)
+        expect(result.providerId).toBe("1xai")
+        expect(openRouterCalls()).toBe(2)
+        expect(oneXaiCalls()).toBe(1)
+        expect(result.attempts).toBe(3)
+    })
+})
+
+describe("B — خطای parse/schema هرگز fallback نمی‌گیرد", () => {
+    beforeEach(setup)
+    afterEach(teardown)
+
+    /** عملیاتی که transform آن همیشه شکست می‌خورد. */
+    const failingParse = () => {
+        const parseError = new Error("ZodError: expected object, received null")
+        return runAiOperation({
+            buildMessages: () => MESSAGES,
+            transform: () => {
+                throw parseError
+            },
+        })
+    }
+
+    it("provider دوم صفر بار صدا زده می‌شود، حتی وقتی fallback فعال است", async () => {
+        // fallback از قبل توسط setup روشن است؛ فقط تأکید می‌کنیم که مسیر fallback
+        // واقعاً در زنجیره حاضر است.
+        expect(isAiFallbackEnabled()).toBe(true)
+        fetchMock.mockImplementation(okEachTime()) // هر call در سطح HTTP موفق
+
+        const error: any = await failingParse().catch((e) => e)
+
+        // retryهای primary طبق policy انجام شده‌اند (AI_MAX_ATTEMPTS = 2)
+        expect(openRouterCalls()).toBe(2)
+        // ولی provider پولی **هیچ‌بار** صدا زده نشده
+        expect(oneXaiCalls()).toBe(0)
+        // و خطای نهایی همان parse error است، نه خطای provider دوم
+        expect(error).toBeInstanceOf(Error)
+        expect(error.message).toBe("ZodError: expected object, received null")
+    })
+
+    it("خطای نهایی همان parse error است، حتی اگر primary چند خطای transport هم داشته باشد", async () => {
+        const parseError = new Error("transform boom")
+        fetchMock.mockResolvedValueOnce(status(503)) // retryable
+        fetchMock.mockResolvedValueOnce(ok()) // HTTP ok ولی parse خراب
+
+        const error: any = await runAiOperation({
+            buildMessages: () => MESSAGES,
+            transform: () => {
+                throw parseError
+            },
+        }).catch((e) => e)
+
+        expect(error).toBe(parseError)
+        expect(oneXaiCalls()).toBe(0)
+        expect(openRouterCalls()).toBe(2)
+    })
+
+    it("خطای transport همچنان fallback می‌گیرد (رفتار موجود تغییری نکرده)", async () => {
+        fetchMock.mockResolvedValueOnce(status(503))
+        fetchMock.mockResolvedValueOnce(status(503))
+        fetchMock.mockResolvedValueOnce(ok())
+
+        const result = await rawOperation()
+
+        expect(result.fallbackUsed).toBe(true)
+        expect(oneXaiCalls()).toBe(1)
+    })
+
+    it("parse failure روی provider دوم هم زنجیره را تمدید نمی‌کند (provider سومی نیست)", async () => {
+        fetchMock.mockResolvedValueOnce(status(503))
+        fetchMock.mockResolvedValueOnce(status(503))
+        fetchMock.mockResolvedValueOnce(ok()) // 1xai پاسخ داد ولی parse خراب است
+
+        const error: any = await failingParse().catch((e) => e)
+
+        expect(error).toBeInstanceOf(Error)
+        expect(openRouterCalls()).toBe(2)
+        expect(oneXaiCalls()).toBe(1) // fallback اجازه داشت؛ parse دوباره جلوی آن را نگرفت
     })
 })

@@ -98,11 +98,14 @@ export async function analyzeTask(text: string): Promise<AiResult> {
             aiTelemetry: stopTimer(result.attempts),
         }
     } catch (error) {
-        // production — سند §۱۲: شکست نهایی provider هرگز mock/success نیست.
-        // مدت اندازه‌گیری‌شده به خطا می‌چسبد (بیرون از خودِ شیء خطا) تا route
-        // بتواند آن را کنار failureCode بنویسد؛ خودِ خطا دست‌نخورده می‌ماند.
-        if (!allowMockFallback) {
-            throw attachAiCallTelemetry(new AiProviderUnavailableError(), stopTimer())
+    console.error("[AI_PROVIDER_FAILURE]", {
+        name: error instanceof Error ? error.name : typeof error,
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+    })
+
+    if (!allowMockFallback) {
+        throw attachAiCallTelemetry(new AiProviderUnavailableError(), stopTimer())
         }
 
         // فاز ۲ — سند §17: لاگ خام console در این محل حذف شد و شکست از همان boundary

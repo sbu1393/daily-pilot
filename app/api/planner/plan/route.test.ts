@@ -20,6 +20,12 @@ const mocks = vi.hoisted(() => ({
     releaseQuota: vi.fn(),
     markReleaseFailed: vi.fn(),
     recordError: vi.fn(),
+    // Phase 4 — قاعدهٔ cutover و ledger جدید داخل `runAiOperation` خوانده می‌شوند.
+    readCutoverAt: vi.fn(),
+    reserveBucketQuota: vi.fn(),
+    completeBucketQuota: vi.fn(),
+    releaseBucketQuota: vi.fn(),
+    recordProviderOutcome: vi.fn(),
 }))
 
 vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: mocks.getCurrentUser }))
@@ -38,7 +44,20 @@ vi.mock("@/app/lib/services/aiQuota.service", () => ({
     completeQuota: mocks.completeQuota,
     releaseQuota: mocks.releaseQuota,
 }))
-vi.mock("@/app/lib/services/aiUsage.service", () => ({ markReleaseFailed: mocks.markReleaseFailed }))
+vi.mock("@/app/lib/services/aiQuotaCutover.service", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/lib/services/aiQuotaCutover.service")>()),
+    readCutoverAt: mocks.readCutoverAt,
+}))
+vi.mock("@/app/lib/services/aiQuotaV2.service", () => ({
+    reserveBucketQuota: mocks.reserveBucketQuota,
+    completeBucketQuota: mocks.completeBucketQuota,
+    releaseBucketQuota: mocks.releaseBucketQuota,
+}))
+vi.mock("@/app/lib/services/aiUsage.service", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/lib/services/aiUsage.service")>()),
+    markReleaseFailed: mocks.markReleaseFailed,
+    recordProviderOutcome: mocks.recordProviderOutcome,
+}))
 vi.mock("@/src/lib/observability/recordError", () => ({ recordError: mocks.recordError }))
 
 import { POST } from "./route"
@@ -106,6 +125,9 @@ describe("POST /api/planner/plan", () => {
         mocks.releaseQuota.mockResolvedValue(true)
         mocks.markReleaseFailed.mockResolvedValue(true)
         mocks.recordError.mockResolvedValue(undefined)
+        // cutover در آینده ⇒ این دوره LEGACY است (رفتار فعلیِ محصول)
+        mocks.readCutoverAt.mockResolvedValue(new Date("2026-10-01T00:00:00.000Z"))
+        mocks.recordProviderOutcome.mockResolvedValue(true)
     })
 
     it("returns a valid ephemeral proposal with basis/source and no mutation", async () => {
@@ -340,6 +362,9 @@ describe("POST /api/planner/plan — concurrent Generate", () => {
         mocks.releaseQuota.mockResolvedValue(true)
         mocks.markReleaseFailed.mockResolvedValue(true)
         mocks.recordError.mockResolvedValue(undefined)
+        // cutover در آینده ⇒ این دوره LEGACY است (رفتار فعلیِ محصول)
+        mocks.readCutoverAt.mockResolvedValue(new Date("2026-10-01T00:00:00.000Z"))
+        mocks.recordProviderOutcome.mockResolvedValue(true)
     })
 
     it("handles two simultaneous Generate calls as two independent, fully-quota'd proposals", async () => {
@@ -462,6 +487,9 @@ describe("POST /api/planner/plan — validates its own output against the canoni
         mocks.releaseQuota.mockResolvedValue(true)
         mocks.markReleaseFailed.mockResolvedValue(true)
         mocks.recordError.mockResolvedValue(undefined)
+        // cutover در آینده ⇒ این دوره LEGACY است (رفتار فعلیِ محصول)
+        mocks.readCutoverAt.mockResolvedValue(new Date("2026-10-01T00:00:00.000Z"))
+        mocks.recordProviderOutcome.mockResolvedValue(true)
     })
 
     it("returns 200 for a proposal whose AI-unscheduled ids overlap the engine's planned list", async () => {

@@ -98,17 +98,20 @@ describe("createReservedEvent", () => {
 describe("transitionEventToConsumed / transitionEventToReleased (§18 ownership)", () => {
     it("consumed: read → conditional update from RESERVED → returns the event identity", async () => {
         const prisma = makePrisma()
-        prisma.aiUsageEvent.findUnique.mockResolvedValue({ units: 2, userId: 7 })
+        prisma.aiUsageEvent.findUnique.mockResolvedValue({ units: 2, userId: 7, bucketId: null })
         prisma.aiUsageEvent.updateMany.mockResolvedValue({ count: 1 })
 
         await expect(transitionEventToConsumed(prisma, "req-1")).resolves.toEqual({
             units: 2,
             userId: 7,
+            // AI Quota v2: ledger نسخهٔ ۲ (BASE/PROMO) روی همین رویداد شناسایی
+            // می‌شود؛ در مسیر legacy همیشه null است.
+            bucketId: null,
         })
 
         expect(prisma.aiUsageEvent.findUnique).toHaveBeenCalledWith({
             where: { requestId: "req-1" },
-            select: { units: true, userId: true },
+            select: { units: true, userId: true, bucketId: true },
         })
         const args = prisma.aiUsageEvent.updateMany.mock.calls[0][0]
         expect(args.where).toEqual({ requestId: "req-1", status: "RESERVED" })

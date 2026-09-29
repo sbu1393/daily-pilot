@@ -55,6 +55,22 @@ enum AiUsageEventStatus {
   RELEASED
 }
 
+// ─── AI Quota v2 (Phase 1 — schema only) ─────────────────────────────────────
+
+/// بُعد سهمیه: سهمیه‌ی Task Analysis و سهمیه‌ی Plan Generation کاملاً مستقل‌اند.
+enum AiFeature {
+  ANALYZE
+  PLAN
+}
+
+/// منبع مصرف یک bucket:
+/// - BASE  → سقف از AiQuotaPolicy زنده خوانده می‌شود (grantedUnits = null)
+/// - PROMO → سقف همان bonus ریدیمپشن‌های همان دوره است (grantedUnits غیر-null)
+enum AiQuotaSource {
+  BASE
+  PROMO
+}
+
 // فاز ۵ — ارائه‌دهنده‌ی پرداخت (سند §3.1؛ فقط providerهای واقعاً پیاده‌شده)
 enum BillingProvider {
   ZARINPAL
@@ -105,6 +121,8 @@ model User {
   reminderTime    String  @default("09:00") // "HH:MM" به وقت محلی کاربر
   reminderSentOn  String? // dayKey محلیِ آخرین ارسال موفق (ضد ارسال تکراری)
   pushSubscriptions PushSubscription[] // یادآورها — اشتراک‌های Web Push این کاربر
+  aiQuotaBuckets   AiQuotaBucket[] // AI Quota v2 — ledger مصرف BASE/PROMO (بدون تغییر رفتار)
+  promoRedemptions PromoRedemption[] // AI Quota v2 — ریدیمپشن‌های کد هدیه (هر کد یک‌بار)
 }
 
 model Task {
@@ -230,12 +248,152 @@ model AiUsageEvent {
   attempts    Int                @default(1)
   failureCode String?
   durationMs  Int?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // AI Quota v2 — متادیتای audit همان عملیات (همه nullable: رکوردهای قبل = نامعلوم)
+  /// provider‌ای که واقعاً پاسخ داد ("openrouter" | "1xai")
+  provider           String?
+  /// آیا پاسخ از provider جایگزین آمده است؟
+  fallbackUsed       Boolean?
+  /// bucketی که این عملیات روی آن حساب شد (BASE/PROMO)
+  quotaSource        AiQuotaSource?
+  /// snapshot سقف BASE در لحظه‌ی رزرو — تا تغییر بعدی policy معنای audit را عوض نکند
+  policyAllowedUnits Int?
+  /// id همان AiQuotaBucket (عمداً بدون relation) — complete/release را قطعی می‌کند
+  bucketId           Int?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
   @@index([userId, status])
+  // برای job بازیابی رزروهای یتیم (RESERVED + قدیمی)
+  @@index([status, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI Quota v2 — Phase 1 (schema only)
+//
+// هر عملیات AI دقیقاً یک (feature × source × period) را مصرف می‌کند:
+// - سقف BASE از AiQuotaPolicy **زنده** خوانده می‌شود تا تغییر ادمین بدون deploy
+//   و بی‌درنگ اثر کند (هیچ عددی در source code hard-code نمی‌شود).
+// - bonus پروموشن در bucket جدا نگه داشته می‌شود تا سهمیه‌ی پایه هرگز mutate نشود؛
+//   BASE و PROMO مستقل و قابل audit باقی می‌مانند.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// سقف سهمیه per (پلن × feature) — منبع حقیقت سقف‌ها.
+/// دقیقاً ۴ ردیف: FREE×ANALYZE, FREE×PLAN, PRO×ANALYZE, PRO×PLAN.
+model AiQuotaPolicy {
+  id              Int      @id @default(autoincrement())
+  plan            UserPlan
+  feature         AiFeature
+  /// سقف ماهانه بر حسب «عملیات منطقی» — CHECK >= 0 در migration
+  allowedUnits    Int
+  /// فقط برای نمایش «آخرین ویرایش‌کننده»؛ audit واقعی در AdminAuditLog است.
+  /// عمداً بدون relation تا حذف یک کاربر ردیف‌های policy را از بین نبرد.
+  updatedByUserId Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([plan, feature])
+}
+
+/// ledger مصرف — یک ردیف per (user × feature × source × period).
+/// invariant: reservedUnits + consumedUnits + units <= capacity(bucket)
+model AiQuotaBucket {
+  id            Int               @id @default(autoincrement())
+  userId        Int
+  feature       AiFeature
+  source        AiQuotaSource
+  periodType    AiUsagePeriodType @default(MONTHLY)
+  /// شروع دوره‌ی محلی کاربر (00:00 در timezone کاربر، به شکل instant پایدار UTC)
+  periodStart   DateTime
+  /// PROMO: مجموع bonus ریدیمپشن‌های همان دوره (غیر-null)
+  /// BASE:  null — سقف از AiQuotaPolicy زنده خوانده می‌شود
+  grantedUnits  Int?
+  reservedUnits Int               @default(0)
+  consumedUnits Int               @default(0)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, feature, source, periodType, periodStart])
+  @@index([userId, periodStart])
+}
+
+/// مرز گذار legacy ⇄ جدید — تک‌ردیفی (CHECK ("id" = 1) در migration).
+///
+/// قاعده‌ی قطعی (تنها مرجع تصمیم legacy/جدید):
+///   دوره‌ی کاربر legacy است ⟺ periodStart < nextPeriodStartOf(cutoverAt, user.timezone)
+/// یعنی آخرین دوره‌ی legacy همان دوره‌ای است که cutoverAt را در بر می‌گیرد و از
+/// دوره‌ی بعد، AiQuotaBucket authoritative می‌شود. هیچ usage تاریخی‌ای به
+/// ANALYZE/PLAN نسبت داده نمی‌شود (بدون backfill و بدون over-grant).
+model AiQuotaCutover {
+  id        Int      @id @default(1)
+  /// باید ≤ لحظه‌ی فعال‌سازی باشد. مقدار seed در migration: آغاز ماه UTC بعد.
+  cutoverAt DateTime
+  note      String?
+  updatedAt DateTime @updatedAt
+}
+
+/// کد هدیه — validFrom/expiresAt فقط پنجرهٔ ریدیمپشن را کنترل می‌کنند؛
+/// expire شدن کد، bonusی که قبلاً snapshot شده را باطل نمی‌کند (bonus تا پایان
+/// همان دوره‌ی quota قابل مصرف است).
+model PromoCode {
+  id                String            @id @default(cuid())
+  /// نرمال‌شده (trim + UPPER) — lookup یونیک و case-insensitive
+  code              String            @unique
+  isActive          Boolean           @default(true)
+  validFrom         DateTime
+  expiresAt         DateTime
+  /// null = بدون سقف؛ سقف با CAS روی redeemedCount اجرا می‌شود
+  maxRedemptions    Int?
+  bonusAnalyzeUnits Int               @default(0)
+  bonusPlanUnits    Int               @default(0)
+  /// شمارنده‌ی denormalized — منبع تصمیم سقف (در همان transaction ریدیمپشن)
+  redeemedCount     Int               @default(0)
+  createdByUserId   Int?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  redemptions       PromoRedemption[]
+
+  @@index([isActive, expiresAt])
+}
+
+/// ریدیمپشن — هر کاربر هر کد را فقط یک‌بار (UNIQUE(userId, promoCodeId) در سطح DB).
+/// bonus به‌صورت snapshot ذخیره می‌شود تا تغییر بعدی کد معنای این ریدیمپشن را عوض نکند.
+model PromoRedemption {
+  id                String    @id @default(cuid())
+  promoCodeId       String
+  userId            Int
+  bonusAnalyzeUnits Int
+  bonusPlanUnits    Int
+  /// دوره‌ای که bonus به آن تعلق گرفت (همان periodStart که bucket پرومو روی آن ساخته شد)
+  periodStart       DateTime
+  redeemedAt        DateTime  @default(now())
+  promoCode         PromoCode @relation(fields: [promoCodeId], references: [id], onDelete: Restrict)
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, promoCodeId])
+  @@index([promoCodeId, redeemedAt])
+  @@index([userId, redeemedAt])
+}
+
+/// audit عملیات ادمین (AI Quota policy + Promo Code).
+/// عمداً بدون relation/FK به User: حذف یک ادمین نباید رد audit را از بین ببرد.
+model AdminAuditLog {
+  id          String   @id @default(cuid())
+  actorUserId Int
+  /// "quota_policy.updated" | "promo.created" | "promo.updated"
+  action      String
+  targetType  String
+  targetId    String
+  before      Json?
+  after       Json?
+  requestId   String?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action, createdAt])
+  @@index([actorUserId, createdAt])
 }
 
 // فاز ۵ — سفارش پرداخت: source of truth «آیا پرداختی ساخته شد و چه شد» (سند §2/§3.4)

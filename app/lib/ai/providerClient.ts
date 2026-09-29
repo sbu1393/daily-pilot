@@ -13,6 +13,12 @@
 // 2) retry روی «همان provider» می‌ماند؛ fallback فقط بعد از تمام‌شدن بودجهٔ
 //    retry همان provider شروع می‌شود.
 // 3) خطای قطعیِ خود درخواست (400/404) هرگز fallback نمی‌گیرد.
+// 4) خطای parse/اعتبارسنجی هرگز fallback نمی‌گیرد: retryهای همان provider انجام
+//    می‌شود، سپس زنجیره متوقف و **همان** خطای parse پرتاب می‌شود (provider بعدی
+//    صفر بار صدا زده می‌شود — قبلاً `continue` این کار را می‌کرد و fallback اجرا
+//    می‌شد، یعنی یک parse error می‌توانست provider پولی را هم صدا بزند).
+// 5) `attempts` = تعداد واقعی `provider.complete()`؛ یکی به‌ازای هر فراخوانی، نه
+//    تعداد exception و نه تعداد تصمیم retry. هرگز fallback نمی‌گیرد.
 //
 // رفتار پیش‌فرض production (ترتیب معکوس‌شده):
 // provider = openrouter · fallback = 1xai (فقط با AI_ALLOW_FALLBACK="true")
@@ -162,6 +168,15 @@ export async function runAiOperation<T = string>(options: {
     /** خطای آخرین تلاشِ provider اصلی — خطایی که در نهایت به caller می‌رود. */
     let primaryError: unknown = null
     let totalAttempts = 0
+    /**
+     * پایان زنجیره به‌خاطر خطای غیرtransport (parse/schema).
+     *
+     * `break` داخل حلقهٔ تلاش‌ها فقط همان provider را می‌بندد، نه کل زنجیره را؛ پس
+     * بدون این پرچم، provider بعدی (پولی) باز هم صدا زده می‌شد. یعنی این دقیقاً
+     * همان باگی است که fix شد: قبلاً `continue` باعث می‌شد بعد از تمام‌شدن retryهای
+     * primary، fallback اجرا شود.
+     */
+    let stopChain = false
 
     try {
         for (const [providerIndex, entry] of chain.entries()) {
@@ -179,12 +194,17 @@ export async function runAiOperation<T = string>(options: {
                 const localAttempt = attemptNumber
                 try {
                     const config = provider.resolveConfig({ timeoutMs: AI_TIMEOUT_MS })
+                    // یک `provider.complete()` = یک واحد. شمارش **قبل** از فراخوانی
+                    // انجام می‌شود تا `attempts` معنای «تعداد واقعی provider call»
+                    // را داشته باشد، نه «تعداد استثنا» و نه «تعداد تصمیم retry».
+                    // (شمارش دوم در catch یا error را دوبار می‌شمرد، یا در خطای
+                    // `resolveConfig`/`buildMessages` اصلاً شمارش نمی‌کرد.)
+                    totalAttempts++
                     const content = await provider.complete(
                         config,
                         options.buildMessages(localAttempt),
                         { signal: deadlineController?.signal },
                     )
-                    totalAttempts++
                     const value = options.transform ? options.transform(content) : (content as unknown as T)
                     return {
                         value,
@@ -194,7 +214,6 @@ export async function runAiOperation<T = string>(options: {
                         fallbackUsed: isFallback,
                     }
                 } catch (error) {
-                    totalAttempts++
                     lastError = error
                     if (!isFallback) primaryError = error
 
@@ -204,8 +223,15 @@ export async function runAiOperation<T = string>(options: {
                         throw new OperationDeadlineError()
                     }
 
-                    // خطای parse/اعتبارسنجی، خطای transport نیست: fallback ممنوع،
-                    // فقط retry همان provider (هم رفتار فعلی پروژه).
+                    // خطای parse/اعتبارسنجی، خطای transport نیست: نه retry به
+                    // provider بعدی، نه throw کردن زودهنگام. retry همان provider تا
+                    // سقف سیاست انجام می‌شود، و `break` زنجیره را **همین‌جا** تمام
+                    // می‌کند تا provider بعدی (پولی/دیگر) اصلاً صدا زده نشود.
+                    //
+                    // چرا این مرز: وقتی HTTP 200 گرفته شده و فقط parse شکست خورده،
+                    // مشکل از سرویس نیست؛ provider دوم همان schema را نمی‌خواند و
+                    // فقط پول/تأخیر تازه اضافه می‌کند. در پایان هم `primaryError`
+                    // پرتاب می‌شود ⇒ خطای نهایی همان parse error است.
                     const isTransportError =
                         error instanceof RetryableError ||
                         error instanceof NonRetryableError ||
@@ -213,8 +239,11 @@ export async function runAiOperation<T = string>(options: {
                     if (!isTransportError) {
                         if (attemptNumber < entry.maxAttempts) {
                             await sleep(retryBackoffMs(attemptNumber))
+                            continue
                         }
-                        continue
+                        // retryهای همین provider تمام شد ⇒ کل زنجیره متوقف می‌شود
+                        stopChain = true
+                        break
                     }
 
                     const policy = providerFailurePolicy(error)
@@ -230,6 +259,8 @@ export async function runAiOperation<T = string>(options: {
                     }
                 }
             }
+
+            if (stopChain) break
         }
     } finally {
         // timer همیشه پاک می‌شود، حتی در throw → بدون leak در مسیر خطا.

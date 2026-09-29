@@ -82,6 +82,17 @@ Two conditions must both hold before a fallback call is ever issued:
 | 400 / 404 (bad request) | no | **no** — switching provider would only add cost and delay |
 | parse/schema rejection of the reply | yes (strict prompt) | **no** — this is not a transport failure |
 
+The parse row above was documented before it was actually true. It used to `continue`
+after the last retry, which walked the chain loop and called the next provider anyway —
+so a body that failed `transform` still got sent to the paid provider. The chain is now
+stopped explicitly and the original parse/schema error is thrown.
+
+**`attempts` means actual provider calls.** It is incremented once, immediately before
+`provider.complete()`, so a call that fails in `transform` still counts exactly once.
+(An earlier version incremented after the call *and* again in `catch`, which reported 3
+attempts after 2 real calls.) `attempts` is not the number of exceptions and not the
+number of retry decisions.
+
 **Quota is unaffected.** One logical AI operation = one unit, regardless of how many
 providers were called. `reserveQuota` / `completeQuota` / `releaseQuota` live in the
 route and run exactly once; the AI layer never calls them.

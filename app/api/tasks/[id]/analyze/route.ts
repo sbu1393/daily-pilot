@@ -3,15 +3,13 @@ import { getCurrentUser } from "@/app/lib/getCurrentUser"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { isRateLimited } from "@/app/lib/rateLimit"
 import { reanalyzeTask } from "@/app/lib/services/tasks.service"
-import { readAiCallTelemetry, type AiCallTelemetry } from "@/app/lib/ai/aiDuration"
+import { type AiCallTelemetry } from "@/app/lib/ai/aiDuration"
 import { reanalyzeTaskSchema } from "@/app/schema/plannerSchema"
 import { createObservabilityContext } from "@/src/lib/observability/context"
 import { recordError } from "@/src/lib/observability/recordError"
-import { resolvePlanPolicy, getMonthlyPeriod } from "@/app/lib/services/planPolicy.service"
 import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
 import { recordProductEvent } from "@/app/lib/services/productEvent.service"
-import { reserveQuota, completeQuota, releaseQuota } from "@/app/lib/services/aiQuota.service"
-import { markReleaseFailed } from "@/app/lib/services/aiUsage.service"
+import { runAiOperation } from "@/app/lib/services/aiOperation.service"
 import { AiProviderUnavailableError, QuotaUnavailableError } from "@/app/lib/services/errors"
 import {
     errorResponse,
@@ -70,31 +68,14 @@ export async function PATCH(
 
         const prisma = getPrisma()
 
-        // فاز ۱ — plan policy (سند §5): سقف ماهانه فقط از سرویس؛ هرگز hard-code (§26)
-        const policy = resolvePlanPolicy({ plan: user.plan })
-
-        // فاز ۱ — period ماهانهٔ محلیِ کاربر (سند §۶): همان periodStart در reserve و complete/release
-        const periodStart = getMonthlyPeriod(new Date(), user.timezone).periodStart
-
-        // فاز ۱ — quota reserve (سند §8): اتمیک، idempotent بر اساس requestId، fail-closed.
-        // P1-5 (سند §19/§20/§21/§32): شکست زیرساخت quota باید در observability ثبت شود؛
-        // QUOTA_EXCEEDED/IDEMPOTENCY_CONFLICT خطای expected‌اند و هرگز record نمی‌شوند.
-        try {
-            await reserveQuota(prisma, {
-                userId: user.id,
-                requestId: context.requestId,
-                allowedUnits: policy.allowedUnits,
-                units: 1, // هر logical AI operation = 1 unit (سند §2)
-                feature: "analyze",
-                periodStart,
-            })
-        } catch (error) {
-            // فقط QUOTA_UNAVAILABLE (infrastructure) و دقیقاً یک‌بار — سپس همان error دوباره throw می‌شود
-            // تا response/envelope فعلی دست‌نخورده بماند (toServiceErrorResponse تغییر نمی‌کند).
-            if (error instanceof QuotaUnavailableError) await recordError(error, context)
-            throw error
-        }
-
+        // ── lifecycle کامل quota در یک نقطه (سند §۸/§۱۰/§۱۱/§۱۲/§۱۳) ─────────────
+        // `runAiOperation` تنها entry point مجاز است و خودش تصمیم می‌گیرد این دوره
+        // LEGACY است یا V2 — پس route دیگر نه `resolvePlanPolicy` می‌خواند، نه
+        // `getMonthlyPeriod`، نه reserve/complete/release را دستی صدا می‌زند.
+        //
+        // ترتیب قفل‌شده: reserve **قبل** از `reanalyzeTask` انجام می‌شود، پس هیچ
+        // provider call بدون reservation رخ نمی‌دهد. unit و قاعدهٔ failureCode هم
+        // از جدول بستهٔ فیچر می‌آید، نه از این route.
         let result: {
             task: unknown
             aiSource: string
@@ -103,65 +84,49 @@ export async function PATCH(
             aiTelemetry?: AiCallTelemetry
         }
         try {
-            // AI call — خارج از transaction کووتا (سند §10)
-            result = await reanalyzeTask(user.id, user.timezone, taskId, textOverride)
-        } catch (error) {
-            // سند §12/§13: هر شکست AI رزرو را آزاد می‌کند.
-            // فاز ۱ — شکست نهایی provider یک رویداد عملیاتی است و باید failureCode بگیرد؛
-            // خطاهای دیگر (مثل TASK_NOT_FOUND) مثل قبل و بدون failureCode آزاد می‌شوند.
-            const providerFailure = error instanceof AiProviderUnavailableError ? error : null
-            // مرحلهٔ ۴.۲ — مدت واقعی همان عملیات، از کنارِ خودِ خطا خوانده می‌شود؛
-            // نبودنش یعنی AI اصلاً اجرا نشده (مثلاً TASK_NOT_FOUND) و آن‌وقت
-            // instrumentation هیچ چیز اضافه نمی‌کند.
-            const telemetry = readAiCallTelemetry(error)
-            try {
-                if (providerFailure) {
-                    // failureCode = همان کد taxonomy که به کلاینت برمی‌گردد (سند §۱۲/§۲۰)
-                    await releaseQuota(
-                        prisma,
-                        context.requestId,
-                        undefined,
-                        { failureCode: providerFailure.code, periodStart },
-                        telemetry,
-                    )
-                } else {
-                    await releaseQuota(
-                        prisma,
-                        context.requestId,
-                        undefined,
-                        { periodStart },
-                        telemetry,
-                    )
-                }
-            } catch {
-                // سند §13: release failure → رزرو باقی می‌ماند، event در RESERVED می‌ماند،
-                // provider دوباره صدا زده نمی‌شود، و failureCode=RELEASE_FAILED برای reconciliation
-                // ثبت می‌شود (best-effort، هرگز throw نمی‌کند) + ثبت در observability (§21).
-                await markReleaseFailed(prisma, context.requestId)
-                await recordError(new QuotaUnavailableError(), context)
-                throw new QuotaUnavailableError()
-            }
-
-            if (providerFailure) {
-                // سند §12 مرحله ۶ / §21: شکست نهایی provider از pipeline observability عبور می‌کند.
-                // outer catch برای ServiceErrorها خودش recordError نمی‌کند → دقیقاً یک رکورد (§18 فاز ۲).
-                await recordError(providerFailure, context)
-            }
-            throw error
-        }
-
-        // موفقیت → complete (سند §11) — روی همان periodStart رزرو
-        // P1-5 (سند §21/§32): شکست complete یک infrastructure failure است → ثبت دقیقاً یک‌بار.
-        try {
-            await completeQuota(
+            const outcome = await runAiOperation({
                 prisma,
-                context.requestId,
-                undefined,
-                { periodStart },
-                result.aiTelemetry,
-            )
+                user,
+                feature: "analyze",
+                requestId: context.requestId,
+                execute: async () => {
+                    const analysis = await reanalyzeTask(
+                        user.id,
+                        user.timezone,
+                        taskId,
+                        textOverride,
+                    )
+                    return {
+                        result: analysis,
+                        telemetry: analysis.aiTelemetry,
+                        // provider/fallback واقعی ثبت می‌شوند (پیش از این wiring
+                        // هرگز ثبت نمی‌شدند و همیشه null می‌ماندند).
+                        // `model` عمداً خالی است: لایهٔ AI آن را برنمی‌گرداند و
+                        // `AI_MODEL` مدلِ provider اصلی است — روی fallback، ثبتِ آن
+                        // دادهٔ audit جعلی می‌شد.
+                        provider: analysis.aiProvider
+                            ? {
+                                  provider: analysis.aiProvider,
+                                  fallbackUsed: analysis.fallbackUsed,
+                              }
+                            : undefined,
+                    }
+                },
+            })
+            result = outcome.result
         } catch (error) {
-            if (error instanceof QuotaUnavailableError) await recordError(error, context)
+            // رزرو پیش از AI انجام شده، پس هر خطایی از این نقطه به بعد یعنی
+            // «رزرو کرده بودیم و باید آزاد شود» — که `runAiOperation` انجام داده
+            // (و در صورت شکستِ release، markReleaseFailed + 503 داده است).
+            // اینجا فقط ثبت observability باقی می‌ماند.
+            if (error instanceof QuotaUnavailableError) {
+                // زیرساخت quota: یک رکورد (شکست reserve یا شکست release).
+                await recordError(error, context)
+            } else if (error instanceof AiProviderUnavailableError) {
+                // سند §۱۲ مرحله ۶ / §۲۱: شکست نهایی provider از pipeline عبور می‌کند.
+                // outer catch برای ServiceErrorها recordError نمی‌کند → دقیقاً یک رکورد.
+                await recordError(error, context)
+            }
             throw error
         }
 

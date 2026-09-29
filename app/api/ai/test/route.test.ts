@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 /* ------------------------------------------------------------------ */
-/* B1 — Route smoke test: GET /api/ai/test (C8 — ADR-04 conformance).  */
-/* runAiSamples mocked: بدون فراخوانی AI واقعی.                        */
+/* GET /api/ai/test — قرارداد «دیباگ داخلی، بدون quota».              */
+/*                                                                      */
+/* تصمیم قطعی: این endpoint هیچ quota واقعی مصرف نمی‌کند. تست‌های این  */
+/* فایل عمداً ماژول‌های quota را mock می‌کنند و انتظار **صفر** فراخوانی*/
+/* دارند، تا یک بازگشتِ ناخواسته به reserveQuota فوراً قرمز شود.        */
 /* ------------------------------------------------------------------ */
 
 const mocks = vi.hoisted(() => ({
@@ -30,15 +33,13 @@ vi.mock("@/app/lib/services/aiQuota.service", () => ({
     releaseQuota: mocks.releaseQuota,
 }))
 vi.mock("@/app/lib/getPrisma", () => ({ getPrisma: mocks.getPrisma }))
-// P1-5 — سند §۲۱/§۳۲: شکست زیرساخت quota باید از recordError عبور کند (بدون I/O واقعی).
 vi.mock("@/src/lib/observability/recordError", () => ({ recordError: mocks.recordError }))
-// D2 — سند §13: علامت‌گذاری release failure باید بدون I/O واقعی قابل assert باشد.
 vi.mock("@/app/lib/services/aiUsage.service", () => ({
     markReleaseFailed: mocks.markReleaseFailed,
 }))
 
 import { GET } from "./route"
-import { QuotaExceededError, QuotaUnavailableError } from "@/app/lib/services/errors"
+import { QuotaExceededError } from "@/app/lib/services/errors"
 
 const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran", plan: "FREE" }
 const SAMPLES = [
@@ -46,7 +47,16 @@ const SAMPLES = [
     { source: "mock", analysis: { priority: "LOW", score: 40, estimatedMinutes: 15, reason: "دلیل", category: "Personal" }, attempts: 0 },
 ]
 
-describe("GET /api/ai/test — production guard (فاز ۱ — سند §16)", () => {
+/** ادعای مرکزی: هیچ مسیر quotaای لمس نمی‌شود — نه در موفقیت، نه در خطا. */
+function expectNoQuotaTouched() {
+    expect(mocks.reserveQuota).not.toHaveBeenCalled()
+    expect(mocks.completeQuota).not.toHaveBeenCalled()
+    expect(mocks.releaseQuota).not.toHaveBeenCalled()
+    expect(mocks.markReleaseFailed).not.toHaveBeenCalled()
+    expect(mocks.getPrisma).not.toHaveBeenCalled()
+}
+
+describe("GET /api/ai/test — production guard", () => {
     it("returns 404 in production as the FIRST business action — no rate limit, no quota, no AI", async () => {
         vi.stubEnv("NODE_ENV", "production")
 
@@ -57,7 +67,7 @@ describe("GET /api/ai/test — production guard (فاز ۱ — سند §16)", ()
         // گارد اولین action است — هیچ چیز دیگری اجرا نشده
         expect(mocks.getCurrentUser).not.toHaveBeenCalled()
         expect(mocks.isRateLimited).not.toHaveBeenCalled()
-        expect(mocks.reserveQuota).not.toHaveBeenCalled()
+        expectNoQuotaTouched()
         expect(mocks.runAiSamples).not.toHaveBeenCalled()
     })
 })
@@ -68,9 +78,6 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
         vi.unstubAllEnvs()
         mocks.getCurrentUser.mockResolvedValue(USER)
         mocks.isRateLimited.mockReturnValue(false)
-        mocks.reserveQuota.mockResolvedValue(undefined)
-        mocks.completeQuota.mockResolvedValue(true)
-        mocks.releaseQuota.mockResolvedValue(true)
         mocks.getPrisma.mockReturnValue({})
     })
 
@@ -83,12 +90,50 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
         await expect(res.json()).resolves.toEqual({ ok: true, data: SAMPLES })
         expect(mocks.runAiSamples).toHaveBeenCalledTimes(1)
         expect(mocks.isRateLimited).toHaveBeenCalledWith("ai-test:user:1", 1, 60 * 60 * 1000)
-        // فاز ۱ — reserve 3 units (all-or-nothing) → complete
-        expect(mocks.reserveQuota).toHaveBeenCalledTimes(1)
-        expect(mocks.reserveQuota.mock.calls[0][1].units).toBe(3)
-        expect(mocks.reserveQuota.mock.calls[0][1].feature).toBe("ai-test")
-        expect(mocks.completeQuota).toHaveBeenCalledTimes(1)
-        expect(mocks.releaseQuota).not.toHaveBeenCalled()
+    })
+
+    /* -------------------------------------------------------------- */
+    /* تصمیم قطعی: هیچ quota واقعی مصرف نمی‌شود                       */
+    /* -------------------------------------------------------------- */
+
+    it("consumes NO quota on success — no reserve, no complete, no release, no prisma", async () => {
+        mocks.runAiSamples.mockResolvedValue(SAMPLES)
+
+        const res = await GET()
+
+        expect(res.status).toBe(200)
+        expectNoQuotaTouched()
+    })
+
+    it("consumes NO quota when the AI call fails — nothing to release because nothing was reserved", async () => {
+        mocks.runAiSamples.mockRejectedValue(new Error("provider down"))
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+        const res = await GET()
+
+        expect(res.status).toBe(500)
+        expectNoQuotaTouched()
+        errorSpy.mockRestore()
+    })
+
+    it("consumes NO quota when the user is not authenticated", async () => {
+        mocks.getCurrentUser.mockResolvedValue(null)
+
+        const res = await GET()
+
+        expect(res.status).toBe(401)
+        expectNoQuotaTouched()
+        expect(mocks.runAiSamples).not.toHaveBeenCalled()
+    })
+
+    it("consumes NO quota when rate limited — rejection happens before any AI work", async () => {
+        mocks.isRateLimited.mockReturnValue(true)
+
+        const res = await GET()
+
+        expect(res.status).toBe(429)
+        expectNoQuotaTouched()
+        expect(mocks.runAiSamples).not.toHaveBeenCalled()
     })
 
     it("returns 429 RATE_LIMITED and never calls runAiSamples when the user limit is exhausted", async () => {
@@ -106,6 +151,19 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
         })
         expect(mocks.isRateLimited).toHaveBeenCalledWith("ai-test:user:1", 1, 60 * 60 * 1000)
         expect(mocks.runAiSamples).not.toHaveBeenCalled()
+    })
+
+    it("never surfaces QUOTA_EXCEEDED — an exhausted user quota cannot block this debug route", async () => {
+        // حتی اگر quota کاربر تمام باشد، این endpoint نباید 429 بدهد: اصلاً quota
+        // نمی‌خواند. Mock عمداً یک QuotaExceededError آماده دارد تا ثابت شود مسیر
+        // هیچ‌وقت به آن نمی‌رسد.
+        mocks.reserveQuota.mockRejectedValue(new QuotaExceededError())
+        mocks.runAiSamples.mockResolvedValue(SAMPLES)
+
+        const res = await GET()
+
+        expect(res.status).toBe(200)
+        expect(mocks.reserveQuota).not.toHaveBeenCalled()
     })
 
     it("keeps the payload under data (payload preserved, envelope added)", async () => {
@@ -133,37 +191,22 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
         expect(mocks.runAiSamples).not.toHaveBeenCalled()
     })
 
-    it("returns 429 QUOTA_EXCEEDED when the 3-unit reservation is over the remaining limit (no partial reserve)", async () => {
-        mocks.reserveQuota.mockRejectedValue(new QuotaExceededError())
+    it("preserves X-Request-ID header on success responses", async () => {
+        mocks.runAiSamples.mockResolvedValue(SAMPLES)
 
         const res = await GET()
 
-        expect(res.status).toBe(429)
-        const parsed = await res.json()
-        expect(parsed.error.code).toBe("QUOTA_EXCEEDED")
-        expect(mocks.runAiSamples).not.toHaveBeenCalled()
-        expect(mocks.completeQuota).not.toHaveBeenCalled()
-        // P1-5 / سند §۲۱/§۳۲: QUOTA_EXCEEDED خطای expected است → هرگز record نمی‌شود
-        expect(mocks.recordError).not.toHaveBeenCalled()
+        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
     })
 
-    /* ---------------------------------------------------------------- */
-    /* P1-5 — D1: infrastructure failures recorded (§19/§20/§21/§32)     */
-    /* ---------------------------------------------------------------- */
-
-    it("reserve failure → 503 QUOTA_UNAVAILABLE, envelope unchanged, recordError exactly once (P1-5)", async () => {
-        const failure = new QuotaUnavailableError()
-        mocks.reserveQuota.mockRejectedValue(failure)
+    it("records an unexpected AI failure exactly once via recordError (error logging retained)", async () => {
+        const failure = new Error("boom")
+        mocks.runAiSamples.mockRejectedValue(failure)
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
         const res = await GET()
 
-        expect(res.status).toBe(503)
-        await expect(res.json()).resolves.toMatchObject({
-            ok: false,
-            error: { code: "QUOTA_UNAVAILABLE", message: failure.message },
-        })
-        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
-        expect(mocks.runAiSamples).not.toHaveBeenCalled()
+        expect(res.status).toBe(500)
         expect(mocks.recordError).toHaveBeenCalledTimes(1)
         expect(mocks.recordError).toHaveBeenCalledWith(
             failure,
@@ -174,73 +217,10 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
                 requestId: res.headers.get("X-Request-ID"),
             }),
         )
-    })
-
-    it("complete failure → 503 QUOTA_UNAVAILABLE and recordError exactly once (P1-5, §21)", async () => {
-        const failure = new QuotaUnavailableError()
-        mocks.runAiSamples.mockResolvedValue(SAMPLES)
-        mocks.completeQuota.mockRejectedValue(failure)
-
-        const res = await GET()
-
-        expect(res.status).toBe(503)
-        const parsed = await res.json()
-        expect(parsed.error.code).toBe("QUOTA_UNAVAILABLE")
-        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
-        expect(mocks.recordError).toHaveBeenCalledTimes(1)
-        expect(mocks.recordError).toHaveBeenCalledWith(
-            failure,
-            expect.objectContaining({ userId: 1 }),
-        )
-    })
-
-    it("release failure → 503 QUOTA_UNAVAILABLE and recordError exactly once (fail-closed, §13/§21 — P1-5)", async () => {
-        mocks.runAiSamples.mockRejectedValue(new Error("provider down"))
-        mocks.releaseQuota.mockRejectedValue(new QuotaUnavailableError())
-
-        const res = await GET()
-
-        expect(res.status).toBe(503)
-        const parsed = await res.json()
-        expect(parsed.error.code).toBe("QUOTA_UNAVAILABLE")
-        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
-        expect(mocks.completeQuota).not.toHaveBeenCalled()
-        expect(mocks.recordError).toHaveBeenCalledTimes(1)
-        expect(mocks.recordError.mock.calls[0][0]).toBeInstanceOf(QuotaUnavailableError)
-        // D2 / سند §13: event برای reconciliation علامت می‌خورد و provider دوباره اجرا نمی‌شود
-        expect(mocks.markReleaseFailed).toHaveBeenCalledTimes(1)
-        expect(mocks.markReleaseFailed).toHaveBeenCalledWith(
-            expect.anything(),
-            res.headers.get("X-Request-ID"),
-        )
-        expect(mocks.runAiSamples).toHaveBeenCalledTimes(1)
-    })
-
-    it("releases the reservation when runAiSamples fails (§12) and keeps envelope", async () => {
-        mocks.runAiSamples.mockRejectedValue(new Error("provider down"))
-        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
-
-        const res = await GET()
-
-        expect(mocks.releaseQuota).toHaveBeenCalledTimes(1)
-        expect(mocks.completeQuota).not.toHaveBeenCalled()
-        expect(res.status).toBe(500)
-        // D2: release موفق است → هیچ علامت‌گذاری RELEASE_FAILED نباید رخ دهد
-        expect(mocks.markReleaseFailed).not.toHaveBeenCalled()
         errorSpy.mockRestore()
     })
 
-    it("preserves X-Request-ID header on success responses", async () => {
-        mocks.runAiSamples.mockResolvedValue(SAMPLES)
-
-        const res = await GET()
-
-        expect(res.headers.get("X-Request-ID")).toEqual(expect.any(String))
-    })
-
     it("propagates ServiceError through the standard error envelope", async () => {
-        // runAiSamples در حال حاضر ServiceError پرتاب نمی‌کند؛ این تست قرارداد ADR-04
-        // مسیر خطای احتمالی را قفل می‌کند (defense against regression).
         mocks.runAiSamples.mockRejectedValue(Object.assign(new Error("boom"), { status: 500 }))
 
         const res = await GET()
@@ -254,10 +234,10 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
     })
 
     /* ---------------------------------------------------------------- */
-    /* فاز ۳ — گام ۹: regression — /api/ai/test از ProductEvent مستقل است */
+    /* regression — /api/ai/test از ProductEvent و activity مستقل است   */
     /* ---------------------------------------------------------------- */
 
-    it("records no ProductEvent (never touches productEvent.service) — even on success", async () => {
+    it("records no ProductEvent — even on success", async () => {
         mocks.runAiSamples.mockResolvedValue(SAMPLES)
 
         const res = await GET()
@@ -266,33 +246,16 @@ describe("GET /api/ai/test (C8 — ADR-04 envelope)", () => {
         // route اصلاً recordProductEvent را import/صدا نمی‌زند؛ mock آن تعریف نشده است —
         // هر فراخوانی خطای ReferenceError می‌داد. اثبات: جریان موفق بدون هیچ event است.
         expect(mocks.runAiSamples).toHaveBeenCalledTimes(1)
-        expect(mocks.completeQuota).toHaveBeenCalledTimes(1)
     })
 
-    it("does NOT touch user activity (lastSeenAt) — debug route is excluded (§6/§25 فاز ۳)", async () => {
+    it("does NOT touch user activity (lastSeenAt) — debug route is excluded", async () => {
         mocks.runAiSamples.mockResolvedValue(SAMPLES)
 
         const res = await GET()
 
         expect(res.status).toBe(200)
-        // فاز ۳ §۶/§۲۵: `/api/ai/test` در فهرست Exclude است و نباید activity تولید کند
-        // → هیچ نوشتنی روی `User.lastSeenAt` رخ نمی‌دهد (نه در موفقیت، نه قبل از quota).
-        expect(mocks.touchAuthenticatedActivity).not.toHaveBeenCalled()
-        // ترتیب business actionهای واقعی: rate limit قبل از reserve
-        const rateOrder = mocks.isRateLimited.mock.invocationCallOrder[0]
-        const reserveOrder = mocks.reserveQuota.mock.invocationCallOrder[0]
-        expect(reserveOrder).toBeGreaterThan(rateOrder)
-    })
-
-    it("never bumps lastSeenAt on quota rejection", async () => {
-        mocks.reserveQuota.mockRejectedValue(new QuotaExceededError())
-
-        const res = await GET()
-
-        expect(res.status).toBe(429)
-        // فاز ۳ §۶/§۲۵: این مسیر نه ProductEvent دارد و نه lastSeenAt — quota rejection
-        // → بدون AI، بدون event و بدون هیچ نوشتن activity.
-        expect(mocks.runAiSamples).not.toHaveBeenCalled()
+        // `/api/ai/test` در فهرست Exclude است و نباید activity تولید کند
+        // → هیچ نوشتنی روی `User.lastSeenAt` رخ نمی‌دهد.
         expect(mocks.touchAuthenticatedActivity).not.toHaveBeenCalled()
     })
 })

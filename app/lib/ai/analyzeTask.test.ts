@@ -25,6 +25,7 @@ const fetchMock = vi.hoisted(() => vi.fn())
 vi.stubGlobal("fetch", fetchMock)
 
 import { AiProviderUnavailableError } from "@/app/lib/services/errors"
+import { pinProviderEnv } from "./testing/pinProviderEnv"
 
 import { analyzeTask } from "./analyzeTask"
 import { aiAnalysisSchema } from "./aiSchema"
@@ -46,6 +47,7 @@ const httpStatus = (status: number) => new Response("boom", { status })
 describe("analyzeTask (§7.8 — Failure & Degradation)", () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        pinProviderEnv()
     })
     afterEach(() => {
         vi.unstubAllEnvs()
@@ -161,6 +163,7 @@ describe("analyzeTask (§7.8 — Failure & Degradation)", () => {
 describe("analyzeTask — production never returns a mock result (فاز ۱ §۲/§۱۲)", () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        pinProviderEnv()
     })
     afterEach(() => {
         vi.unstubAllEnvs()

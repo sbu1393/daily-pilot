@@ -47,7 +47,6 @@ const MARKER_EMAIL = RUN_ID
 const MARKER_USERNAME = "phase1-quota-concurrency-test"
 
 const FREE_ALLOWED_UNITS = 15 // §5
-const AI_TEST_UNITS = 3 // §16
 
 const DB_REQUIRED =
     "REAL_POSTGRESQL_UNAVAILABLE: تست quota concurrency به PostgreSQL واقعی نیاز دارد؛ skip جعلی ممنوع است (Phase 1 §25)."
@@ -511,8 +510,8 @@ describe("aiQuota — real PostgreSQL integration/concurrency (Phase 1 §25/§32
             userId,
             requestId: "d5-rollover-b",
             allowedUnits: FREE_ALLOWED_UNITS,
-            units: 3,
-            feature: "ai-test",
+            units: 1,
+            feature: "analyze",
             periodStart: periodB,
         })
 
@@ -527,13 +526,13 @@ describe("aiQuota — real PostgreSQL integration/concurrency (Phase 1 §25/§32
             releaseQuota(prisma, "d5-rollover-a", undefined, { periodStart: periodA }),
         ).resolves.toBe(true)
         expect(await periodRow(periodA)).toEqual({ reservedUnits: 0, consumedUnits: 0 })
-        expect(await periodRow(periodB)).toEqual({ reservedUnits: 3, consumedUnits: 0 }) // B دست‌نخورده
+        expect(await periodRow(periodB)).toEqual({ reservedUnits: 1, consumedUnits: 0 }) // B دست‌نخورده
 
         // complete ماه جدید → فقط ردیف B
         await expect(
             completeQuota(prisma, "d5-rollover-b", undefined, { periodStart: periodB }),
         ).resolves.toBe(true)
-        expect(await periodRow(periodB)).toEqual({ reservedUnits: 0, consumedUnits: 3 })
+        expect(await periodRow(periodB)).toEqual({ reservedUnits: 0, consumedUnits: 1 })
         expect(await periodRow(periodA)).toEqual({ reservedUnits: 0, consumedUnits: 0 }) // A دست‌نخورده
     })
 
@@ -693,10 +692,15 @@ describe("aiQuota — real PostgreSQL integration/concurrency (Phase 1 §25/§32
     })
 
     /* ------------------------------------------------------------------ */
-    /* 14–15) /api/ai/test contract: production guard + reserve = 3 (§16)  */
+    /* 14) /api/ai/test: production guard و «بدون quota» بودن (§16)            */
+    /*                                                                        */
+    /* تصمیم قطعی: این endpoint دیباگ داخلی است و هیچ quota واقعی مصرف       */
+    /* نمی‌کند. تست قبلیِ «reserve = ۳ واحد all-or-nothing» حذف شد چون        */
+    /* قراردادی را قفل می‌کرد که دیگر وجود ندارد؛ و عدد ۳ فقط تعداد sampleهای  */
+    /* داخلی بود، نه هزینهٔ محصول.                                             */
     /* ------------------------------------------------------------------ */
 
-    it("production guard: GET /api/ai/test returns 404 and writes NOTHING to the real DB (§16)", async () => {
+    it("production guard: GET /api/ai/test returns 404 and writes NOTHING to the real DB", async () => {
         requireDb()
 
         const { GET } = await import("@/app/api/ai/test/route")
@@ -713,46 +717,40 @@ describe("aiQuota — real PostgreSQL integration/concurrency (Phase 1 §25/§32
         }
     })
 
-    it("ai-test contract: reserve = 3 units is all-or-nothing (§16)", async () => {
+    it("ai-test writes NO quota row even in dev — this route never consumes real user quota", async () => {
         requireDb()
-        const { periodStart } = getMonthlyPeriod(new Date("2026-09-15T12:00:00Z"))
+        vi.stubEnv("NODE_ENV", "development")
+        try {
+            // نمونه‌ها عمداً خراب می‌شوند: چون اصلاً نباید AI یا quota اجرا شود،
+            // مسیر حتی به آن‌ها هم نمی‌رسد و هیچ رزرویی ساخته نمی‌شود.
+            vi.resetModules()
+            vi.doMock("@/app/lib/services/analysis.service", () => ({
+                runAiSamples: vi.fn().mockRejectedValue(new Error("__ai_test_probe__")),
+            }))
+            vi.doMock("@/app/lib/getCurrentUser", () => ({
+                getCurrentUser: vi.fn().mockResolvedValue({
+                    id: userId,
+                    username: MARKER_USERNAME,
+                    email: MARKER_EMAIL,
+                    timezone: "UTC",
+                    plan: "FREE",
+                }),
+            }))
 
-        // ظرفیت ۲ < ۳ → کل invocation باید رد شود، بدون partial reservation
-        await expect(
-            reserveQuota(prisma, {
-                userId,
-                requestId: "d5-aitest-partial",
-                allowedUnits: 2,
-                units: AI_TEST_UNITS,
-                feature: "ai-test",
-                periodStart,
-            }),
-        ).rejects.toBeInstanceOf(QuotaExceededError)
+            const { GET } = await import("@/app/api/ai/test/route")
+            const res = await GET()
 
-        expect(await eventRow("d5-aitest-partial")).toBeNull()
-        expect(await periodRow(periodStart)).toEqual({ reservedUnits: 0, consumedUnits: 0 })
+            // خطای ۵۰۰ قابل‌قبول است؛ مهم این است که هیچ quota‌ای مصرف/رزرو نشده باشد.
+            expect(res.status).toBeGreaterThanOrEqual(400)
 
-        // ظرفیت کافی → ۳ unit یکجا
-        await reserveQuota(prisma, {
-            userId,
-            requestId: "d5-aitest-full",
-            allowedUnits: FREE_ALLOWED_UNITS,
-            units: AI_TEST_UNITS,
-            feature: "ai-test",
-            periodStart,
-        })
-        expect(await periodRow(periodStart)).toEqual({
-            reservedUnits: AI_TEST_UNITS,
-            consumedUnits: 0,
-        })
-
-        // و complete آن invocation دقیقاً ۳ unit را consume می‌کند (یک logical request)
-        await expect(
-            completeQuota(prisma, "d5-aitest-full", undefined, { periodStart }),
-        ).resolves.toBe(true)
-        expect(await periodRow(periodStart)).toEqual({
-            reservedUnits: 0,
-            consumedUnits: AI_TEST_UNITS,
-        })
+            // ادعای اصلی: هیچ ledger ردیفی نساخته و هیچ event ثبت نشده
+            expect(await prisma.aiUsage.count({ where: { userId } })).toBe(0)
+            expect(await prisma.aiUsageEvent.count({ where: { userId } })).toBe(0)
+        } finally {
+            vi.unstubAllEnvs()
+            vi.doUnmock("@/app/lib/services/analysis.service")
+            vi.doUnmock("@/app/lib/getCurrentUser")
+            vi.resetModules()
+        }
     })
 }, DB_TEST_TIMEOUT_MS)

@@ -7,6 +7,7 @@ import JalaliCalendar from "@/app/components/calender/jalili"
 import DayHeader from "./DayHeader"
 import DayStatsBar from "./DayStarBar"
 import DayStartModal from "./DayStarModal"
+import AiQuotaStatusBar from "./AiQuotaStatusBar"
 import { useDaySummary } from "../hooks/useDaySummary"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import DayTaskArea from "../components/task/DayTaskArea"
@@ -53,6 +54,10 @@ export default function Dashboard() {
             {summary && !loading && (
                 <DayStatsBar summary={summary} />
             )}
+
+            {/* وضعیت سهمیهٔ AI — فقط خواندنی، کنار آمار روز. خودش از
+                /api/ai/quota می‌خواند و بعد از هر عملیات AI تازه می‌شود. */}
+            <AiQuotaStatusBar />
 
             <DayTaskArea />
 

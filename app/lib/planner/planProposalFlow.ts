@@ -17,6 +17,7 @@
 //   - no persistence: proposal فقط in-memory است.
 
 import { ApiClientError, api } from "@/app/lib/api/client"
+import { announceAiQuotaChanged } from "@/app/lib/aiQuotaEvents"
 
 export type PlanProposalPriority = "HIGH" | "MEDIUM" | "LOW"
 
@@ -117,14 +118,21 @@ export function isPlanProposal(value: unknown): value is PlanProposal {
 // ---------- Default transport (endpointهای موجود backend) ----------
 
 export async function fetchPlanProposal(dayKey: string, signal?: AbortSignal): Promise<PlanProposal> {
-    const data = await api<unknown>("/api/planner/plan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildGenerateBody(dayKey)),
-        ...(signal ? { signal } : {}),
-    })
-    if (!isPlanProposal(data)) throw new Error("پاسخ سرور نامعتبر است")
-    return data
+    try {
+        const data = await api<unknown>("/api/planner/plan", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(buildGenerateBody(dayKey)),
+            ...(signal ? { signal } : {}),
+        })
+        if (!isPlanProposal(data)) throw new Error("پاسخ سرور نامعتبر است")
+        return data
+    } finally {
+        // plan هم سهمیه مصرف می‌کند: موفق ⇒ مصرف نهایی، ناموفق ⇒ رزرو آزاد می‌شود.
+        // release پیش از رسیدن پاسخ به کلاینت انجام شده، پس این اعلام همیشه
+        // وضعیتِ نهایی را می‌گیرد و هیچ مصرفِ نیمه‌کاره‌ای نشان نمی‌دهد.
+        announceAiQuotaChanged()
+    }
 }
 
 export async function applyPlanProposal(

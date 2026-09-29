@@ -325,4 +325,67 @@
     margin: -6px 0 12px;
     font-weight: 600;
   }
-  
+
+  /* ── وضعیت سهمیهٔ AI (فقط اطلاع‌رسانی) ──────────────────────────────────────
+     عمداً بدون نوار پیشرفت/شمارش معکوس/رنگِ هشداردهنده: این نوار فقط واقعیت را
+     می‌گوید. حالت‌ها از راه متن و ساختار تفکیک می‌شوند، نه فقط رنگ.
+     همهٔ فاصله‌ها logical هستند تا در RTL درست بنشینند. */
+  .quotaPanel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 12px 16px;
+    margin: 10px 0 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .quotaPanelHead {
+    color: var(--muted);
+    font-size: 0.74rem;
+    font-weight: 700;
+  }
+
+  .quotaList {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 22px;
+  }
+
+  .quotaItem {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 0.86rem;
+    color: var(--ink);
+  }
+
+  /* حالت «تمام شده» فقط کمی پررنگ‌تر است؛ رنگ تنها حامل معنی نیست چون متن
+     خودش جملهٔ کاملِ «تمام شده» را دارد. */
+  .quotaItem[data-tone="exhausted"] .quotaText {
+    color: var(--muted);
+  }
+
+  .quotaPromo {
+    color: var(--muted);
+    font-size: 0.74rem;
+    font-weight: 600;
+  }
+
+  .quotaLink {
+    align-self: flex-start;
+    margin-inline-start: 0;
+    color: var(--primary-dark);
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .quotaLink:hover,
+  .quotaLink:focus-visible {
+    text-decoration: underline;
+  }

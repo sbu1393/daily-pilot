@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { toast } from "react-toastify"
 import { api } from "@/app/lib/api/client"
+import { announceAiQuotaChanged } from "@/app/lib/aiQuotaEvents"
 import { TaskItem, priorityMeta, priorityMissingMeta, categoryInfo } from "./taskTypes"
 import { faDigits, fmtMinutes } from "@/app/lib/time"
 import { aiSourceNotice } from "@/app/lib/ai/aiSource" // C7 — §7.13: تشخیص‌پذیری mock در UI
@@ -78,6 +79,10 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
             toast.error(message) // §9.6: Toast فقط برای Feedback غیرمسدودکننده
             setLastFailedId(task.id) // §9.6 Retry: دستی، با احتیاط — بدون duplicate mutation مخرب
         } finally {
+            // در هر دو حالت سهمیه ممکن است تغییر کرده باشد: موفق ⇒ مصرف نهایی،
+            // ناموفق ⇒ رزرو آزاد شده. release پیش از رسیدن پاسخ به کلاینت انجام
+            // شده، پس عددی که اینجا می‌گیریم نهایی است و مصرفِ نیمه‌کاره نشان نمی‌دهد.
+            announceAiQuotaChanged()
             setBusy(false)
         }
     }

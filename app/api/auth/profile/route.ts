@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { profileSchema } from "@/app/schema/formSchema"
 import { updateProfile } from "@/app/lib/services/auth.service"
 import {
@@ -19,7 +19,7 @@ import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 export async function GET() {
     const context = createObservabilityContext("/api/auth/profile", "auth")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
         return okResponse(user, { requestId: context.requestId })
@@ -35,7 +35,7 @@ export async function GET() {
 export async function PATCH(req: NextRequest) {
     const context = createObservabilityContext("/api/auth/profile", "auth")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

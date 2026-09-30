@@ -207,6 +207,28 @@ export class UsernameTakenError extends ServiceError {
 }
 
 /**
+ * 403 — کاربر با رمز موقت لاگین کرده ولی هنوز رمز دائمی تعیین نکرده.
+ *
+ * این خطا فقط از گارد مرکزی `requireVerifiedUser` می‌آید، نه از کپی‌کردن چک در
+ * هر route. هر endpointی که آن را مصرف می‌کند، از طریق `toServiceErrorResponse`
+ * همان envelope استاندارد پروژه را برمی‌گرداند.
+ *
+ * پیام عمداً کاربر-محور است: به‌جای «دسترسی ممنوع» می‌گوید چه باید کرد.
+ */
+export class PasswordChangeRequiredError extends ServiceError {
+    constructor() {
+        super(
+            403,
+            "PASSWORD_CHANGE_REQUIRED",
+            "ابتدا باید رمز عبور جدید خود را تعیین کنید",
+            undefined,
+            "BUSINESS_RULE",
+            "INFO",
+        )
+    }
+}
+
+/**
  * 503 — شکست ارسال ایمیل ترانزاکشنی (سرویس بیرونی Resend).
  *
  * این کد عمداً وجود دارد تا نتیجه‌ی Resend بی‌صدا رد نشود: مسیر OTP دو مرحله‌ای

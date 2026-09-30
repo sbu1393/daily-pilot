@@ -1,4 +1,4 @@
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { readAiQuotaStatus } from "@/app/lib/services/aiQuotaStatus.service"
 import {
@@ -26,7 +26,7 @@ import { recordError } from "@/src/lib/observability/recordError"
 export async function GET() {
     const context = createObservabilityContext("/api/ai/quota", "ai")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

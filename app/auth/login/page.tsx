@@ -22,6 +22,8 @@ type LoginResult = {
     nextStep?: string
     challengeId?: string
     email?: string
+    /** رمز موقت بوده ⇒ بعد از OTP باید رمز دائمی تعیین شود. */
+    mustChangePassword?: boolean
 }
 
 const loginFields = [
@@ -134,6 +136,10 @@ export default function LoginForm() {
                 <div className="dp-auth-switch">
                     حساب کاربری نداری؟{" "}
                     <Link href="/auth/register">ثبت‌نام کن</Link>
+                </div>
+
+                <div className="dp-auth-switch">
+                    <Link href="/auth/forgot-password">رمز عبور را فراموش کرده‌اید؟</Link>
                 </div>
             </AuthCard>
         </motion.div>

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { getHistoryMarkers } from "@/app/lib/services/planner.service"
 import { isValidCanonicalDayKey } from "@/app/lib/canonicalDay"
 import {
@@ -19,7 +19,7 @@ import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 export async function GET(req: NextRequest) {
     const context = createObservabilityContext("/api/planner/history", "planner")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

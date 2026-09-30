@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { setAvatar, removeAvatar } from "@/app/lib/services/auth.service"
 import {
     errorResponse,
@@ -23,7 +23,7 @@ function isValidBase64Payload(payload: string): boolean {
 export async function POST(req: NextRequest) {
     const context = createObservabilityContext("/api/auth/avatar", "auth")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
 export async function DELETE() {
     const context = createObservabilityContext("/api/auth/avatar", "auth")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

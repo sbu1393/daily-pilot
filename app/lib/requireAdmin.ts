@@ -1,4 +1,4 @@
-import { getCurrentUser } from "./getCurrentUser"
+import { requireVerifiedUser } from "./requireVerifiedUser"
 import { ServiceError } from "@/app/lib/services/errors"
 
 // فاز ۴ — Step 4: گارد server-side authorization برای Admin.
@@ -21,7 +21,9 @@ export class AdminForbiddenError extends ServiceError {
 }
 
 export async function requireAdmin() {
-    const user = await getCurrentUser()
+    // از گارد مرکزی رد می‌شود تا مسیر مدیریتی هم تا وقتی کاربر رمز موقت دارد
+    // مسدود بماند — بدون آن، /api/admin/* می‌شد راه دور زدن enforcement.
+    const user = await requireVerifiedUser()
     if (!user) {
         // 401 — استاندارد فعلی repository (same code/envelope as route-level 401)
         throw new ServiceError(401, "UNAUTHORIZED", "Unauthorized")

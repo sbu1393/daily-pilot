@@ -18,7 +18,7 @@
 
 import { NextRequest } from "next/server"
 
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { errorResponse, okResponse, toServiceErrorResponse, unauthorizedResponse } from "@/app/lib/apiResponse"
 import { getSubscriptionView } from "@/app/lib/services/billing.service"
@@ -30,7 +30,7 @@ export async function GET(_req: NextRequest) {
     const context = createObservabilityContext("/api/billing/subscription", "billing")
     try {
         // ۱) authentication — نبود نشست → همان 401 موجود
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

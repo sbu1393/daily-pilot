@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { getOverdueTasks } from "@/app/lib/services/tasks.service"
 import {
     errorResponse,
@@ -16,7 +16,7 @@ import { recordError } from "@/src/lib/observability/recordError"
 export async function GET(_req: NextRequest) {
     const context = createObservabilityContext("/api/tasks/overdue", "tasks")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

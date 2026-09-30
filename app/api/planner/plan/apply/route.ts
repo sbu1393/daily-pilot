@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server"
 
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { planApplyRequestSchema } from "@/app/schema/plannerSchema"
 import type { PlanProposal } from "@/app/lib/planner/planProposal"
 import { applyPlan } from "@/app/lib/services/planApply.service"
@@ -24,7 +24,7 @@ import { recordError } from "@/src/lib/observability/recordError"
 export async function POST(req: NextRequest) {
     const context = createObservabilityContext("/api/planner/plan/apply", "planner")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

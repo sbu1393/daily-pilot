@@ -76,12 +76,48 @@ export async function POST(req: NextRequest) {
             )
         }
 
-        const user = await authenticate(email, password)
+        const auth = await authenticate(email, password)
+        const user = auth.user
         context.userId = user.id
+
+        // رمز موقت = ورود موفق ولی «هنوز کامل نیست». این پرچم تا صفحهٔ OTP و
+        // سشن نهایی حمل می‌شود تا کاربر مستقیم به /auth/set-new-password برود.
+        // OTP همچنان اجباری است — این پرچم هیچ مسیر ورود بدون تأیید ایمیل نمی‌سازد.
+        const mustChangePassword = auth.kind === "TEMPORARY"
+
+        // ورود با رمز موقت یعنی حساب وارد وضعیت «باید رمز جدید تعیین شود» شد.
+        // فلگ **همین‌جا** در DB نوشته می‌شود، نه در verify-otp، چون تنها جایی که
+        // «رمز موقت بود» را می‌داند همین‌جاست؛ OtpCode چنین ستونی ندارد و
+        // افزودنش schema را بدون فایده‌ی دیگری بزرگ می‌کرد.
+        // اثرش بی‌خطر است تا وقتی سشنی وجود ندارد: سشن فقط در verify-otp صادر
+        // می‌شود، پس تا آن لحظه این فلگ هیچ مسیری را باز نمی‌کند.
+        if (mustChangePassword) {
+            try {
+                await getPrisma().user.update({
+                    where: { id: user.id },
+                    data: { mustChangePassword: true },
+                })
+            } catch (error) {
+                // نگسستن به ورود: OTP هنوز باید تأیید شود و ساخت سشن در verify-otp
+                // دوباره فلگ را از DB می‌خواند؛ اگر این نوشتن شکست بخورد، سشن
+                // ساخته می‌شود ولی بدون فلگ — که یعنی enforcement خنثی. پس صریحاً
+                // خطا می‌دهیم تا کاربر پیام درست بگیرد.
+                await recordError(error, context)
+                return errorResponse(
+                    503,
+                    "ACCOUNT_STATE_UNAVAILABLE",
+                    "لطفاً کمی بعد دوباره تلاش کن",
+                    undefined,
+                    context.requestId,
+                )
+            }
+        }
 
         console.log("[login] password verified", {
             requestId: context.requestId,
             userId: user.id,
+            // نوع ورود لاگ می‌شود ولی نه خودِ رمز و نه خودِ ایمیل.
+            loginKind: auth.kind,
         })
 
         // فاز ۳ — گام ۷: auth.login_succeeded فقط بعد از موفقیت واقعی authentication،
@@ -136,6 +172,7 @@ export async function POST(req: NextRequest) {
                     nextStep: "OTP",
                     challengeId: challenge.challengeId,
                     email: user.email,
+                    mustChangePassword,
                 },
             },
             { status: 200 },

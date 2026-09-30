@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { completeTask } from "@/app/lib/services/tasks.service"
 import { completeTaskSchema } from "@/app/schema/taskSchema"
 import {
@@ -21,7 +21,7 @@ export async function PATCH(
 ) {
     const context = createObservabilityContext("/api/tasks/[id]/complete", "tasks")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

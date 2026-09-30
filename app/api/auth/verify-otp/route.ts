@@ -102,10 +102,14 @@ export async function POST(req: NextRequest) {
 
     // سشن فقط برای چالشی که مرحلهٔ ورود صادر کرده است (challengeId).
     // ایمیل از خود **رکورد** خوانده می‌شود، نه از ورودی کلاینت.
+    //
+    // `mustChangePassword` هم از DB خوانده می‌شود (نه از کلاینت، نه از کوکی):
+    // `/api/auth/login` آن را هنگام تشخیص رمز موقت در DB نوشته، پس این‌جا
+    // مقدارِ قطعی همان لحظه است.
     const user = challengeId
       ? await prisma.user.findUnique({
           where: { email: record.email },
-          select: { id: true, username: true, email: true },
+          select: { id: true, username: true, email: true, mustChangePassword: true },
         })
       : null
 

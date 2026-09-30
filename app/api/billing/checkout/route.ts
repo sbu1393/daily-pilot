@@ -31,7 +31,7 @@ import type { BillingProviderId } from "@/app/lib/billing/config"
 import type { PaymentProvider } from "@/app/lib/billing/provider"
 import { PaymentProviderError } from "@/app/lib/billing/provider"
 import { buildRedirectUrl, zarinpalProvider } from "@/app/lib/billing/zarinpal.adapter"
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { isRateLimited } from "@/app/lib/rateLimit"
 import {
@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
     const context = createObservabilityContext("/api/billing/checkout", "billing")
     try {
         // ۱) authentication — نبود نشست → همان 401 موجود
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

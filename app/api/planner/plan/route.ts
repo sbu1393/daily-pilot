@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { isRateLimited } from "@/app/lib/rateLimit"
 import { getCanonicalToday } from "@/app/lib/canonicalDay"
@@ -40,7 +40,7 @@ export const maxDuration = 60
 export async function POST(req: NextRequest) {
     const context = createObservabilityContext("/api/planner/plan", "planner")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

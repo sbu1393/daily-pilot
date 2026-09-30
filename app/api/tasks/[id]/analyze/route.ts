@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { isRateLimited } from "@/app/lib/rateLimit"
 import { reanalyzeTask } from "@/app/lib/services/tasks.service"
@@ -34,7 +34,7 @@ export async function PATCH(
 ) {
     const context = createObservabilityContext("/api/tasks/[id]/analyze", "analyze")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

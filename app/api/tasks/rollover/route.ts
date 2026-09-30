@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { rolloverTasks } from "@/app/lib/services/tasks.service"
 import { rolloverSchema } from "@/app/schema/plannerSchema"
 import {
@@ -18,7 +18,7 @@ import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 export async function POST(req: NextRequest) {
     const context = createObservabilityContext("/api/tasks/rollover", "tasks")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

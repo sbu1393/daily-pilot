@@ -11,7 +11,7 @@
 
 import { NextRequest } from "next/server"
 
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { isRateLimited } from "@/app/lib/rateLimit"
 import {
     errorResponse,
@@ -31,7 +31,7 @@ const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000
 export async function POST(_req: NextRequest) {
     const context = createObservabilityContext("/api/notifications/test", "notifications")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

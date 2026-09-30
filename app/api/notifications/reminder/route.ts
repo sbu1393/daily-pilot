@@ -17,7 +17,7 @@ import { NextRequest } from "next/server"
 
 import { z } from "zod"
 
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { isRateLimited } from "@/app/lib/rateLimit"
 import {
@@ -44,7 +44,7 @@ const reminderScheduleSchema = z.object({
 export async function POST(req: NextRequest) {
     const context = createObservabilityContext("/api/notifications/reminder", "notifications")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

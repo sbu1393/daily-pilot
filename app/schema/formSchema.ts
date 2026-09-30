@@ -112,6 +112,41 @@ export const changePasswordSchema = z
         { message: "رمز عبور جدید و تکرار آن یکسان نیست", path: ["newPasswordConfirm"] },
     )
 
+/** POST /api/auth/forgot-password — فقط ایمیل؛ هیچ چیز دیگری از کلاینت. */
+export const forgotPasswordSchema = z.object({
+    email: z
+        .string()
+        .trim()
+        .toLowerCase()
+        .email("ایمیل معتبر نیست"),
+})
+
+/**
+ * POST /api/auth/set-new-password — عمداً **بدون** `currentPassword`.
+ *
+ * علت: در این وضعیت کاربر با رمز *موقت* لاگین کرده و آن رمز فقط یک‌بارمصرف
+ * است. اگر اینجا رمز فعلی را هم می‌خواستیم، یا کاربر باید رمز موقت را دوباره
+ * وارد می‌کرد (که با «یک‌بارمصرف» در تناقض است) یا باید از نشستِ همین لحظه
+ * عبور می‌کرد.
+ *
+ * امنیت از دو جای دیگر می‌آید: (۱) endpoint فقط با نشستِ معتبر کار می‌کند،
+ * (۲) همان نشست فقط وقتی ساخته شده که OTP هم تأیید شده بود. پس «احراز شده» در
+ * این مسیر یعنی «ایمیل هم تأیید شده».
+ */
+export const setNewPasswordSchema = z
+    .object({
+        newPassword: z
+            .string()
+            .min(8, "رمز عبور جدید حداقل ۸ کاراکتر باشد")
+            .max(128, "رمز عبور جدید بسیار طولانی است"),
+        newPasswordConfirm: z.string(),
+    })
+    .strict()
+    .refine((data) => data.newPassword === data.newPasswordConfirm, {
+        message: "رمز عبور جدید و تکرار آن یکسان نیست",
+        path: ["newPasswordConfirm"],
+    })
+
 /** اعتبارسنجی تاریخ تولد: قالب YYYY-MM-DD و تاریخ تقویمی واقعی */
 function isValidBirthDate(value: string): boolean {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false

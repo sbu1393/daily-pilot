@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { redeemPromoCode } from "@/app/lib/services/promoCode.service"
 import { redeemPromoCodeSchema } from "@/app/schema/aiQuotaSchema"
@@ -30,7 +30,7 @@ const WINDOW_MS = 15 * 60 * 1000
 export async function POST(req: NextRequest) {
     const context = createObservabilityContext("/api/promo/redeem", "billing")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

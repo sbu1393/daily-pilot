@@ -163,10 +163,11 @@ describe("POST /api/auth/verify-otp", () => {
         expect(mocks.verifyOtp).toHaveBeenCalledWith(CODE, "hashed-code")
         // یک‌بارمصرف: حذف قبل از صدور سشن
         expect(mocks.otpDelete).toHaveBeenCalledWith({ where: { id: CHALLENGE_ID } })
-        // کاربر از خود رکورد (سمت سرور) خوانده می‌شود، نه از ورودی کلاینت
+        // کاربر از خود رکورد (سمت سرور) خوانده می‌شود، نه از ورودی کلاینت.
+        // `mustChangePassword` هم از DB خوانده می‌شود تا در سشن حمل شود.
         expect(mocks.userFindUnique).toHaveBeenCalledWith({
             where: { email: EMAIL },
-            select: { id: true, username: true, email: true },
+            select: { id: true, username: true, email: true, mustChangePassword: true },
         })
         expect(mocks.createSession).toHaveBeenCalledWith(USER, expect.anything())
         expect(res.cookies.get("token")?.value).toBe("mocked-jwt")

@@ -120,9 +120,42 @@ model User {
   reminderEnabled Boolean @default(false) // آیا یادآور فعال است؟
   reminderTime    String  @default("09:00") // "HH:MM" به وقت محلی کاربر
   reminderSentOn  String? // dayKey محلیِ آخرین ارسال موفق (ضد ارسال تکراری)
+  // رمز عبور موقت — کاربر با رمز موقت لاگین کرده ولی هنوز رمز دائمی تعیین نکرده.
+  // DB تنها منبع حقیقت است؛ JWT می‌تواند آن را حمل کند ولی مرجع نیست.
+  mustChangePassword Boolean @default(false)
   pushSubscriptions PushSubscription[] // یادآورها — اشتراک‌های Web Push این کاربر
   aiQuotaBuckets   AiQuotaBucket[] // AI Quota v2 — ledger مصرف BASE/PROMO (بدون تغییر رفتار)
   promoRedemptions PromoRedemption[] // AI Quota v2 — ریدیمپشن‌های کد هدیه (هر کد یک‌بار)
+  passwordResetTokens PasswordResetToken[] // رمز عبور موقت — lifecycle جدا از User.password
+}
+
+/// رمز عبور موقت — عمداً جدول جدا و NOT روی User.password.
+///
+/// چرا جدا؟ چون `User.password` باید **رمز دائمی قبلی** را سالم نگه دارد: اگر
+/// ایمیل به دست کاربر نرسد، حسابش قفل می‌شود. علاوه بر آن، تشخیص «لاگین با رمز
+/// موقت» فقط با مقایسهٔ دو هش صریح است، نه یک `password` مبهم.
+///
+/// - plaintext هرگز persist نمی‌شود؛ فقط bcrypt hash (هم‌راستا با `OtpCode.codeHash`).
+/// - یک‌بارمصرف: `usedAt` یا حذف ردیف در همان تراکنش مصرف.
+/// - انقضا: `expiresAt` (TTL کوتاه) — انقضا فقط پنجرهٔ *لاگین* را می‌بندد؛ پس از
+///   لاگین، وضعیت با `User.mustChangePassword` نگه داشته می‌شود.
+/// - `attempts` ضد brute force روی خودِ توکن است.
+/// - `invalidatedAt` یعنی با درخواست جدیدِ همان کاربر supersede شده است.
+model PasswordResetToken {
+  id            String    @id @default(cuid())
+  userId        Int
+  tokenHash     String
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(5)
+  expiresAt     DateTime
+  usedAt        DateTime?
+  invalidatedAt DateTime?
+  createdAt     DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
 }
 
 model Task {

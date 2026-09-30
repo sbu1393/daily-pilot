@@ -79,6 +79,10 @@ export async function getCurrentUser() {
                 // (revocation فوری در request بعدی؛ سند Phase 4 «Role Model»)
                 role: true,
 
+                // رمز موقت — از DB خوانده می‌شود، هرگز از JWT. این تنها مرجع
+                // حقیقتِ enforcement است (گارد مرکزی `requireVerifiedUser`).
+                mustChangePassword: true,
+
                 // فاز ۵ — گام ۱۳: `plan` از این select حذف شد؛ مقدار کهنه‌ی آینه‌ی سروری هرگز به
                 // مصرف‌کننده (planPolicy/quota) نمی‌رسد و پلن از entitlement resolve می‌شود.
             },

@@ -1,4 +1,4 @@
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { isRateLimited } from "@/app/lib/rateLimit"
 import { runAiSamples } from "@/app/lib/services/analysis.service"
 import { createObservabilityContext } from "@/src/lib/observability/context"
@@ -34,7 +34,7 @@ export async function GET() {
 
     const context = createObservabilityContext("/api/ai/test", "ai-test")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

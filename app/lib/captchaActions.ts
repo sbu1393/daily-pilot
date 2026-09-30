@@ -14,6 +14,8 @@ export const CAPTCHA_ACTIONS = {
     login: "login",
     sendOtp: "send_otp",
     verifyOtp: "verify_otp",
+    // فراموشی رمز — بدون کپچا این endpoint به ابزار ارسال ایمیل انبوه تبدیل می‌شود.
+    forgotPassword: "forgot_password",
 } as const
 
 export type CaptchaAction = (typeof CAPTCHA_ACTIONS)[keyof typeof CAPTCHA_ACTIONS]

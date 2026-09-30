@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
     isRateLimited: vi.fn(),
     clientIp: vi.fn(),
     authenticate: vi.fn(),
+    userUpdate: vi.fn(),
     touchAuthenticatedActivity: vi.fn(),
     recordProductEvent: vi.fn(),
     getPrisma: vi.fn(),
@@ -76,8 +77,9 @@ describe("POST /api/auth/login", () => {
             recorded: true,
             eventName: "auth.login_succeeded",
         })
-        mocks.getPrisma.mockReturnValue({})
-        mocks.authenticate.mockResolvedValue(USER)
+        mocks.getPrisma.mockReturnValue({ user: { update: mocks.userUpdate } })
+        // `authenticate` یک discriminated union برمی‌گرداند (NORMAL | TEMPORARY).
+        mocks.authenticate.mockResolvedValue({ kind: "NORMAL", user: USER })
         mocks.createOtpChallenge.mockResolvedValue(CHALLENGE)
         mocks.sendOtpEmail.mockResolvedValue({ sent: true, id: "email_1" })
     })
@@ -92,7 +94,12 @@ describe("POST /api/auth/login", () => {
         expect(res.status).toBe(200)
         await expect(res.json()).resolves.toEqual({
             ok: true,
-            data: { nextStep: "OTP", challengeId: "ch_1", email: "test@example.com" },
+            data: {
+                nextStep: "OTP",
+                challengeId: "ch_1",
+                email: "test@example.com",
+                mustChangePassword: false,
+            },
         })
         expect(mocks.authenticate).toHaveBeenCalledWith("test@example.com", "secret123")
         expect(mocks.createOtpChallenge).toHaveBeenCalledWith("test@example.com")

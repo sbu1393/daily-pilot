@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { getDaySummary, setDayPlan } from "@/app/lib/services/planner.service"
 import { getCanonicalToday, isValidCanonicalDayKey } from "@/app/lib/canonicalDay"
 import { dayPlanSchema } from "@/app/schema/plannerSchema"
@@ -22,7 +22,7 @@ import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 export async function GET(req: NextRequest) {
     const context = createObservabilityContext("/api/planner/day", "planner")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 
@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
     const context = createObservabilityContext("/api/planner/day", "planner")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

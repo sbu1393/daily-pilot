@@ -10,6 +10,11 @@ import {
     UsernameTakenError,
     WrongPasswordError,
 } from "./errors"
+import {
+    consumeTokenForLogin,
+    invalidateActiveTokensForUser,
+    type PasswordResetClient,
+} from "./passwordReset.service"
 
 const BCRYPT_COST = 12
 
@@ -52,14 +57,67 @@ export async function registerUser(input: {
 }
 
 // ---------- ورود (خطای یکسان برای جلوگیری از User Enumeration) ----------
-export async function authenticate(email: string, password: string): Promise<User> {
-    const user = await getPrisma().user.findUnique({ where: { email } })
+
+/**
+ * نتیجهٔ authenticate — چرا `User` برنمی‌گرداند؟
+ *
+ * مسیر لاگین باید بداند ورود با **رمز دائمی** بوده یا **رمز موقت**، تا پرچم
+ * `mustChangePassword` را تا `/auth/otp` و سشن نهایی حمل کند. برگرداندن خودِ
+ * `User` این اطلاعات را ندارد، و اضافه‌کردن پرچم به `User` هم آن را آلوده می‌کند.
+ * پس یک discriminated union برمی‌گردد — تغییری که هر دو حالت را صریح می‌کند.
+ */
+export type AuthenticationResult =
+    | { kind: "NORMAL"; user: User }
+    | { kind: "TEMPORARY"; user: User }
+
+/**
+ * authenticate — ایمیل + رمز را بررسی می‌کند.
+ *
+ * ترتیب بررسی **رمز دائمی اول، رمز موقت دوم** است، و دلیلش صرفاً کارایی نیست:
+ * اگر اول توکن موقت بررسی شود، هر تلاش ناموفق یک increment روی `attempts`
+ * می‌خورد و کاربری که رمز عبورش را اشتباه تایپ کرده، ممکن است بی‌دلیل سقف
+ * تلاشِ توکنش را بسوزاند و ناچار شود دوباره رمز موقت بگیرد.
+ *
+ * خطا در **همهٔ** حالت‌ها یکسان است (`InvalidCredentialsError`): نه کاربر وجود
+ * ندارد، نه رمز غلط است، نه توکن منقضی/مصرف‌شده/بی‌اثر. هیچ تفکیکی وجود ندارد
+ * تا این مسیر قابلیت enumeration نداشته باشد.
+ *
+ * توجه: بازگشت `TEMPORARY` فقط **نوع ورود** را مشخص می‌کند. OTP همچنان اجباری
+ * است — سشن فقط در `verify-otp` صادر می‌شود، نه اینجا.
+ */
+export async function authenticate(
+    email: string,
+    password: string,
+    prisma: PrismaAuthClient = getPrisma() as unknown as PrismaAuthClient,
+): Promise<AuthenticationResult> {
+    const user = await prisma.user.findUnique({ where: { email } })
     if (!user) throw new InvalidCredentialsError()
 
     const passwordMatch = await bcrypt.compare(password, user.password)
-    if (!passwordMatch) throw new InvalidCredentialsError()
+    if (passwordMatch) return { kind: "NORMAL", user }
 
-    return user
+    // رمز دائمی رد شد → شاید رمز موقت باشد. بررسی فقط وقتی لازم است که کاربر
+    // قبلاً با رمز موقت لاگین کرده باشد؛ در آن صورت توکن فعال وجود دارد.
+    // همان کلاینتِ تزریق‌شده جلو می‌رود تا تست بتواند مسیر را کنترل کند.
+    const reset = await consumeTokenForLogin(prisma, {
+        userId: user.id,
+        candidate: password,
+    })
+    if (!reset.ok) throw new InvalidCredentialsError()
+
+    return { kind: "TEMPORARY", user }
+}
+
+/**
+ * کلاینت حداقلی موردنیاز `authenticate` — تزریق‌پذیر برای تست.
+ * عملاً همان سطح دسترسی `PasswordResetClient` است (هر دو به `user` و
+ * `passwordResetToken` نیاز دارند)؛ این interface فقط برای خواناییِ امضای
+ * `authenticate` و تایپِ دقیق `User` تعریف شده.
+ */
+export interface PrismaAuthClient extends PasswordResetClient {
+    user: PasswordResetClient["user"] & {
+        findUnique: (args: unknown) => Promise<User | null>
+    }
 }
 
 export type ProfileUpdateInput = {
@@ -121,6 +179,19 @@ export async function removeAvatar(userId: number): Promise<void> {
 }
 
 // ---------- تغییر رمز عبور ----------
+/**
+ * changePassword — مسیر عادی تغییر رمز (تنظیمات، یا هنگام داشتن رمز موقت).
+ *
+ * نکتهٔ امنیتی: هر تغییرِ موفقِ رمز، **توکن‌های رمز موقتِ باز را باطل می‌کند**.
+ * بدون این، این سناریو ممکن بود: کاربر با رمز موقت لاگین می‌کند، بعد با همان
+ * رمز موقت `change-password` را صدا می‌زند و یک رمز دائمی تازه می‌گذارد — ولی
+ * خودِ توکن تا ۱۵ دقیقه معتبر می‌ماند و هر کسی که رمز موقت را از ایمیل دیده،
+ * هنوز می‌تواند با آن وارد شود. یعنی «بعد از تغییر رمز، رمز موقت دیگر کار
+ * نمی‌کند» فقط روی مسیر `set-new-password` درست می‌بود، نه روی این یکی.
+ *
+ * `invalidateActiveTokensForUser` عمداً fail-open است (best-effort) تا یک خطای
+ * ثبت‌نظافتی، تغییر موفق رمز را شکست ندهد.
+ */
 export async function changePassword(
     userId: number,
     currentPassword: string,
@@ -144,4 +215,7 @@ export async function changePassword(
         where: { id: userId },
         data: { password: hashed },
     })
+
+    // رمز تازه تعیین شد ⇒ هر رمز موقتِ در جریان بی‌اثر است.
+    await invalidateActiveTokensForUser(prisma as unknown as PasswordResetClient, userId)
 }

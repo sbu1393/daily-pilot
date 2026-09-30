@@ -22,6 +22,8 @@ export const metadata: Metadata = {
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
     const user = await getCurrentUser()
     if (!user) redirect("/auth/login")
+    // رمز موقت: پیش از هر چیز مدیریتی باید رمز دائمی تعیین شود.
+    if (user.mustChangePassword) redirect("/auth/set-new-password")
     if (user.role !== "ADMIN") redirect("/dashboard")
 
     return <AppShell user={user}>{children}</AppShell>

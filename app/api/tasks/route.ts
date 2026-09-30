@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { getCurrentUser } from "@/app/lib/getCurrentUser"
+import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { createTask, getDayTasks } from "@/app/lib/services/tasks.service"
 import { getCanonicalToday, isValidCanonicalDayKey } from "@/app/lib/canonicalDay"
 import { makeCreateTaskSchema } from "@/app/schema/taskSchema"
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     // فاز صفر Observability — requestId فقط سمت سرور تولید می‌شود (هرگز از کلاینت خوانده نمی‌شود)
     const context = createObservabilityContext("/api/tasks")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
     const context = createObservabilityContext("/api/tasks")
     try {
-        const user = await getCurrentUser()
+        const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 

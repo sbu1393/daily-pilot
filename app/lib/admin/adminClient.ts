@@ -10,10 +10,19 @@ import { api, ApiClientError } from "@/app/lib/api/client"
 import type {
     AdminActivityPage,
     AdminAiUsagePage,
+    AdminAuditLogsPage,
+    AdminCreatePromoCodeInput,
     AdminErrorLogsPage,
     AdminOverview,
+    AdminPromoCodeView,
+    AdminPromoCodesPage,
+    AdminQuotaFeature,
+    AdminQuotaPolicyPage,
+    AdminQuotaPolicyView,
     AdminUserDetail,
+    AdminUserQuotaDetail,
     AdminUsersPage,
+    AdminPlan,
 } from "./adminTypes"
 
 export interface AdminRequestError {
@@ -85,4 +94,68 @@ export async function fetchAdminUserErrors(
 
 export async function fetchAdminErrors(query: string, signal?: AbortSignal): Promise<AdminErrorLogsPage> {
     return api<AdminErrorLogsPage>(`/api/admin/errors?${query}`, { signal })
+}
+
+// ---------- Admin V2: /admin/quota (policy) ----------
+
+export async function fetchAdminQuotaPolicy(signal?: AbortSignal): Promise<AdminQuotaPolicyPage> {
+    return api<AdminQuotaPolicyPage>("/api/admin/quota-policy", { signal })
+}
+
+export async function updateAdminQuotaPolicy(input: {
+    plan: AdminPlan
+    feature: AdminQuotaFeature
+    allowedUnits: number
+}): Promise<AdminQuotaPolicyView> {
+    return api<AdminQuotaPolicyView>("/api/admin/quota-policy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+    })
+}
+
+// ---------- Admin V2: /admin/promo-codes ----------
+
+export async function fetchAdminPromoCodes(signal?: AbortSignal): Promise<AdminPromoCodesPage> {
+    return api<AdminPromoCodesPage>("/api/admin/promo-codes", { signal })
+}
+
+export async function createAdminPromoCode(input: AdminCreatePromoCodeInput): Promise<AdminPromoCodeView> {
+    return api<AdminPromoCodeView>("/api/admin/promo-codes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+    })
+}
+
+export async function setAdminPromoCodeActive(
+    id: string,
+    isActive: boolean,
+): Promise<{ id: string; isActive: boolean }> {
+    return api<{ id: string; isActive: boolean }>(
+        `/api/admin/promo-codes/${encodeURIComponent(id)}`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ isActive }),
+        },
+    )
+}
+
+// ---------- Admin V2: per-user quota (V2-aware) ----------
+
+export async function fetchAdminUserQuota(
+    id: string,
+    signal?: AbortSignal,
+): Promise<AdminUserQuotaDetail> {
+    return api<AdminUserQuotaDetail>(`/api/admin/users/${encodeURIComponent(id)}/quota`, { signal })
+}
+
+// ---------- Admin V2: /admin/audit ----------
+
+export async function fetchAdminAuditLogs(
+    query: string,
+    signal?: AbortSignal,
+): Promise<AdminAuditLogsPage> {
+    return api<AdminAuditLogsPage>(`/api/admin/audit-log?${query}`, { signal })
 }

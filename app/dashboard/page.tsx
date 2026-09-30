@@ -8,6 +8,7 @@ import DayHeader from "./DayHeader"
 import DayStatsBar from "./DayStarBar"
 import DayStartModal from "./DayStarModal"
 import AiQuotaStatusBar from "./AiQuotaStatusBar"
+import PromoRedeemBox from "./PromoRedeemBox"
 import { useDaySummary } from "../hooks/useDaySummary"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import DayTaskArea from "../components/task/DayTaskArea"
@@ -58,6 +59,9 @@ export default function Dashboard() {
             {/* وضعیت سهمیهٔ AI — فقط خواندنی، کنار آمار روز. خودش از
                 /api/ai/quota می‌خواند و بعد از هر عملیات AI تازه می‌شود. */}
             <AiQuotaStatusBar />
+
+            {/* کد هدیه — بخش ساده و خنثی برای وارد کردن promo code. */}
+            <PromoRedeemBox />
 
             <DayTaskArea />
 

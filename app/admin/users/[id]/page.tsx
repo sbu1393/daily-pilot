@@ -15,13 +15,15 @@
 import Link from "next/link"
 import { useParams } from "next/navigation"
 import { useCallback, useMemo } from "react"
-import { Activity, ArrowRight, Bot, CreditCard, ShieldAlert } from "lucide-react"
+import { Activity, ArrowRight, Bot, CreditCard, Gauge, ShieldAlert } from "lucide-react"
 import {
     fetchAdminUserActivity,
     fetchAdminUserAiUsage,
     fetchAdminUserDetail,
     fetchAdminUserErrors,
+    fetchAdminUserQuota,
 } from "@/app/lib/admin/adminClient"
+import type { AdminQuotaDimensionView } from "@/app/lib/admin/adminTypes"
 import { useAdminQuery } from "@/app/lib/admin/useAdminQuery"
 import {
     buildActivityPageVM,
@@ -32,6 +34,7 @@ import {
     faDigits,
     formatTimestamp,
     formatUtilization,
+    hasPromoQuota,
     paymentStatusLabel,
     planLabel,
     resolveListStatus,
@@ -77,11 +80,16 @@ export default function AdminUserDetailPage() {
         (signal: AbortSignal) => fetchAdminUserErrors(userId, errorsQuery, signal),
         [userId, errorsQuery],
     )
+    const quotaFetcher = useCallback(
+        (signal: AbortSignal) => fetchAdminUserQuota(userId, signal),
+        [userId],
+    )
 
     const detail = useAdminQuery(idValid ? `user:${userId}` : "", detailFetcher)
     const activity = useAdminQuery(idValid ? `activity:${userId}` : "", activityFetcher)
     const aiUsage = useAdminQuery(idValid ? "ai-usage" : "", aiFetcher)
     const errors = useAdminQuery(idValid ? "errors" : "", errorsFetcher)
+    const quota = useAdminQuery(idValid ? `quota:${userId}` : "", quotaFetcher)
 
     if (!idValid) {
         return (
@@ -227,6 +235,30 @@ export default function AdminUserDetailPage() {
                 </section>
             )}
 
+            {/* Admin V2 — سهمیه AI (V2-aware: effective plan + mode + BASE/PROMO) */}
+            {quota.data !== null && (
+                <section aria-labelledby="admin-uquota-heading" className={styles.section}>
+                    <h2 id="admin-uquota-heading" className={styles.sectionTitle}>
+                        <Gauge size={16} aria-hidden="true" /> سهمیه AI
+                    </h2>
+                    <dl className={styles.defList}>
+                        <dt>طرح مؤثر (از اشتراک)</dt>
+                        <dd>{planLabel(quota.data.effectivePlan)}</dd>
+                        <dt>حالت دوره</dt>
+                        <dd>{quota.data.mode === "NEW" ? "NEW (bucket V2)" : "LEGACY"}</dd>
+                        <dt>شروع دوره</dt>
+                        <dd>{formatTimestamp(quota.data.periodStart)}</dd>
+                    </dl>
+                    {quota.data.mode === "LEGACY" && (
+                        <p className={styles.statHint}>
+                            در دوره‌ی legacy یک استخر مشترک بین تحلیل و برنامه‌ریزی وجود دارد.
+                        </p>
+                    )}
+                    <QuotaDimensionTable title="تحلیل هوشمند" dimension={quota.data.dimensions.analyze} />
+                    <QuotaDimensionTable title="برنامه‌ریزی هوشمند" dimension={quota.data.dimensions.plan} />
+                </section>
+            )}
+
             {/* اشتراک و پرداخت — read-only (فاز ۵ §۲۴/§۳۰) */}
             {billing !== null && (
                 <section aria-labelledby="admin-ubilling-heading" className={styles.section}>
@@ -367,6 +399,60 @@ export default function AdminUserDetailPage() {
                     )
                 })()}
             </section>
+        </div>
+    )
+}
+
+function QuotaDimensionTable({
+    title,
+    dimension,
+}: {
+    title: string
+    dimension: AdminQuotaDimensionView
+}) {
+    const hasPromo = hasPromoQuota(dimension.promo)
+    return (
+        <div className={styles.tableScroll}>
+            <table className={styles.table}>
+                <caption className={styles.statHint}>{title}</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">منبع</th>
+                        <th scope="col">ظرفیت</th>
+                        <th scope="col">رزرو</th>
+                        <th scope="col">مصرف</th>
+                        <th scope="col">باقی‌مانده</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>سهمیه‌ی پایه (BASE)</td>
+                        <td>{faDigits(dimension.base.capacity)}</td>
+                        <td>{faDigits(dimension.base.reserved)}</td>
+                        <td>{faDigits(dimension.base.consumed)}</td>
+                        <td>{faDigits(dimension.base.remaining)}</td>
+                    </tr>
+                    <tr>
+                        <td>سهمیه‌ی هدیه (PROMO)</td>
+                        {hasPromo ? (
+                            <>
+                                <td>{faDigits(dimension.promo.capacity)}</td>
+                                <td>{faDigits(dimension.promo.reserved)}</td>
+                                <td>{faDigits(dimension.promo.consumed)}</td>
+                                <td>{faDigits(dimension.promo.remaining)}</td>
+                            </>
+                        ) : (
+                            <td colSpan={4} className={styles.emptyCell}>
+                                بدون سهمیه هدیه
+                            </td>
+                        )}
+                    </tr>
+                    <tr>
+                        <td>مجموع باقی‌مانده</td>
+                        <td colSpan={4}>{faDigits(dimension.totalRemaining)}</td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
     )
 }

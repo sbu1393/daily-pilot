@@ -16,10 +16,15 @@ import type { AdminAccessStatus } from "@/app/lib/admin/adminViewModels"
 const NAV_TABS = [
     { href: "/admin", label: "نمای کلی" },
     { href: "/admin/users", label: "کاربران" },
+    { href: "/admin/quota", label: "سهمیه AI" },
+    { href: "/admin/promo-codes", label: "کدهای هدیه" },
+    { href: "/admin/audit", label: "گزارش فعالیت" },
     { href: "/admin/errors", label: "خطاها" },
 ] as const
 
-export function AdminNavTabs({ active }: { active: "/admin" | "/admin/users" | "/admin/errors" }) {
+type AdminNavHref = (typeof NAV_TABS)[number]["href"]
+
+export function AdminNavTabs({ active }: { active: AdminNavHref }) {
     return (
         <nav className={styles.navTabs} aria-label="ناوبری بخش مدیریت">
             {NAV_TABS.map((tab) => (

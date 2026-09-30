@@ -18,8 +18,12 @@
 // کاربران «id DESC» (tie-break deterministic با خود id — unique است)؛ بدون schema change.
 
 import { getPrisma } from "@/app/lib/getPrisma"
-import { UserNotFoundError } from "./errors"
+import type { PrismaClientLike } from "./aiUsage.service"
+import { QuotaUnavailableError, UserNotFoundError } from "./errors"
 import { getMonthlyPeriod, resolvePlanPolicy } from "./planPolicy.service"
+import { readCutoverAt, resolveQuotaMode, type QuotaMode } from "./aiQuotaCutover.service"
+import { readQuotaBuckets, type QuotaBucketView } from "./aiQuotaV2.service"
+import { resolveEffectivePlan } from "./entitlement.service"
 import {
     listErrorLogs,
     getErrorStats,
@@ -1564,6 +1568,127 @@ export async function getAdminBillingSummary(
     }
 
     return { plan, entitlement, latestPayment, errorLogs }
+}
+
+// =====================================================================
+// ۹.۵) Admin V2 — نمای سهمیهٔ V2-aware یک کاربر (کاملاً read-only)
+// =====================================================================
+//
+// تفاوت با `getUserAiUsage` (legacy):
+//   • پلن مؤثر از `resolveEffectivePlan` می‌آید، نه آینهٔ `User.plan`.
+//   • mode از `readCutoverAt`/`resolveQuotaMode` می‌آید (همان تصمیم runtime).
+//   • در NEW منبع data دقیقاً `readQuotaBuckets` است (BASE/PROMO جدا).
+//   • در LEGACY رفتار legacy حفظ می‌شود (AiUsage + resolvePlanPolicy، استخر مشترک).
+// هیچ‌جا reserved/consumed دست‌کاری نمی‌شود.
+
+export interface AdminQuotaBucketView {
+    capacity: number
+    reserved: number
+    consumed: number
+    remaining: number
+}
+
+export interface AdminQuotaDimensionView {
+    base: AdminQuotaBucketView
+    promo: AdminQuotaBucketView
+    totalRemaining: number
+}
+
+export interface AdminUserQuotaDetail {
+    /** پلن مؤثر واقعی (نتیجهٔ resolveEffectivePlan) — هرگز آینهٔ User.plan. */
+    effectivePlan: AdminPlan
+    mode: QuotaMode
+    periodStart: string
+    dimensions: {
+        analyze: AdminQuotaDimensionView
+        plan: AdminQuotaDimensionView
+    }
+}
+
+const ZERO_BUCKET: AdminQuotaBucketView = { capacity: 0, reserved: 0, consumed: 0, remaining: 0 }
+
+function toDimensionView(
+    views: QuotaBucketView[],
+    feature: "ANALYZE" | "PLAN",
+): AdminQuotaDimensionView {
+    const base = views.find((v) => v.feature === feature && v.source === "BASE")
+    const promo = views.find((v) => v.feature === feature && v.source === "PROMO")
+    const b = base
+        ? { capacity: base.capacity, reserved: base.reserved, consumed: base.consumed, remaining: base.remaining }
+        : ZERO_BUCKET
+    const p = promo
+        ? { capacity: promo.capacity, reserved: promo.reserved, consumed: promo.consumed, remaining: promo.remaining }
+        : ZERO_BUCKET
+    return { base: b, promo: p, totalRemaining: b.remaining + p.remaining }
+}
+
+export async function getAdminUserQuotaDetail(
+    userId: number,
+    options: { prisma?: PrismaClientLike; now?: Date } = {},
+): Promise<AdminUserQuotaDetail> {
+    const client = options.prisma ?? getPrismaLate()
+    const now = isValidDate(options.now) ? options.now : new Date()
+
+    const userRow = (await client.user.findUnique({
+        where: { id: userId },
+        select: { timezone: true },
+    })) as { timezone?: unknown } | null
+    if (userRow === null) throw new UserNotFoundError()
+    const timezone = typeof userRow.timezone === "string" ? userRow.timezone : "UTC"
+
+    // effective plan از همان مسیر entitlement (lazy expiration + resolve) — نه User.plan.
+    const effectivePlan = (await resolveEffectivePlan(client, userId, now)) as AdminPlan
+
+    const cutoverAt = await readCutoverAt(client)
+    const periodStart = getMonthlyPeriod(now, timezone).periodStart
+    const mode = resolveQuotaMode(periodStart, cutoverAt, timezone)
+
+    if (mode === "NEW") {
+        const views = await readQuotaBuckets(client, {
+            userId,
+            plan: effectivePlan,
+            timezone,
+            now,
+        })
+        return {
+            effectivePlan,
+            mode,
+            periodStart: periodStart.toISOString(),
+            dimensions: {
+                analyze: toDimensionView(views, "ANALYZE"),
+                plan: toDimensionView(views, "PLAN"),
+            },
+        }
+    }
+
+    // LEGACY — همان رفتار runtime: یک استخر مشترک روی AiUsage با سقف resolvePlanPolicy.
+    const allowedUnits = resolvePlanPolicy({ plan: effectivePlan }).allowedUnits
+    let reserved = 0
+    let consumed = 0
+    try {
+        const row = (await client.aiUsage.findUnique({
+            where: {
+                userId_periodType_periodStart: { userId, periodType: "MONTHLY", periodStart },
+            },
+            select: { reservedUnits: true, consumedUnits: true },
+        })) as { reservedUnits?: unknown; consumedUnits?: unknown } | null
+        reserved = typeof row?.reservedUnits === "number" ? row.reservedUnits : 0
+        consumed = typeof row?.consumedUnits === "number" ? row.consumedUnits : 0
+    } catch {
+        throw new QuotaUnavailableError()
+    }
+    const sharedRemaining = Math.max(0, allowedUnits - reserved - consumed)
+    const shared: AdminQuotaDimensionView = {
+        base: { capacity: allowedUnits, reserved, consumed, remaining: sharedRemaining },
+        promo: ZERO_BUCKET,
+        totalRemaining: sharedRemaining,
+    }
+    return {
+        effectivePlan,
+        mode,
+        periodStart: periodStart.toISOString(),
+        dimensions: { analyze: shared, plan: shared },
+    }
 }
 
 // =====================================================================

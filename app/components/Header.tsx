@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 // rebase: UI نسخه‌ی remote (lucide + logo.png) حفظ شد؛ importهای H2 پروژه باقی ماندند
 import { toast } from "react-toastify"
-import { CalendarDays, DoorOpen, Settings } from "lucide-react"
+import { CalendarDays, DoorOpen, Settings, Shield } from "lucide-react"
 import Avatar, { type AvatarUser } from "./Avatar"
 import { clearOfflineForLogout } from "@/app/lib/offline"
 import { faDigits } from "@/app/lib/time"
@@ -70,6 +70,13 @@ export default function Header({ user }: { user: AvatarUser | null }) {
                     <Link href="/dashboard" className="dp-header-link">
                         <span style={{margin:"3px"}}>برنامه امروز </span> <CalendarDays />
                     </Link>
+
+                    {/* لینک پنل مدیریت — فقط نمایشی برای نقش ADMIN؛ امنیت واقعی server-side است. */}
+                    {user?.role === "ADMIN" && (
+                        <Link href="/admin" className="dp-header-link">
+                            <span style={{margin:"3px"}}>پنل مدیریت </span> <Shield />
+                        </Link>
+                    )}
 
                     {user && (
                         <div className="header-user" ref={menuRef}>

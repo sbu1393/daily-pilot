@@ -5,6 +5,8 @@ export type AvatarUser = {
     firstName?: string | null
     lastName?: string | null
     image?: string | null
+    /** نقش اختیاری — فقط برای نمایش لینک مدیریتی؛ هیچ تصمیم امنیتی از آن گرفته نمی‌شود. */
+    role?: string | null
 }
 
 export default function Avatar({

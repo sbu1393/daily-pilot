@@ -9,10 +9,14 @@
 
 import type {
     AdminActivityPage,
+    AdminAuditLogsPage,
     AdminBillingSummary,
     AdminErrorLogsPage,
     AdminErrorLogView,
     AdminOverview,
+    AdminPromoCodeView,
+    AdminQuotaBucketView,
+    AdminQuotaPolicyView,
     AdminUserDetail,
     AdminUsersPage,
     AdminAiUsagePage,
@@ -550,4 +554,203 @@ export function severityTone(severity: string): "critical" | "error" | "warning"
         default:
             return "neutral"
     }
+}
+
+// =====================================================================
+// Admin V2 — AI Quota Policy viewmodels
+// =====================================================================
+
+/** برچسب فارسی بُعد سهمیه. */
+export function quotaFeatureLabel(feature: string): string {
+    switch (feature) {
+        case "ANALYZE":
+            return "تحلیل"
+        case "PLAN":
+            return "برنامه‌ریزی"
+        default:
+            return feature
+    }
+}
+
+/** ترتیب پایدار FREE/PRO × ANALYZE/PLAN — هیچ عدد policy اینجا نیست. */
+export function orderQuotaPolicies(policies: AdminQuotaPolicyView[]): AdminQuotaPolicyView[] {
+    const order: Record<string, number> = {
+        "FREE:ANALYZE": 0,
+        "FREE:PLAN": 1,
+        "PRO:ANALYZE": 2,
+        "PRO:PLAN": 3,
+    }
+    return [...policies].sort(
+        (a, b) =>
+            (order[`${a.plan}:${a.feature}`] ?? 99) - (order[`${b.plan}:${b.feature}`] ?? 99),
+    )
+}
+
+// =====================================================================
+// Admin V2 — Promo Codes viewmodels
+// =====================================================================
+
+export type PromoStatus = "active" | "inactive" | "expired" | "upcoming"
+
+/** status فقط display state است — هرگز در DB ذخیره نمی‌شود. */
+export function resolvePromoStatus(
+    promo: Pick<AdminPromoCodeView, "isActive" | "validFrom" | "expiresAt">,
+    now: Date,
+): PromoStatus {
+    if (!promo.isActive) return "inactive"
+    const from = new Date(promo.validFrom).getTime()
+    const until = new Date(promo.expiresAt).getTime()
+    const t = now.getTime()
+    if (Number.isFinite(until) && t >= until) return "expired"
+    if (Number.isFinite(from) && t < from) return "upcoming"
+    return "active"
+}
+
+export function promoStatusLabel(status: PromoStatus): string {
+    switch (status) {
+        case "active":
+            return "فعال"
+        case "inactive":
+            return "غیرفعال"
+        case "expired":
+            return "منقضی"
+        case "upcoming":
+            return "آینده"
+    }
+}
+
+export function promoStatusTone(status: PromoStatus): "ok" | "muted" | "warn" {
+    switch (status) {
+        case "active":
+            return "ok"
+        case "upcoming":
+            return "warn"
+        default:
+            return "muted"
+    }
+}
+
+/** نمایش «بی‌نهایت» برای maxRedemptions = null. */
+export function maxRedemptionsLabel(max: number | null): string {
+    return max === null ? "بدون سقف" : faDigits(max)
+}
+
+// =====================================================================
+// Admin V2 — User quota viewmodels
+// =====================================================================
+
+/** آیا این بُعد سهمیهٔ هدیه دارد؟ (capacity صفر ⇒ «بدون سهمیه هدیه»). */
+export function hasPromoQuota(bucket: AdminQuotaBucketView): boolean {
+    return bucket.capacity > 0
+}
+
+// =====================================================================
+// Admin V2 — Audit Log viewmodels
+// =====================================================================
+
+export type AdminAuditQuery = {
+    action?: string
+    targetType?: string
+    targetId?: string
+    actorUserId?: string
+    from?: string
+    to?: string
+    page: number
+    limit: number
+}
+
+/** فقط کلیدهای مجاز serialize می‌شوند؛ limit هرگز > 100 نمی‌شود. */
+export function buildAuditQueryString(query: AdminAuditQuery): string {
+    const sp = new URLSearchParams()
+    for (const [key, raw] of [
+        ["action", query.action],
+        ["targetType", query.targetType],
+        ["targetId", query.targetId],
+        ["actorUserId", query.actorUserId],
+        ["from", query.from],
+        ["to", query.to],
+    ] as const) {
+        const value = (raw ?? "").trim()
+        if (value.length > 0) sp.set(key, value)
+    }
+    sp.set("page", String(Math.max(1, Math.floor(query.page))))
+    sp.set("limit", String(clampLimit(query.limit)))
+    return sp.toString()
+}
+
+export type AuditLogsPageVM = {
+    status: AdminListStatus
+    items: AdminAuditLogsPage["items"]
+    page: number
+    totalPages: number
+    total: number
+    hasPrev: boolean
+    hasNext: boolean
+}
+
+export function buildAuditLogsPageVM(
+    data: AdminAuditLogsPage | null,
+    loading: boolean,
+    error: string | null,
+): AuditLogsPageVM {
+    if (data === null) {
+        return {
+            status: resolveListStatus(loading, error, 0),
+            items: [],
+            page: 1,
+            totalPages: 1,
+            total: 0,
+            hasPrev: false,
+            hasNext: false,
+        }
+    }
+    const totalPages = Math.max(1, Math.ceil(data.total / Math.max(1, data.limit)))
+    return {
+        status: resolveListStatus(loading, error, data.items.length),
+        items: data.items,
+        page: data.page,
+        totalPages,
+        total: data.total,
+        hasPrev: data.page > 1,
+        hasNext: data.hasMore || data.page < totalPages,
+    }
+}
+
+/** برچسب فارسی action — مقدار ناشناخته همان کد خام می‌ماند (بدون اختراع). */
+export function auditActionLabel(action: string): string {
+    switch (action) {
+        case "quota_policy.updated":
+            return "تغییر سقف سهمیه"
+        case "promo.created":
+            return "ساخت کد هدیه"
+        case "promo.updated":
+            return "تغییر وضعیت کد هدیه"
+        case "promo.redeem_rejected":
+            return "رد ریدیمپشن کد هدیه"
+        default:
+            return action
+    }
+}
+
+export function auditActorLabel(view: AdminAuditLogsPage["items"][number]): string {
+    return view.actorUsername ?? `#${faDigits(view.actorUserId)}`
+}
+
+/**
+ * خلاصه‌ی یک snapshot (before/after) به‌صورت متن — projection allowlist سرور را
+ * دوباره به شکل امن رشته‌ای تبدیل می‌کند. هرگز JSON خام render نمی‌شود.
+ */
+export function formatAuditSnapshot(snapshot: Record<string, unknown> | null): string {
+    if (snapshot === null) return "—"
+    const parts: string[] = []
+    for (const [key, value] of Object.entries(snapshot)) {
+        parts.push(`${key}: ${formatSnapshotValue(value)}`)
+    }
+    return parts.length > 0 ? parts.join(" · ") : "—"
+}
+
+function formatSnapshotValue(value: unknown): string {
+    if (value === null || value === undefined) return "—"
+    if (Array.isArray(value)) return value.map((v) => String(v)).join("، ")
+    return String(value)
 }

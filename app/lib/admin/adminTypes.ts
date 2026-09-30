@@ -237,3 +237,100 @@ export interface AdminAiUsagePage {
     total: number
     hasMore: boolean
 }
+
+// ---------- Admin V2: AI Quota Policy ----------
+
+export type AdminQuotaFeature = "ANALYZE" | "PLAN"
+export type AdminQuotaMode = "LEGACY" | "NEW"
+
+export interface AdminQuotaPolicyView {
+    plan: AdminPlan
+    feature: AdminQuotaFeature
+    allowedUnits: number
+}
+
+/** context گذار از سرور؛ هیچ عدد policy اینجا hard-code نمی‌شود. */
+export interface AdminQuotaPolicyPage {
+    policies: AdminQuotaPolicyView[]
+    cutoverAt: string
+    mode: AdminQuotaMode
+    periodStart: string
+}
+
+// ---------- Admin V2: Promo Codes ----------
+
+export interface AdminPromoCodeView {
+    id: string
+    code: string
+    isActive: boolean
+    validFrom: string
+    expiresAt: string
+    maxRedemptions: number | null
+    bonusAnalyzeUnits: number
+    bonusPlanUnits: number
+    redeemedCount: number
+    createdAt: string
+}
+
+export interface AdminPromoCodesPage {
+    items: AdminPromoCodeView[]
+}
+
+/** ورودی ساخت کد — آینهٔ createPromoCodeSchema (سرور تنها منبع اعتبارسنجی است). */
+export interface AdminCreatePromoCodeInput {
+    code: string
+    validFrom: string
+    expiresAt: string
+    maxRedemptions: number | null
+    bonusAnalyzeUnits: number
+    bonusPlanUnits: number
+}
+
+// ---------- Admin V2: User quota (V2-aware) ----------
+
+export interface AdminQuotaBucketView {
+    capacity: number
+    reserved: number
+    consumed: number
+    remaining: number
+}
+
+export interface AdminQuotaDimensionView {
+    base: AdminQuotaBucketView
+    promo: AdminQuotaBucketView
+    totalRemaining: number
+}
+
+export interface AdminUserQuotaDetail {
+    /** پلن مؤثر واقعی (نتیجهٔ entitlement) — نه آینهٔ User.plan. */
+    effectivePlan: AdminPlan
+    mode: AdminQuotaMode
+    periodStart: string
+    dimensions: {
+        analyze: AdminQuotaDimensionView
+        plan: AdminQuotaDimensionView
+    }
+}
+
+// ---------- Admin V2: Audit Log ----------
+
+export interface AdminAuditLogView {
+    id: string
+    actorUserId: number
+    actorUsername: string | null
+    action: string
+    targetType: string
+    targetId: string
+    before: Record<string, unknown> | null
+    after: Record<string, unknown> | null
+    requestId: string | null
+    createdAt: string
+}
+
+export interface AdminAuditLogsPage {
+    items: AdminAuditLogView[]
+    page: number
+    limit: number
+    total: number
+    hasMore: boolean
+}

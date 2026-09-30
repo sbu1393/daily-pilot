@@ -4,7 +4,11 @@ import Link from "next/link"
 import { motion } from "framer-motion"
 
 import { useAiQuota } from "@/app/hooks/useAiQuota"
-import { describeQuotaDimension, type AiQuotaDimensionView } from "./aiQuotaView"
+import {
+    describeQuotaDimension,
+    QUOTA_PROMO_SOURCE_NOTE,
+    type AiQuotaDimensionView,
+} from "./aiQuotaView"
 import styles from "./dashboard.module.css"
 
 /**
@@ -32,6 +36,8 @@ export default function AiQuotaStatusBar() {
     ]
 
     const anyExhausted = views.some((v) => v.tone === "exhausted")
+    // منبعِ سهمیه فقط یک توضیح ثانویه است — یک‌بار برای کل نوار، نه کنار هر عدد.
+    const anyPromo = views.some((v) => v.hasPromo)
 
     return (
         <motion.section
@@ -51,12 +57,13 @@ export default function AiQuotaStatusBar() {
                         <span className={styles.quotaText} aria-label={view.ariaLabel}>
                             {view.text}
                         </span>
-                        {view.promoHint && (
-                            <span className={styles.quotaPromo}>{view.promoHint}</span>
-                        )}
                     </li>
                 ))}
             </ul>
+
+            {/* توضیح ثانویه و بدون عدد: منبعِ بخشی از سهمیه. عمداً بعد از فهرست و
+                جدا از هر عدد می‌نشیند تا با «باقی‌مانده» جمع زده نشود. */}
+            {anyPromo && <p className={styles.quotaPromo}>{QUOTA_PROMO_SOURCE_NOTE}</p>}
 
             {anyExhausted && (
                 <Link href="/subscription" className={styles.quotaLink}>

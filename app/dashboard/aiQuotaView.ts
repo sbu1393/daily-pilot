@@ -40,9 +40,21 @@ export interface AiQuotaDimensionView {
      * (الزام دسترس‌پذیری) و در element جدا با `aria-label` می‌نشیند.
      */
     ariaLabel: string
-    /** فقط وقتی PROMO باقی مانده باشد؛ توضیح ظریف، نه شمارندهٔ اصلی. */
-    promoHint?: string
+    /**
+     * آیا بخشی از باقی‌مانده از کد هدیه تأمین شده است؟
+     *
+     * عمداً فقط یک boolean است، نه یک عدد. نمایش «۲ مورد هدیه» کنار «۱۱ باقی‌مانده»
+     * برای کاربر دو عددِ ناهم‌خوان کنار هم می‌گذاشت و وسوسه‌ی جمع‌زدنشان می‌داد؛ منبعِ
+     * سهمیه فقط یک توضیح ثانویه است و در متنِ اصلیِ هر بُعد جایی ندارد.
+     */
+    hasPromo: boolean
 }
+
+/**
+ * توضیح ثانویهٔ منبع سهمیه — یک جمله برای کل نوار، بدون عدد.
+ * عمداً بدون رقم است تا با «باقی‌مانده» جمع نشود و شمرده نشود.
+ */
+export const QUOTA_PROMO_SOURCE_NOTE = "بخشی از این سهمیه از کد هدیه تأمین شده است."
 
 /** نام نمایشی هر بُعد — واژهٔ «فرصت» عمداً استفاده نشده (لحن غیرتحریکی). */
 export function quotaFeatureLabel(key: AiQuotaFeatureKey): string {
@@ -69,6 +81,7 @@ export function describeQuotaDimension(
     const label = quotaFeatureLabel(key)
     const remaining = Math.max(0, status.remaining)
     const tone = quotaTone(remaining)
+    const hasPromo = status.promoRemaining > 0
 
     if (tone === "exhausted") {
         return {
@@ -77,36 +90,20 @@ export function describeQuotaDimension(
             label,
             text: `سهمیهٔ ${label} این دوره تمام شده است.`,
             ariaLabel: `سهمیهٔ ${label} برای این دوره تمام شده است.`,
+            hasPromo,
         }
     }
 
     const remainingDigits = faDigits(remaining)
 
-    // حالت «کم»: کمی صریح‌تر، ولی بدون هیچ لحن فشار یا تشویق به مصرف.
-    if (tone === "low") {
-        return {
-            key,
-            tone,
-            label,
-            text: `${remainingDigits} ${label} باقی‌مانده`,
-            ariaLabel: `${remainingDigits} مورد ${label} برای این دوره باقی مانده است.`,
-            ...promoHint(status.promoRemaining),
-        }
-    }
-
-    // حالت عادی: یک خط کم‌حجم، فقط واقعیت.
+    // حالت «عادی» و «کم» یک قالبِ یکسان دارند: فقط «چقدر قابل استفاده مانده».
+    // عمداً هیچ عددِ دومی (مثلاً موجودیِ کد هدیه) کنار این عدد نمی‌آید.
     return {
         key,
         tone,
         label,
-        text: `${label} · ${remainingDigits} باقی‌مانده`,
+        text: `${label}: ${remainingDigits} مورد باقی‌مانده`,
         ariaLabel: `${remainingDigits} مورد ${label} برای این دوره باقی مانده است.`,
-        ...promoHint(status.promoRemaining),
+        hasPromo,
     }
-}
-
-/** توضیح ظریف هدیه — فقط وقتی واقعاً PROMO باقی مانده باشد. */
-function promoHint(promoRemaining: number): { promoHint?: string } {
-    if (promoRemaining <= 0) return {}
-    return { promoHint: `${faDigits(promoRemaining)} مورد هدیه` }
 }

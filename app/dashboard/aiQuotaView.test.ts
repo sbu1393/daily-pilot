@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest"
 import {
     describeQuotaDimension,
     LOW_QUOTA_THRESHOLD,
+    QUOTA_PROMO_SOURCE_NOTE,
     quotaFeatureLabel,
     quotaTone,
 } from "./aiQuotaView"
@@ -45,7 +46,7 @@ describe("describeQuotaDimension — سهمیهٔ هدیه", () => {
 
         expect(view.tone).not.toBe("exhausted")
         expect(view.text).not.toMatch(/تمام شده/)
-        expect(view.promoHint).toBe("۵ مورد هدیه")
+        expect(view.hasPromo).toBe(true)
     })
 
     it("بونوسِ خیلی کم هم «تمام شده» نیست (لحن «کم»، نه exhausted)", () => {
@@ -57,7 +58,7 @@ describe("describeQuotaDimension — سهمیهٔ هدیه", () => {
         })
 
         expect(view.tone).toBe("low")
-        expect(view.text).toBe("۱ تحلیل هوشمند باقی‌مانده")
+        expect(view.text).toBe("تحلیل هوشمند: ۱ مورد باقی‌مانده")
     })
 
     it("بونوس تمام‌شده ⇒ exhausted، بدون راهنمای هدیه", () => {
@@ -70,13 +71,13 @@ describe("describeQuotaDimension — سهمیهٔ هدیه", () => {
 
         expect(view.tone).toBe("exhausted")
         expect(view.text).toBe("سهمیهٔ تحلیل هوشمند این دوره تمام شده است.")
-        expect(view.promoHint).toBeUndefined()
+        expect(view.hasPromo).toBe(false)
     })
 
     it("بدون PROMO اصلاً راهنمای هدیه نشان داده نمی‌شود", () => {
         const view = describeQuotaDimension("analyze", dim(10, { promoRemaining: 0 }))
 
-        expect(view.promoHint).toBeUndefined()
+        expect(view.hasPromo).toBe(false)
     })
 })
 
@@ -95,15 +96,15 @@ describe("quotaTone", () => {
 })
 
 describe("describeQuotaDimension — حالت عادی (remaining > 3)", () => {
-    it("یک خط کم‌حجم با جداکنندهٔ نقطه", () => {
+    it("یک خط کم‌حجم با قالبِ یکسانِ «برچسب: N مورد باقی‌مانده»", () => {
         const v = describeQuotaDimension("analyze", dim(9))
         expect(v.tone).toBe("normal")
-        expect(v.text).toBe("تحلیل هوشمند · ۹ باقی‌مانده")
+        expect(v.text).toBe("تحلیل هوشمند: ۹ مورد باقی‌مانده")
     })
 
     it("برنامه‌ریزی هم درست رندر می‌شود", () => {
         expect(describeQuotaDimension("plan", dim(2 + 4)).text).toBe(
-            "برنامه‌ریزی هوشمند · ۶ باقی‌مانده",
+            "برنامه‌ریزی هوشمند: ۶ مورد باقی‌مانده",
         )
     })
 
@@ -113,14 +114,16 @@ describe("describeQuotaDimension — حالت عادی (remaining > 3)", () => {
 })
 
 describe("describeQuotaDimension — حالت کم (remaining ≤ 3)", () => {
-    it("۳ باقی‌مانده کمی صریح‌تر نمایش داده می‌شود", () => {
+    it("۳ باقی‌مانده همان قالبِ حالت عادی را دارد (فقط رنگ فرق می‌کند)", () => {
         const v = describeQuotaDimension("analyze", dim(3))
         expect(v.tone).toBe("low")
-        expect(v.text).toBe("۳ تحلیل هوشمند باقی‌مانده")
+        expect(v.text).toBe("تحلیل هوشمند: ۳ مورد باقی‌مانده")
     })
 
     it("۱ باقی‌مانده هم درست است", () => {
-        expect(describeQuotaDimension("plan", dim(1)).text).toBe("۱ برنامه‌ریزی هوشمند باقی‌مانده")
+        expect(describeQuotaDimension("plan", dim(1)).text).toBe(
+            "برنامه‌ریزی هوشمند: ۱ مورد باقی‌مانده",
+        )
     })
 
     it("در این حالت هم هیچ لحن فشاری ندارد", () => {
@@ -145,31 +148,35 @@ describe("describeQuotaDimension — حالت صفر", () => {
     it("در حالت صفر هیچ توضیح هدیه‌ای نشان داده نمی‌شود", () => {
         // کاربر همه‌ی هدیه را مصرف کرده ⇒ promoRemaining صفر
         const v = describeQuotaDimension("analyze", dim(0, { promoRemaining: 0 }))
-        expect(v.promoHint).toBeUndefined()
+        expect(v.hasPromo).toBe(false)
     })
 })
 
-describe("describeQuotaDimension — هدیهٔ PROMO", () => {
-    it("وقتی PROMO باقی مانده، توضیح ظریف اضافه می‌شود", () => {
+describe("describeQuotaDimension — هدیهٔ PROMO (فقط boolean، بدون عدد)", () => {
+    it("وقتی PROMO باقی مانده، فقط پرچمِ منبع روشن می‌شود", () => {
         const v = describeQuotaDimension("analyze", dim(11, { promoRemaining: 2 }))
-        expect(v.promoHint).toBe("۲ مورد هدیه")
+        expect(v.hasPromo).toBe(true)
     })
 
     it("هدیه در حالت کم هم دیده می‌شود", () => {
-        expect(describeQuotaDimension("analyze", dim(2, { promoRemaining: 1 })).promoHint).toBe(
-            "۱ مورد هدیه",
-        )
+        expect(describeQuotaDimension("analyze", dim(2, { promoRemaining: 1 })).hasPromo).toBe(true)
     })
 
-    it("بدون هدیه، هیچ متن اضافه‌ای تولید نمی‌شود", () => {
-        expect(describeQuotaDimension("analyze", dim(9, { promoRemaining: 0 })).promoHint).toBeUndefined()
+    it("بدون هدیه، پرچم خاموش است", () => {
+        expect(describeQuotaDimension("analyze", dim(9, { promoRemaining: 0 })).hasPromo).toBe(false)
     })
 
-    it("هدیه به سهمیهٔ اصلی چسبانده نمی‌شود (جدا می‌ماند)", () => {
+    it("عددِ هدیه هرگز وارد متنِ اصلی نمی‌شود (نمای تازه‌شدهٔ همان باگ UX)", () => {
         const v = describeQuotaDimension("analyze", dim(11, { promoRemaining: 2 }))
-        // متن اصلی فقط عدد remaining را می‌گوید؛ هدیه جداگانه است.
-        expect(v.text).toBe("تحلیل هوشمند · ۱۱ باقی‌مانده")
-        expect(v.promoHint).not.toContain("۱۳")
+        // متن اصلی فقط یک عدد دارد: همان باقی‌مانده‌ی واقعی.
+        expect(v.text).toBe("تحلیل هوشمند: ۱۱ مورد باقی‌مانده")
+        expect(v.text).not.toContain("هدیه")
+        expect(v.text).not.toContain("۲ ")
+    })
+
+    it("یادداشتِ ثانویهٔ منبع، بدون رقم و بدون کنارِ عدد است", () => {
+        expect(QUOTA_PROMO_SOURCE_NOTE).toBe("بخشی از این سهمیه از کد هدیه تأمین شده است.")
+        expect(QUOTA_PROMO_SOURCE_NOTE).not.toMatch(/[۰-۹0-9]/)
     })
 })
 
@@ -199,7 +206,7 @@ describe("describeQuotaDimension — قفل لحنِ غیرتحریکی", () => 
         describeQuotaDimension("plan", dim(50)),
         describeQuotaDimension("plan", dim(1)),
         describeQuotaDimension("plan", dim(0)),
-    ].flatMap((v) => [v.text, v.ariaLabel, v.promoHint ?? ""])
+    ].flatMap((v) => [v.text, v.ariaLabel, QUOTA_PROMO_SOURCE_NOTE])
 
     const forbidden = [
         /فرصت/,

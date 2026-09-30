@@ -285,7 +285,7 @@ describe("regression: کد هدیه در دورهٔ LEGACY هم دیده می‌
         const view = describeQuotaDimension("analyze", status.analyze)
         expect(view.tone).not.toBe("exhausted")
         expect(view.text).not.toMatch(/تمام شده/)
-        expect(view.promoHint).toBe("۵ مورد هدیه")
+        expect(view.hasPromo).toBe(true)
     })
 
     it("اجرای ANALYZE از PROMO موفق می‌شود و AiUsage دست‌نخورده می‌ماند", async () => {

@@ -17,6 +17,7 @@
 //   - no persistence: proposal فقط in-memory است.
 
 import { ApiClientError, api } from "@/app/lib/api/client"
+import { isQuotaExceeded } from "@/app/lib/api/quotaError"
 import { announceAiQuotaChanged } from "@/app/lib/aiQuotaEvents"
 
 export type PlanProposalPriority = "HIGH" | "MEDIUM" | "LOW"
@@ -220,6 +221,11 @@ export type GeneratePlanOutcome = {
     proposal: PlanProposal | null
     /** پیام خطای نگاشت‌شده — فقط وقتی proposal null است */
     message?: string
+    /**
+     * سهمیهٔ AI تمام شده (code === "QUOTA_EXCEEDED") — تصمیم UI بر اساس همین
+     * flag است، نه متن پیام. بقیهٔ خطاها (از جمله RATE_LIMITED) false می‌دهند.
+     */
+    quotaExceeded?: boolean
 }
 
 export type PlanProposalFlowDeps = {
@@ -314,7 +320,7 @@ export function createPlanProposalOrchestrator(deps?: Partial<PlanProposalFlowDe
                     error: message,
                     isStale: false,
                 })
-                return { proposal: null, message }
+                return { proposal: null, message, quotaExceeded: isQuotaExceeded(error) }
             }
         },
 

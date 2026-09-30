@@ -181,6 +181,33 @@ describe("orchestrator — generate", () => {
         expect(flow.getState().error).toContain("ظرفیت")
     })
 
+    it("flags QUOTA_EXCEEDED on the generate outcome (code-based, not message)", async () => {
+        const flow = createPlanProposalOrchestrator({
+            fetchProposal: async () => {
+                throw new ApiClientError(429, "QUOTA_EXCEEDED", "quota")
+            },
+        })
+
+        const outcome = await flow.generate(DAY)
+
+        expect(outcome.proposal).toBeNull()
+        expect(outcome.quotaExceeded).toBe(true)
+    })
+
+    it("does not flag RATE_LIMITED (same 429 status) as quota exceeded", async () => {
+        const flow = createPlanProposalOrchestrator({
+            fetchProposal: async () => {
+                throw new ApiClientError(429, "RATE_LIMITED", "slow down")
+            },
+        })
+
+        const outcome = await flow.generate(DAY)
+
+        expect(outcome.proposal).toBeNull()
+        expect(outcome.quotaExceeded).toBe(false)
+        expect(outcome.message).toBeTruthy()
+    })
+
     it("(5) a stale (older) generate response cannot overwrite a newer one", async () => {
         const first = deferred<PlanProposal>()
         const second = deferred<PlanProposal>()

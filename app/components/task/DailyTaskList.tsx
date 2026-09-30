@@ -35,6 +35,7 @@ import AdvisorCard from "./AdvisorCard"
 import { useDaySuggestion } from "@/app/hooks/useDaySuggestion"
 import { usePlanProposal } from "@/app/hooks/usePlanProposal"
 import PlanProposalModal from "./PlanProposalModal"
+import QuotaExceededModal from "./QuotaExceededModal"
 import { orderTasksByAdvisor } from "@/app/lib/planner/advisorOrder"
 import { type AdvisorResult } from "@/app/lib/planner/advisor"
 import { LayersPlus, Megaphone, RotateCwFadingClock, Sparkles } from "lucide-react"
@@ -88,6 +89,8 @@ export default function DailyTaskList() {
 
     // استیت‌های مربوط به هوش مصنوعی
     const [suggestionOpen, setSuggestionOpen] = useState(false)
+    // سهمیهٔ AI تمام شده در «ایجاد برنامه» — مودال مستقل (proposal اینجا ساخته نمی‌شود)
+    const [quotaExceededOpen, setQuotaExceededOpen] = useState(false)
     // Phase 2 — «چیدمان هوشمند»: فقط یک کلیدِ نمایشیِ محلی (هیچ داده‌ای را تغییر نمی‌دهد)
     const [isAdvisorOrderActive, setIsAdvisorOrderActive] = useState(false)
 
@@ -309,9 +312,12 @@ export default function DailyTaskList() {
 
     // Phase 4.3 — Generate: فقط روز فرستاده می‌شود؛ task/capacity/planVersion از کلاینت نمی‌آید.
     const handleGeneratePlan = async () => {
-        const { proposal, message } = await generatePlan(selectedDate)
+        const { proposal, message, quotaExceeded } = await generatePlan(selectedDate)
         if (proposal) {
             toast.info("پیشنهاد برنامه آماده شد — قبل از تأیید بازبینی کن")
+        } else if (quotaExceeded) {
+            // سهمیهٔ AI: به‌جای Toast، یک مودال اختصاصی (تصمیم بر اساس code، نه متن).
+            setQuotaExceededOpen(true)
         } else if (message) {
             toast.error(message)
         }
@@ -553,6 +559,13 @@ export default function DailyTaskList() {
                     onClose={clearPlan}
                 />
             )}
+
+            {/* سهمیهٔ AI تمام شده در «ایجاد برنامه» — مستقل از PlanProposalModal،
+                چون در این حالت هیچ proposal‌ای ساخته نشده است. */}
+            <QuotaExceededModal
+                open={quotaExceededOpen}
+                onClose={() => setQuotaExceededOpen(false)}
+            />
         </section>
     )
 }

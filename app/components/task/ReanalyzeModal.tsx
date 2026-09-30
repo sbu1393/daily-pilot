@@ -3,11 +3,13 @@
 import { useEffect, useState } from "react"
 import { toast } from "react-toastify"
 import { api } from "@/app/lib/api/client"
+import { isQuotaExceeded } from "@/app/lib/api/quotaError"
 import { announceAiQuotaChanged } from "@/app/lib/aiQuotaEvents"
 import { TaskItem, priorityMeta, priorityMissingMeta, categoryInfo } from "./taskTypes"
 import { faDigits, fmtMinutes } from "@/app/lib/time"
 import { aiSourceNotice } from "@/app/lib/ai/aiSource" // C7 — §7.13: تشخیص‌پذیری mock در UI
 import AnimatedModal from "../motion/AnimatedModal"
+import QuotaExceededContent from "./QuotaExceededContent"
 import styles from "./task.module.css"
 
 type Props = {
@@ -31,6 +33,8 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
     const [text, setText] = useState(task?.title ?? "")
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    // سهمیهٔ AI تمام شده — نمایش داخلی (نه مودال تو‌در‌تو، نه Toast)
+    const [quotaExceeded, setQuotaExceeded] = useState(false)
     // §9.6 Retry: شناسه کارِ آخرین تلاش ناموفق — پس از هر تلاش موفق پاک می‌شود
     const [lastFailedId, setLastFailedId] = useState<number | null>(null)
     // اسنپشاتِ وضعیت قبل — چون والد تا بسته شدن مودال، آبجکت قدیمی رو نگه می‌داره
@@ -54,6 +58,7 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
         if (!task || busy) return
         setBusy(true)
         setError(null)
+        setQuotaExceeded(false)
         setLastFailedId(null)
         try {
             // اگه متن عوض نشده، بدنه خالی بفرست (سرور خودش از task.title استفاده می‌کنه)
@@ -74,10 +79,16 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
             setResult({ old: { ...task }, next, source: body.aiSource ?? "" })
             onDone() // رفرش لیست و نوار آمار (بازتوزیع بودجه)
         } catch (e) {
-            const message = e instanceof Error ? e.message : "خطا در تحلیل مجدد"
-            setError(message) // §9.6: عملیات مهم → Inline Error State، نه فقط Toast
-            toast.error(message) // §9.6: Toast فقط برای Feedback غیرمسدودکننده
-            setLastFailedId(task.id) // §9.6 Retry: دستی، با احتیاط — بدون duplicate mutation مخرب
+            // فقط بر اساس code تصمیم می‌گیریم (نه متن پیام). QUOTA_EXCEEDED یک
+            // نمایش اختصاصی داخل همین مودال می‌گیرد؛ بقیهٔ خطاها دقیقاً رفتار قبل را دارند.
+            if (isQuotaExceeded(e)) {
+                setQuotaExceeded(true)
+            } else {
+                const message = e instanceof Error ? e.message : "خطا در تحلیل مجدد"
+                setError(message) // §9.6: عملیات مهم → Inline Error State، نه فقط Toast
+                toast.error(message) // §9.6: Toast فقط برای Feedback غیرمسدودکننده
+                setLastFailedId(task.id) // §9.6 Retry: دستی، با احتیاط — بدون duplicate mutation مخرب
+            }
         } finally {
             // در هر دو حالت سهمیه ممکن است تغییر کرده باشد: موفق ⇒ مصرف نهایی،
             // ناموفق ⇒ رزرو آزاد شده. release پیش از رسیدن پاسخ به کلاینت انجام
@@ -99,7 +110,10 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
     return (
         <AnimatedModal open={task !== null} onClose={onClose}>
 
-                {!result ? (
+                {quotaExceeded ? (
+                    // همان مودال باز می‌ماند؛ فقط محتوا عوض می‌شود → هیچ مودال دومی باز نمی‌شود.
+                    <QuotaExceededContent onClose={onClose} />
+                ) : !result ? (
                     <>
                         <div className={styles.modalHead}>
                             <h4>تحلیل مجدد با هوش مصنوعی</h4>

@@ -39,6 +39,76 @@
     line-height: 1.9;
 }
 
+/* ---------- کد هدیه ----------
+   قبل از کارت‌های پلن قرار می‌گیرد: کاربرِ کم‌سهمیه اول دنبال کد است، نه خرید.
+   کارت‌ها هم بعد از آن می‌آیند تا چشم اول روی «ظرفیت» بنشیند، نه روی قیمت. */
+.promoBox {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 22px 22px 20px;
+    margin-bottom: 26px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(16px);
+    text-align: center;
+}
+
+.promoTitle {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: var(--ink);
+}
+
+.promoHint {
+    margin: 0;
+    color: var(--muted);
+    font-size: .86rem;
+    line-height: 1.9;
+}
+
+.promoForm {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-top: 2px;
+}
+
+.promoForm .dp-input {
+    flex: 1 1 220px;
+    max-width: 320px;
+}
+
+.promoForm .dp-btn {
+    flex: 0 0 auto;
+}
+
+.promoError {
+    color: var(--danger-strong);
+    font-size: .82rem;
+    font-weight: 600;
+}
+
+/* موفقیت: جملهٔ اصلی + جزئیات اینکه چند واحد اضافه شد. */
+.promoSuccess {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: var(--success);
+    font-size: .84rem;
+    font-weight: 700;
+}
+
+.promoSummary {
+    color: var(--muted);
+    font-size: .78rem;
+    font-weight: 600;
+}
+
 /* ---------- شبکهٔ پلن‌ها ---------- */
 .grid {
     display: grid;

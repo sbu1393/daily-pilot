@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { isValidCanonicalDayKey } from "@/app/lib/canonicalDay"
+import { TASK_TITLE_MAX_LENGTH, TASK_TITLE_TOO_LONG_MESSAGE } from "@/app/lib/taskTitle"
 import { planPrioritySchema } from "@/app/lib/ai/planSchema"
 
 export const rolloverSchema = z.object({
@@ -162,6 +163,6 @@ export const reanalyzeTaskSchema = z.object({
         .string()
         .trim()
         .min(3, "عنوان باید حداقل ۳ حرف باشد")
-        .max(200, "عنوان خیلی طولانی است")
+        .max(TASK_TITLE_MAX_LENGTH, TASK_TITLE_TOO_LONG_MESSAGE)
         .optional(), // اگه نیاد، همون متن فعلی تسک دوباره تحلیل میشه
 })

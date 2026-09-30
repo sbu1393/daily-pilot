@@ -68,6 +68,7 @@ vi.mock("@/src/lib/observability/recordError", () => ({ recordError: mocks.recor
 // planPolicy واقعی استفاده می‌شود (خالص و بدون DB) — FREE=15/PRO=300 در تست خودش پوشش دارد
 
 import { PATCH } from "./route"
+import { TASK_TITLE_MAX_LENGTH } from "@/app/lib/taskTitle"
 import {
     AiProviderUnavailableError,
     IdempotencyConflictError,
@@ -182,6 +183,15 @@ describe("PATCH /api/tasks/[id]/analyze", () => {
 
     it("returns 400 VALIDATION_ERROR for an invalid body (text too short)", async () => {
         const res = await callPATCH({ text: "ab" })
+
+        expect(res.status).toBe(400)
+        const parsed = await res.json()
+        expect(parsed.error.code).toBe("VALIDATION_ERROR")
+        expect(mocks.reanalyzeTask).not.toHaveBeenCalled()
+    })
+
+    it("returns 400 VALIDATION_ERROR for a text over the shared limit (31+ characters)", async () => {
+        const res = await callPATCH({ text: "ا".repeat(TASK_TITLE_MAX_LENGTH + 1) })
 
         expect(res.status).toBe(400)
         const parsed = await res.json()

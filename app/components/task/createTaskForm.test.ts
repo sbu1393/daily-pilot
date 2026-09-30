@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest"
 /* هدف: ثابت کردن اینکه «ارسال بدون دسته» در هیچ حالتی ممکن نیست.        */
 /* ------------------------------------------------------------------ */
 
+import { TASK_TITLE_MAX_LENGTH, TASK_TITLE_TOO_LONG_MESSAGE } from "@/app/lib/taskTitle"
 import {
     buildCreateTaskBody,
     CATEGORY_REQUIRED_MESSAGE,
@@ -80,6 +81,20 @@ describe("validateCreateForm — category is required", () => {
     it("still requires a category when the title is valid", () => {
         const r = validateCreateForm("ab", "work")
         expect(r.ok).toBe(false)
+    })
+
+    it("accepts a title exactly at the limit", () => {
+        const r = validateCreateForm("ا".repeat(TASK_TITLE_MAX_LENGTH), "work")
+        expect(r.ok).toBe(true)
+    })
+
+    it("blocks submit for a title over the limit with the shared message", () => {
+        const r = validateCreateForm("ا".repeat(TASK_TITLE_MAX_LENGTH + 1), "work")
+        expect(r.ok).toBe(false)
+        if (!r.ok) {
+            expect(r.field).toBe("title")
+            expect(r.message).toBe(TASK_TITLE_TOO_LONG_MESSAGE)
+        }
     })
 })
 

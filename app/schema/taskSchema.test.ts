@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { canonicalKeyToLocalMidnight, getCanonicalDayKey } from "@/app/lib/canonicalDay"
-import { makeCreateTaskSchema } from "./taskSchema"
+import { TASK_TITLE_MAX_LENGTH, TASK_TITLE_TOO_LONG_MESSAGE } from "@/app/lib/taskTitle"
+import { makeCreateTaskSchema, makeUpdateTaskSchema } from "./taskSchema"
 
 const title = "تسک آزمایشی"
 // دسته در قرارداد create اجباری است؛ این تست‌ها فقط scheduledDate را می‌سنجند
@@ -51,5 +52,47 @@ describe("taskSchema scheduledDate", () => {
         })
 
         expect(parsed.success).toBe(false)
+    })
+})
+
+describe("taskSchema title length limit", () => {
+    const timezone = "Asia/Tehran"
+    const scheduledDate = "2026-01-01"
+    const at = (n: number) => "ا".repeat(n)
+
+    it("create: accepts 29 characters", () => {
+        expect(
+            makeCreateTaskSchema(timezone).safeParse({ title: at(29), scheduledDate, category }).success,
+        ).toBe(true)
+    })
+
+    it("create: accepts exactly the limit (30 characters)", () => {
+        expect(
+            makeCreateTaskSchema(timezone).safeParse({ title: at(TASK_TITLE_MAX_LENGTH), scheduledDate, category }).success,
+        ).toBe(true)
+    })
+
+    it("create: rejects one character over the limit (31 characters) with the Persian message", () => {
+        const parsed = makeCreateTaskSchema(timezone).safeParse({
+            title: at(TASK_TITLE_MAX_LENGTH + 1),
+            scheduledDate,
+            category,
+        })
+        expect(parsed.success).toBe(false)
+        if (!parsed.success) {
+            expect(parsed.error.issues.map((i) => i.message)).toContain(TASK_TITLE_TOO_LONG_MESSAGE)
+        }
+    })
+
+    it("update: accepts exactly the limit (30 characters)", () => {
+        expect(makeUpdateTaskSchema(timezone).safeParse({ title: at(TASK_TITLE_MAX_LENGTH) }).success).toBe(true)
+    })
+
+    it("update: rejects one character over the limit (31 characters)", () => {
+        expect(makeUpdateTaskSchema(timezone).safeParse({ title: at(TASK_TITLE_MAX_LENGTH + 1) }).success).toBe(false)
+    })
+
+    it("update: accepts a body without a title (legacy long title edited via category only)", () => {
+        expect(makeUpdateTaskSchema(timezone).safeParse({ category: "work" }).success).toBe(true)
     })
 })

@@ -49,6 +49,7 @@ vi.mock("@/app/lib/planner/advisor", async (importOriginal) => {
 
 import { GET, POST } from "./route"
 import { ServiceError } from "@/app/lib/services/errors"
+import { TASK_TITLE_MAX_LENGTH } from "@/app/lib/taskTitle"
 
 const USER = { id: 1, username: "test", email: "test@example.com", timezone: "Asia/Tehran" }
 const DAY_KEY = "2026-01-01"
@@ -114,6 +115,24 @@ describe("POST /api/tasks", () => {
         expect(res.status).toBe(400)
         const parsed = await res.json()
         expect(parsed.ok).toBe(false)
+        expect(parsed.error.code).toBe("VALIDATION_ERROR")
+        expect(mocks.createTask).not.toHaveBeenCalled()
+    })
+
+    it("returns 400 VALIDATION_ERROR for a title over the shared limit and never calls the service", async () => {
+        const res = await POST(
+            new NextRequest("http://localhost/api/tasks", {
+                method: "POST",
+                body: JSON.stringify({
+                    title: "ا".repeat(TASK_TITLE_MAX_LENGTH + 1),
+                    scheduledDate: SCHEDULED_DATE,
+                    category: "shopping",
+                }),
+            }),
+        )
+
+        expect(res.status).toBe(400)
+        const parsed = await res.json()
         expect(parsed.error.code).toBe("VALIDATION_ERROR")
         expect(mocks.createTask).not.toHaveBeenCalled()
     })

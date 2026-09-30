@@ -34,6 +34,7 @@ vi.mock("@/app/lib/services/productEvent.service", () => ({
 
 import { DELETE, GET, PATCH } from "./route"
 import { TaskNotFoundError } from "@/app/lib/services/errors"
+import { TASK_TITLE_MAX_LENGTH } from "@/app/lib/taskTitle"
 
 describe("/api/tasks/[id] — X-Request-ID (فاز صفر §7)", () => {
     beforeEach(() => {
@@ -186,6 +187,24 @@ describe("PATCH /api/tasks/[id]", () => {
         expect(mocks.updateTask).not.toHaveBeenCalled()
     })
 
+    it("returns 400 VALIDATION_ERROR for a title over the shared limit and never calls the service", async () => {
+        const res = await callPATCH({ title: "ا".repeat(TASK_TITLE_MAX_LENGTH + 1) })
+
+        expect(res.status).toBe(400)
+        const parsed = await res.json()
+        expect(parsed.error.code).toBe("VALIDATION_ERROR")
+        expect(mocks.updateTask).not.toHaveBeenCalled()
+    })
+
+    it("accepts a category-only edit (legacy long title left untouched, no title in the body)", async () => {
+        mocks.updateTask.mockResolvedValue({ task: TASK })
+
+        const res = await callPATCH({ category: "health" })
+
+        expect(res.status).toBe(200)
+        expect(mocks.updateTask).toHaveBeenCalledWith(1, "Asia/Tehran", 5, { category: "health" })
+    })
+
     it("returns 400 VALIDATION_ERROR for malformed JSON (not 500) and never calls the service", async () => {
         const res = await PATCH(
             new NextRequest("http://localhost/api/tasks/5", {
@@ -312,12 +331,14 @@ describe("PATCH /api/tasks/[id]", () => {
 
     it("event properties contain only taskId and field names — task content never reaches analytics", async () => {
         mocks.updateTask.mockResolvedValue({
-            task: { ...TASK, title: "خرید نان و لبنیات با جزئیات حساس", dayKey: "2026-01-02" },
+            // عنوان کوتاه (≤۳۰) تا از سقف مشترک عبور کند؛ هدف تست فقط اثبات
+            // نرسیدن محتوا به analytics است، نه سنجش طول.
+            task: { ...TASK, title: "خرید نان و لبنیات", dayKey: "2026-01-02" },
             changed: true,
             changedFields: ["title", "day"],
         })
 
-        const res = await callPATCH({ title: "خرید نان و لبنیات با جزئیات حساس", scheduledDate: "2026-01-02" })
+        const res = await callPATCH({ title: "خرید نان و لبنیات", scheduledDate: "2026-01-02" })
 
         expect(res.status).toBe(200)
         expect(mocks.recordProductEvent).toHaveBeenCalledTimes(1)

@@ -17,7 +17,8 @@ import { describe, expect, it } from "vitest"
 /* schema up.                                                          */
 /* ------------------------------------------------------------------ */
 
-import { planApplyRequestSchema, planProposalSchema } from "./plannerSchema"
+import { TASK_TITLE_MAX_LENGTH, TASK_TITLE_TOO_LONG_MESSAGE } from "@/app/lib/taskTitle"
+import { planApplyRequestSchema, planProposalSchema, reanalyzeTaskSchema } from "./plannerSchema"
 
 const DAY = "2026-09-27"
 
@@ -155,6 +156,26 @@ describe("planProposalSchema — still rejects genuine corruption", () => {
         ["an unknown source", { source: "gpt" }],
     ])("rejects %s", (_label, overrides) => {
         expect(planProposalSchema.safeParse(proposal(overrides)).success).toBe(false)
+    })
+})
+
+describe("reanalyzeTaskSchema — title length limit", () => {
+    const at = (n: number) => "ا".repeat(n)
+
+    it("accepts a missing text (re-analyze the existing title)", () => {
+        expect(reanalyzeTaskSchema.safeParse({}).success).toBe(true)
+    })
+
+    it("accepts exactly the limit (30 characters)", () => {
+        expect(reanalyzeTaskSchema.safeParse({ text: at(TASK_TITLE_MAX_LENGTH) }).success).toBe(true)
+    })
+
+    it("rejects one character over the limit (31 characters) with the Persian message", () => {
+        const parsed = reanalyzeTaskSchema.safeParse({ text: at(TASK_TITLE_MAX_LENGTH + 1) })
+        expect(parsed.success).toBe(false)
+        if (!parsed.success) {
+            expect(parsed.error.issues.map((i) => i.message)).toContain(TASK_TITLE_TOO_LONG_MESSAGE)
+        }
     })
 })
 

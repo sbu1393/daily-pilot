@@ -19,6 +19,7 @@ import {
     type TaskCategorySelection,
 } from "@/app/lib/categories"
 import { EMPTY_CATEGORY_DRAFT, validateCategoryDraft, type CategoryDraft } from "./categoryForm"
+import { TASK_TITLE_MAX_LENGTH, TASK_TITLE_TOO_LONG_MESSAGE } from "@/app/lib/taskTitle"
 
 export { CATEGORY_REQUIRED_MESSAGE, TASK_CATEGORIES }
 export type { TaskCategoryKey }
@@ -48,6 +49,10 @@ export function validateCreateForm(
 ): CreateFormResult {
     if (title.trim().length < 3) {
         return { ok: false, message: TITLE_TOO_SHORT_MESSAGE, field: "title" }
+    }
+    // سقف مشترک با سرور (TASK_TITLE_MAX_LENGTH) — خطا قبل از ارسال request اعلام می‌شود.
+    if (title.trim().length > TASK_TITLE_MAX_LENGTH) {
+        return { ok: false, message: TASK_TITLE_TOO_LONG_MESSAGE, field: "title" }
     }
 
     const selection = draft

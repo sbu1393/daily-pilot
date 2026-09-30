@@ -14,6 +14,7 @@ import {
     classifyCategory,
 } from "@/app/lib/categories"
 import { z } from "zod"
+import { TASK_TITLE_MAX_LENGTH, TASK_TITLE_TOO_LONG_MESSAGE } from "@/app/lib/taskTitle"
 
 // C1 — Task CRUD validation (Phase C1: Task CRUD Foundation)
 // قرارداد §6.2.2.1: dayKey هرگز از Client پذیرفته نمی‌شود — سمت سرور از
@@ -158,7 +159,7 @@ export function makeCreateTaskSchema(timezone: string) {
             .string()
             .trim()
             .min(1, "عنوان نمی‌تواند خالی باشد")
-            .max(200, "عنوان خیلی طولانی است"),
+            .max(TASK_TITLE_MAX_LENGTH, TASK_TITLE_TOO_LONG_MESSAGE),
         scheduledDate: makeScheduledDateField(timezone),
         // بدون `.optional()`/`.nullable()` — نبودن یا null عمداً خطاست
         ...categoryShape,
@@ -177,7 +178,7 @@ export function makeUpdateTaskSchema(timezone: string) {
                 .string()
                 .trim()
                 .min(1, "عنوان نمی‌تواند خالی باشد")
-                .max(200, "عنوان خیلی طولانی است")
+                .max(TASK_TITLE_MAX_LENGTH, TASK_TITLE_TOO_LONG_MESSAGE)
                 .optional(),
             status: z.enum(["TODO", "IN_PROGRESS"]).optional(),
             scheduledDate: makeScheduledDateField(timezone).optional(),

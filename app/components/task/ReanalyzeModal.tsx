@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { toast } from "react-toastify"
 import { api } from "@/app/lib/api/client"
 import { isQuotaExceeded } from "@/app/lib/api/quotaError"
+import { TASK_TITLE_MAX_LENGTH } from "@/app/lib/taskTitle"
 import { announceAiQuotaChanged } from "@/app/lib/aiQuotaEvents"
 import { TaskItem, priorityMeta, priorityMissingMeta, categoryInfo } from "./taskTypes"
 import { faDigits, fmtMinutes } from "@/app/lib/time"
@@ -129,6 +130,7 @@ export default function ReanalyzeModal({ task, onClose, onDone }: Props) {
                         <textarea
                             className={styles.textarea}
                             value={text}
+                            maxLength={TASK_TITLE_MAX_LENGTH}
                             onChange={(e) => setText(e.target.value)}
                             autoFocus
                         />

@@ -5,6 +5,7 @@ import { useCalendar } from "@/app/contexts/CalenderContext"
 import { enqueueTask, isOffline } from "@/app/lib/offline"
 import { canonicalKeyToLocalMidnight } from "@/app/lib/canonicalDay"
 import { api } from "@/app/lib/api/client"
+import { TASK_TITLE_MAX_LENGTH } from "@/app/lib/taskTitle"
 import { toast } from "react-toastify"
 import AnimatedModal from "../motion/AnimatedModal"
 import styles from "./task.module.css"
@@ -164,7 +165,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }: Props) {
                 className={styles.input}
                 placeholder="مثلاً: آماده کردن گزارش مشتری"
                 value={text}
-                maxLength={200}
+                maxLength={TASK_TITLE_MAX_LENGTH}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => {
                     if (e.key === "Enter" && !loading) submit()

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { api } from "@/app/lib/api/client"
+import { TASK_TITLE_MAX_LENGTH } from "@/app/lib/taskTitle"
 import { toast } from "react-toastify"
 import AnimatedModal from "../motion/AnimatedModal"
 import CategoryPicker from "./CategoryPicker"
@@ -87,7 +88,10 @@ export default function EditTaskModal({ task, onClose, onSaved }: Props) {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    title: trimmedTitle,
+                    // عنوانِ بدون تغییر هرگز فرستاده نمی‌شود: تسک‌های قدیمی با عنوانِ
+                    // بلندتر از سقف فعلی نباید صرفاً برای ویرایش دسته، خطای validation
+                    // بگیرند. عنوانِ تغییرکرده از سقف مشترک عبور می‌کند (سرور هم enforce می‌کند).
+                    ...(trimmedTitle !== task.title ? { title: trimmedTitle } : {}),
                     category: selection.selection.category,
                     ...(selection.selection.categoryIcon
                         ? { categoryIcon: selection.selection.categoryIcon }
@@ -123,7 +127,7 @@ export default function EditTaskModal({ task, onClose, onSaved }: Props) {
                 className={styles.input}
                 placeholder="عنوان کار"
                 value={title}
-                maxLength={200}
+                maxLength={TASK_TITLE_MAX_LENGTH}
                 onChange={(e) => {
                     setTitle(e.target.value)
                     setErrorField(null)

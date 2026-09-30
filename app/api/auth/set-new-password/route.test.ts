@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { NextRequest } from "next/server"
 import bcrypt from "bcryptjs"
 
-/* POST /api/auth/set-new-password — مصرف توکن + نوشتن رمز دائمی. */
+/* POST /api/auth/set-new-password — مصرف توکنِ سنجاق‌شده به نشست + نوشتن رمز دائمی. */
 
 const mocks = vi.hoisted(() => ({
     getCurrentUser: vi.fn(),
@@ -35,7 +35,13 @@ vi.mock("@/app/lib/getPrisma", () => ({
 
 import { POST } from "@/app/api/auth/set-new-password/route"
 
-const USER = { id: 7, email: "user@example.com", mustChangePassword: true }
+const USER = {
+    id: 7,
+    email: "user@example.com",
+    mustChangePassword: true,
+    // grant نشست: همان توکنی که رمز موقت را احراز کرده
+    resetTokenId: "tok_1",
+}
 const FUTURE = new Date(Date.now() + 60_000).toISOString()
 
 const req = (body: unknown) =>
@@ -74,6 +80,20 @@ describe("POST /api/auth/set-new-password — احراز هویت", () => {
         mocks.isRateLimited.mockReturnValue(true)
         const res = await POST(req({ newPassword: "aVeryNewPassword1", newPasswordConfirm: "aVeryNewPassword1" }))
         expect(res.status).toBe(429)
+        expect(mocks.userUpdate).not.toHaveBeenCalled()
+    })
+
+    it("نشستِ بدون grant (مثلاً نشستی که با رمز دائمی ساخته شده) ⇒ رد", async () => {
+        // بدون این گارد، هر نشست معتبرِ کاربر می‌توانست با داشتن یک توکن باز
+        // `currentPassword` در change-password را دور بزند.
+        mocks.getCurrentUser.mockResolvedValue({ ...USER, resetTokenId: null })
+
+        const res = await POST(req({ newPassword: "aVeryNewPassword1", newPasswordConfirm: "aVeryNewPassword1" }))
+
+        expect(res.status).toBe(400)
+        expect((await res.json()).error.code).toBe("PASSWORD_RESET_INVALID")
+        // حتی یک کوئری توکن هم نباید زده شود
+        expect(mocks.tokenFindFirst).not.toHaveBeenCalled()
         expect(mocks.userUpdate).not.toHaveBeenCalled()
     })
 })
@@ -145,11 +165,10 @@ describe("POST /api/auth/set-new-password — lifecycle توکن", () => {
         expect(mocks.userUpdate).not.toHaveBeenCalled()
     })
 
-    it("فقط جدیدترین توکن باز کاربر را بررسی می‌کند", async () => {
+    it("فقط توکنِ سنجاق‌شده به همین نشست را بررسی می‌کند، نه «آخرین توکن باز»", async () => {
         await POST(req({ newPassword: "aVeryNewPassword1", newPasswordConfirm: "aVeryNewPassword1" }))
         expect(mocks.tokenFindFirst).toHaveBeenCalledWith({
-            where: { userId: 7, usedAt: null, invalidatedAt: null },
-            orderBy: { createdAt: "desc" },
+            where: { id: "tok_1", userId: 7, usedAt: null, invalidatedAt: null },
             select: { id: true, expiresAt: true },
         })
     })

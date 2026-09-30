@@ -79,7 +79,7 @@ describe("getCurrentUser (M1 — auth vs infrastructure failures)", () => {
     })
 
     it("returns the session user for a valid token", async () => {
-        await expect(getCurrentUser()).resolves.toEqual({ ...USER, plan: "FREE" })
+        await expect(getCurrentUser()).resolves.toEqual({ ...USER, plan: "FREE", resetTokenId: null })
 
         expect(mocks.cookieToken).toHaveBeenCalledWith("token")
         expect(mocks.findUnique).toHaveBeenCalledWith({
@@ -182,6 +182,24 @@ describe("getCurrentUser (M1 — auth vs infrastructure failures)", () => {
         mocks.findUnique.mockResolvedValue({ ...USER, role: "USER" })
 
         await expect(getCurrentUser()).resolves.toMatchObject({ role: "USER" })
+    })
+
+    it("exposes the reset-grant claim so set-new-password can pin the token", async () => {
+        mocks.cookieToken.mockReturnValue(
+            cookieWith(
+                jwt.sign({ id: 1, email: "test@example.com", resetTokenId: "tok_1" }, SECRET),
+            ),
+        )
+
+        await expect(getCurrentUser()).resolves.toMatchObject({ resetTokenId: "tok_1" })
+    })
+
+    it("normalizes a blank reset-grant claim to null", async () => {
+        mocks.cookieToken.mockReturnValue(
+            cookieWith(jwt.sign({ id: 1, email: "test@example.com", resetTokenId: "   " }, SECRET)),
+        )
+
+        await expect(getCurrentUser()).resolves.toMatchObject({ resetTokenId: null })
     })
 
     it("returns null (no DB call) when the session cookie is absent", async () => {

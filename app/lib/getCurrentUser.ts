@@ -33,13 +33,14 @@ export async function getCurrentUser() {
         throw new Error("JWT_SECRET is not defined")
     }
 
-    let decoded: { id: number; email: string }
+    let decoded: { id: number; email: string; resetTokenId?: string | null }
 
     // M1 — انتظاری: توکن نامعتبر/منقضی/دستکاری‌شده → کاربر ناشناس، بدون لاگ نویز.
     try {
         decoded = jwt.verify(token.value, secret, { algorithms: ["HS256"] }) as {
             id: number
             email: string
+            resetTokenId?: string | null
         }
     } catch {
         return null
@@ -96,7 +97,16 @@ export async function getCurrentUser() {
         // هیچ mutation دیگری این‌جا رخ نمی‌دهد؛ تنها نوشتن ممکن همان materialize شدن انقضا است (§17).
         const plan = await resolveEffectivePlan(prisma, user.id)
 
-        return { ...user, plan }
+        // grant رمز موقت: کدام توکن بازیابی این نشست را مجاز کرده است.
+        // نشست‌های عادی این مقدار را ندارند (`null`) و مجاز به تعیین رمز نیستند.
+        // عمداً از JWT خوانده می‌شود، نه از DB: این یک ویژگیِ خودِ نشست است،
+        // نه وضعیت حساب (وضعیت حساب همان `mustChangePassword` است که از DB می‌آید).
+        const resetTokenId =
+            typeof decoded.resetTokenId === "string" && decoded.resetTokenId.trim() !== ""
+                ? decoded.resetTokenId
+                : null
+
+        return { ...user, plan, resetTokenId }
     } catch (error) {
         // فاز صفر §26 — لاگ خام حذف شد. در این نقطه identity قطعی نیست (ممکن است پیش از
         // احراز هویت کامل اجرا شود) → context فقط requestId/endpoint دارد و هیچ userId ندارد.

@@ -15,6 +15,7 @@
 import { useState } from "react"
 
 import { api } from "@/app/lib/api/client"
+import PasswordVisibilityToggle from "@/app/components/PasswordVisibilityToggle"
 import styles from "@/app/components/task/task.module.css"
 
 type Props = {
@@ -26,6 +27,10 @@ type Props = {
 export default function ForcedPasswordModal({ open, onSuccess }: Props) {
     const [newPassword, setNewPassword] = useState("")
     const [confirm, setConfirm] = useState("")
+    // هر input toggle مستقل خودش را دارد — دیدن رمز اول نباید رمز دوم را هم
+    // آشکار کند (کاربر معمولاً فقط می‌خواهد مطمئن شود تکرار درست تایپ شده).
+    const [showNewPassword, setShowNewPassword] = useState(false)
+    const [showConfirm, setShowConfirm] = useState(false)
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
@@ -85,30 +90,46 @@ export default function ForcedPasswordModal({ open, onSuccess }: Props) {
                         <label className="dp-field-label" htmlFor="new-password">
                             رمز عبور جدید
                         </label>
-                        <input
-                            id="new-password"
-                            type="password"
-                            className="dp-input"
-                            value={newPassword}
-                            onChange={(e) => setNewPassword(e.target.value)}
-                            placeholder="حداقل ۸ کاراکتر"
-                            autoComplete="new-password"
-                        />
+                        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                            <input
+                                id="new-password"
+                                type={showNewPassword ? "text" : "password"}
+                                className="dp-input"
+                                style={{ paddingLeft: "2.5rem" }}
+                                value={newPassword}
+                                onChange={(e) => setNewPassword(e.target.value)}
+                                placeholder="حداقل ۸ کاراکتر"
+                                autoComplete="new-password"
+                            />
+                            <PasswordVisibilityToggle
+                                visible={showNewPassword}
+                                onToggle={() => setShowNewPassword((prev) => !prev)}
+                                label={showNewPassword ? "مخفی کردن رمز عبور جدید" : "نمایش رمز عبور جدید"}
+                            />
+                        </div>
                     </div>
 
                     <div className="dp-field">
                         <label className="dp-field-label" htmlFor="confirm-password">
                             تکرار رمز عبور جدید
                         </label>
-                        <input
-                            id="confirm-password"
-                            type="password"
-                            className="dp-input"
-                            value={confirm}
-                            onChange={(e) => setConfirm(e.target.value)}
-                            placeholder="رمز عبور جدید را دوباره وارد کنید"
-                            autoComplete="new-password"
-                        />
+                        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                            <input
+                                id="confirm-password"
+                                type={showConfirm ? "text" : "password"}
+                                className="dp-input"
+                                style={{ paddingLeft: "2.5rem" }}
+                                value={confirm}
+                                onChange={(e) => setConfirm(e.target.value)}
+                                placeholder="رمز عبور جدید را دوباره وارد کنید"
+                                autoComplete="new-password"
+                            />
+                            <PasswordVisibilityToggle
+                                visible={showConfirm}
+                                onToggle={() => setShowConfirm((prev) => !prev)}
+                                label={showConfirm ? "مخفی کردن تکرار رمز عبور جدید" : "نمایش تکرار رمز عبور جدید"}
+                            />
+                        </div>
                     </div>
 
                     {error !== null && (

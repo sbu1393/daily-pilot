@@ -6,7 +6,9 @@ import { defineConfig } from "vitest/config"
 export default defineConfig({
     test: {
         environment: "node",
-        include: ["app/**/*.test.ts", "src/**/*.test.ts"],
+        // `lib/` هم شامل تست است (مثلاً رمز موقت) — بدون این ورودی، آن فایل‌ها
+        // بی‌سروصدا از اجرا حذف می‌مانند و کسی متوجه نمی‌شود که پوشش ندارند.
+        include: ["app/**/*.test.ts", "src/**/*.test.ts", "lib/**/*.test.ts"],
     },
     resolve: {
         alias: {

@@ -33,9 +33,18 @@ const WINDOW_MS = 15 * 60 * 1000
  * مسدود می‌کند) و فقط `getCurrentUser` می‌گیرد تا نشست معتبر را اثبات کند.
  *
  * امنیت از سه چیز می‌آید و هیچ‌کدام به ورودی کاربر تکیه ندارد:
- *   ۱) نشست معتبر — که فقط پس از تأیید OTP ساخته شده است.
- *   ۲) توکن فعالِ متعلق به **همین** کاربر که هنوز مصرف نشده و منقضی نشده.
+ *   ۱) نشست معتبر که `resetTokenId` دارد — یعنی نشستی که **همین حالا با رمز موقت
+ *      ساخته شده**. یک نشست عادی (حتی با نشست فعالِ دیگرِ همان کاربر) این claim
+ *      را ندارد و همین‌جا رد می‌شود.
+ *   ۲) توکنِ دقیقاً همان `resetTokenId` که هنوز مصرف نشده و منقضی نشده.
  *   ۳) تراکنش واحد — حذف توکن و نوشتن رمز جدید با هم، یا هیچ‌کدام.
+ *
+ * چرا `resetTokenId` و نه «آخرین توکن باز کاربر»؟ قبلاً همین endpoint فقط
+ * `userId` را می‌دید و «جدیدترین توکن باز» را برمی‌داشت. نتیجه: **هر** نشستِ
+ * معتبرِ کاربر (حتی نشستی که با رمز دائمی ساخته شده بود) می‌توانست به‌عنوان
+ * درِ دور زدنِ `currentPassword` در `change-password` استفاده شود: کافی بود
+ * کاربر برای ایمیل خودش یک forgot-password بزند تا یک توکن فعال داشته باشد.
+ * با سنجاق‌کردن سشن به همان توکنی که آن را مجاز کرده، این در بسته می‌شود.
  *
  * نکتهٔ UX: کاربر **رمز موقت را دوباره وارد نمی‌کند**؛ به این دلیل schema عمداً
  * `currentPassword` ندارد (به `app/schema/formSchema.ts` مراجعه کنید).
@@ -49,6 +58,7 @@ export async function POST(req: NextRequest) {
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 
+        // rate limit اول: ارزان است و باید قبل از هر کار دیگری بیاید.
         if (isRateLimited(`setpw:user:${user.id}`, USER_MAX_ATTEMPTS, WINDOW_MS)) {
             return errorResponse(
                 429,
@@ -58,6 +68,11 @@ export async function POST(req: NextRequest) {
                 context.requestId,
             )
         }
+
+        // grant باید متعلق به همین نشست باشد. نشست‌های عادی (از جمله نشستی که با
+        // رمز دائمی ساخته شده) `resetTokenId` ندارند و همین‌جا رد می‌شوند.
+        const resetTokenId = user.resetTokenId
+        if (!resetTokenId) throw new PasswordResetRejectedError()
 
         const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
         if (!body) return validationErrorResponse(undefined, undefined, context.requestId)
@@ -78,11 +93,11 @@ export async function POST(req: NextRequest) {
         await prisma.$transaction(async (tx: unknown) => {
             const client = tx as PasswordResetClient
 
-            // «فعال‌ترین» توکنِ کاربر. اگر چندتا باز مانده باشد (حالت غیرعادی)،
-            // فقط جدیدترین بررسی می‌شود.
+            // **همان** توکنی که این نشست را مجاز کرده — نه «آخرین توکن باز».
+            // کاربر و توکن هر دو در `where` می‌آیند تا توکنِ کاربر دیگری
+            // (که طریق دست‌کاری کوکی ممکن است در payload بیاید) پذیرفته نشود.
             const row = await client.passwordResetToken.findFirst({
-                where: { userId: user.id, usedAt: null, invalidatedAt: null },
-                orderBy: { createdAt: "desc" },
+                where: { id: resetTokenId, userId: user.id, usedAt: null, invalidatedAt: null },
                 select: { id: true, expiresAt: true },
             })
 
@@ -95,7 +110,7 @@ export async function POST(req: NextRequest) {
             // یکی برنده شود (race/replay) — بدون نیاز به قفل.
             await consumeTokenAndSetPassword(client, {
                 userId: user.id,
-                tokenId: row.id,
+                tokenId: resetTokenId,
                 newPassword,
             })
         })

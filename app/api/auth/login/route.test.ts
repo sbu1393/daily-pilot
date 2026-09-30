@@ -1,15 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { NextRequest } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { InvalidCredentialsError } from "@/app/lib/services/errors"
 
 /* ------------------------------------------------------------------ */
 /* Route smoke test: POST /api/auth/login (ADR-04)                     */
 /*                                                                     */
-/* ورود دو مرحله‌ای (2FA): رمز عبور + کد ایمیل.                         */
+/* دو مسیر ورود:                                                       */
+/* • رمز دائمی ⇒ 2FA: چالش OTP، بدون سشن در این مرحله                  */
+/* • رمز موقت ⇒ سشنِ محدود سنجاق‌شده به توکن بازیابی، بدون OTP         */
 /* - authenticate mocked (no DB)                                       */
 /* - rateLimit mocked                                                  */
 /* - otp.service mocked (چالش + ارسال ایمیل بدون DB/شبکه واقعی)         */
-/* - هیچ سشنی در این مرحله ساخته نمی‌شود (createSession صدا زده نمی‌شود) */
+/* - createSession mocked (JWT_SECRET در محیط تست نیست)                */
 /* ------------------------------------------------------------------ */
 
 const mocks = vi.hoisted(() => ({
@@ -23,6 +25,7 @@ const mocks = vi.hoisted(() => ({
     verifyTurnstile: vi.fn(),
     createOtpChallenge: vi.fn(),
     sendOtpEmail: vi.fn(),
+    createSession: vi.fn(),
 }))
 
 vi.mock("@/app/lib/rateLimit", () => ({
@@ -45,6 +48,10 @@ vi.mock("@/app/lib/services/otp.service", () => ({
     sendOtpEmail: mocks.sendOtpEmail,
     OTP_TTL_MS: 600000,
     OTP_MAX_ATTEMPTS: 5,
+}))
+vi.mock("@/app/lib/createSession", () => ({
+    createSession: mocks.createSession,
+    DEFAULT_SESSION_MAX_AGE_SECONDS: 604800,
 }))
 
 import { POST } from "./route"
@@ -82,6 +89,7 @@ describe("POST /api/auth/login", () => {
         mocks.authenticate.mockResolvedValue({ kind: "NORMAL", user: USER })
         mocks.createOtpChallenge.mockResolvedValue(CHALLENGE)
         mocks.sendOtpEmail.mockResolvedValue({ sent: true, id: "email_1" })
+        mocks.createSession.mockImplementation((_user: unknown, response: NextResponse) => response)
     })
 
     /* -------------------------------------------------------------- */
@@ -112,6 +120,7 @@ describe("POST /api/auth/login", () => {
         expect(res.status).toBe(200)
         expect(res.cookies.get("token")).toBeUndefined()
         expect(res.headers.get("set-cookie")).toBeNull()
+        expect(mocks.createSession).not.toHaveBeenCalled()
     })
 
     it("returns 503 EMAIL_DELIVERY_FAILED when the email provider rejects the send (never silent)", async () => {
@@ -341,5 +350,106 @@ describe("POST /api/auth/login", () => {
         expect(parsed.error.errors).toBeDefined()
         expect(mocks.authenticate).not.toHaveBeenCalled()
         expect(mocks.createOtpChallenge).not.toHaveBeenCalled()
+    })
+})
+
+/* ------------------------------------------------------------------ */
+/* ورود با رمز موقت — سشن محدود، بدون چالش OTP                       */
+/* ------------------------------------------------------------------ */
+
+describe("POST /api/auth/login — رمز موقت (بدون OTP)", () => {
+    const TEMP_EXPIRY = new Date(Date.now() + 10 * 60 * 1000)
+
+    // hook های vitest در سطح همان describe اعمال می‌شوند؛ پس این بلوک پایه‌ی
+    // مشترکِ خودش را دارد (همان الگوی describe قبلی، تکرار نشده).
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.clientIp.mockReturnValue("1.2.3.4")
+        mocks.isRateLimited.mockReturnValue(false)
+        mocks.verifyTurnstile.mockResolvedValue(true)
+        mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
+        mocks.recordProductEvent.mockResolvedValue({ recorded: true, eventName: "auth.login_succeeded" })
+        mocks.getPrisma.mockReturnValue({ user: { update: mocks.userUpdate } })
+        mocks.createSession.mockImplementation((_user: unknown, response: NextResponse) => response)
+
+        mocks.authenticate.mockResolvedValue({
+            kind: "TEMPORARY",
+            user: USER,
+            resetTokenId: "tok_1",
+            resetExpiresAt: TEMP_EXPIRY,
+        })
+    })
+
+    it("پاسخ 200 با nextStep=SET_PASSWORD می‌دهد و هیچ چالش OTP نمی‌سازد", async () => {
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(200)
+        await expect(res.json()).resolves.toEqual({
+            ok: true,
+            data: {
+                nextStep: "SET_PASSWORD",
+                email: "test@example.com",
+                mustChangePassword: true,
+            },
+        })
+        // نکتهٔ اصلی حذف OTP: نه کدی ساخته می‌شود، نه ایمیلی می‌رود
+        expect(mocks.createOtpChallenge).not.toHaveBeenCalled()
+        expect(mocks.sendOtpEmail).not.toHaveBeenCalled()
+    })
+
+    it("فلگ mustChangePassword را قبل از ساخت سشن در DB می‌نویسد", async () => {
+        await callPOST(VALID_BODY)
+
+        expect(mocks.userUpdate).toHaveBeenCalledWith({
+            where: { id: 1 },
+            data: { mustChangePassword: true },
+        })
+        expect(mocks.userUpdate.mock.invocationCallOrder[0]).toBeLessThan(
+            mocks.createSession.mock.invocationCallOrder[0],
+        )
+    })
+
+    it("سشن را به همان توکنِ بازیابی سنجاق می‌کند", async () => {
+        await callPOST(VALID_BODY)
+
+        expect(mocks.createSession).toHaveBeenCalledTimes(1)
+        expect(mocks.createSession.mock.calls[0][0]).toEqual({
+            id: 1,
+            email: "test@example.com",
+            mustChangePassword: true,
+            resetTokenId: "tok_1",
+        })
+    })
+
+    it("عمر سشن را به باقی‌ماندهٔ توکن محدود می‌کند، نه ۷ روز", async () => {
+        await callPOST(VALID_BODY)
+
+        const options = mocks.createSession.mock.calls[0][2] as { maxAgeSeconds: number }
+        expect(options.maxAgeSeconds).toBeGreaterThan(60)
+        expect(options.maxAgeSeconds).toBeLessThanOrEqual(10 * 60)
+    })
+
+    it("کف ۶۰ ثانیه را نگه می‌دارد حتی اگر توکن در لبهٔ انقضا باشد", async () => {
+        mocks.authenticate.mockResolvedValue({
+            kind: "TEMPORARY",
+            user: USER,
+            resetTokenId: "tok_1",
+            resetExpiresAt: new Date(Date.now() + 5_000),
+        })
+
+        await callPOST(VALID_BODY)
+
+        const options = mocks.createSession.mock.calls[0][2] as { maxAgeSeconds: number }
+        expect(options.maxAgeSeconds).toBe(60)
+    })
+
+    it("اگر نوشتن فلگ شکست بخورد، سشن صادر نمی‌شود و ۵۰۳ می‌دهد", async () => {
+        mocks.userUpdate.mockRejectedValue(new Error("db down"))
+
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(503)
+        expect((await res.json()).error.code).toBe("ACCOUNT_STATE_UNAVAILABLE")
+        expect(mocks.createSession).not.toHaveBeenCalled()
     })
 })

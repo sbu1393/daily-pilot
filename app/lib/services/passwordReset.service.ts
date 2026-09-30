@@ -147,6 +147,10 @@ export async function findActiveTokenForUser(
  * احراز می‌کند و شمارندهٔ تلاش را یکی زیاد می‌کند. مصرف واقعی در
  * `consumeTokenAndSetPassword` (سمت تعیین رمز جدید) انجام می‌شود.
  *
+ * `tokenId` و `expiresAt` برمی‌گردند چون caller (route لاگین) آن‌ها را در
+ * سشن محدودشده می‌نشاند: سشن فقط با **همین** توکن و فقط تا **همین** انقضا
+ * معتبر است. بدون برگرداندن این دو، grant قابل اتصال به توکن نبود.
+ *
  * همهٔ حالت‌های رد یک پاسخ یکسان می‌دهند (`PasswordResetRejectedError`) تا
  * مسیر لاگین قابلیت enumeration نداشته باشد: منقضی / مصرف‌شده / باطل‌شده /
  * تمام‌شدن تلاش‌ها / هش نادرست — همه یکی.
@@ -154,7 +158,7 @@ export async function findActiveTokenForUser(
 export async function consumeTokenForLogin(
     prisma: PasswordResetClient,
     input: { userId: number; candidate: string; now?: Date },
-): Promise<{ ok: true; tokenId: string } | { ok: false }> {
+): Promise<{ ok: true; tokenId: string; expiresAt: Date } | { ok: false }> {
     const now = input.now ?? new Date()
     const row = await findActiveTokenForUser(prisma, input.userId)
 
@@ -176,7 +180,7 @@ export async function consumeTokenForLogin(
     // اجازه می‌داد، در حالی که قرارداد «۵ تلاش» است.)
     if (row.attempts >= row.maxAttempts) return { ok: false }
 
-    return { ok: true, tokenId: row.id }
+    return { ok: true, tokenId: row.id, expiresAt: row.expiresAt }
 }
 
 /** یکی زیاد کردن `attempts` — فقط شمارنده است، تصمیم‌گیری در caller. */

@@ -62,13 +62,19 @@ export async function registerUser(input: {
  * نتیجهٔ authenticate — چرا `User` برنمی‌گرداند؟
  *
  * مسیر لاگین باید بداند ورود با **رمز دائمی** بوده یا **رمز موقت**، تا پرچم
- * `mustChangePassword` را تا `/auth/otp` و سشن نهایی حمل کند. برگرداندن خودِ
+ * `mustChangePassword` را تا سشن نهایی حمل کند. برگرداندن خودِ
  * `User` این اطلاعات را ندارد، و اضافه‌کردن پرچم به `User` هم آن را آلوده می‌کند.
- * پس یک discriminated union برمی‌گردد — تغییری که هر دو حالت را صریح می‌کند.
+ * پس یک discriminated union برمی‌گرداند — تغییری که هر دو حالت را صریح می‌کند.
+ *
+ * شاخهٔ `TEMPORARY` علاوه بر نوع ورود، **مشخصات توکنِ بازیابی** را هم حمل می‌کند
+ * (`resetTokenId` / `resetExpiresAt`). دلیل: سشنی که با رمز موقت صادر می‌شود یک
+ * سشن عادی نیست، یک **grant محدود** است — فقط با همان توکن و فقط تا همان انقضا
+ * اجازهٔ تعیین رمز جدید می‌دهد. بدون این دو، سشن به «آخرین توکن بازِ کاربر» وصل
+ * می‌شد و به نشست‌های دیگرِ همان کاربر هم قابل تعمیم بود.
  */
 export type AuthenticationResult =
     | { kind: "NORMAL"; user: User }
-    | { kind: "TEMPORARY"; user: User }
+    | { kind: "TEMPORARY"; user: User; resetTokenId: string; resetExpiresAt: Date }
 
 /**
  * authenticate — ایمیل + رمز را بررسی می‌کند.
@@ -82,8 +88,9 @@ export type AuthenticationResult =
  * ندارد، نه رمز غلط است، نه توکن منقضی/مصرف‌شده/بی‌اثر. هیچ تفکیکی وجود ندارد
  * تا این مسیر قابلیت enumeration نداشته باشد.
  *
- * توجه: بازگشت `TEMPORARY` فقط **نوع ورود** را مشخص می‌کند. OTP همچنان اجباری
- * است — سشن فقط در `verify-otp` صادر می‌شود، نه اینجا.
+ * شاخهٔ `TEMPORARY` خودش سشن صادر نمی‌کند؛ فقط **مشخصات grant** را برمی‌گرداند
+ * تا route لاگین سشنِ محدود را بسازد (پرچم `mustChangePassword` بالا + سنجاق به
+ * همین توکن و همین انقضا).
  */
 export async function authenticate(
     email: string,
@@ -105,7 +112,12 @@ export async function authenticate(
     })
     if (!reset.ok) throw new InvalidCredentialsError()
 
-    return { kind: "TEMPORARY", user }
+    return {
+        kind: "TEMPORARY",
+        user,
+        resetTokenId: reset.tokenId,
+        resetExpiresAt: reset.expiresAt,
+    }
 }
 
 /**

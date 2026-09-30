@@ -100,7 +100,7 @@ describe("consumeTokenForLogin", () => {
 
     it("رمز موقت درست را قبول می‌کند و توکن را مصرف نمی‌کند (مصرف در تعیین رمز است)", async () => {
         const client = makeClient()
-        const raw = await seedToken(client, "abcDEF2345!@")
+        const raw = await seedToken(client, "ab3DEF2345xy")
 
         const result = await consumeTokenForLogin(client as never, {
             userId: 7,
@@ -108,7 +108,11 @@ describe("consumeTokenForLogin", () => {
             now: NOW,
         })
 
-        expect(result).toEqual({ ok: true, tokenId: "tok_1" })
+        expect(result).toEqual({
+            ok: true,
+            tokenId: "tok_1",
+            expiresAt: new Date(NOW.getTime() + PASSWORD_RESET_TTL_MS),
+        })
         // مهم: این مسیر سمت لاگین است، نه سمت تغییر رمز
         expect(client.passwordResetToken.deleteMany).not.toHaveBeenCalled()
         expect(client.user.update).not.toHaveBeenCalled()
@@ -133,7 +137,7 @@ describe("consumeTokenForLogin", () => {
 
     it("توکن منقضی را رد می‌کند", async () => {
         const client = makeClient()
-        const raw = await seedToken(client, "abcDEF2345!@")
+        const raw = await seedToken(client, "ab3DEF2345xy")
         ;(client.passwordResetToken.findFirst.mockResolvedValue)({
             id: "tok_1",
             tokenHash: await bcrypt.hash(raw, 4),
@@ -155,7 +159,7 @@ describe("consumeTokenForLogin", () => {
     it("توکن invalidated/used را رد می‌کند", async () => {
         for (const field of ["usedAt", "invalidatedAt"] as const) {
             const client = makeClient()
-            const raw = await seedToken(client, "abcDEF2345!@")
+            const raw = await seedToken(client, "ab3DEF2345xy")
             ;(client.passwordResetToken.findFirst.mockResolvedValue)({
                 id: "tok_1",
                 tokenHash: await bcrypt.hash(raw, 4),
@@ -178,7 +182,7 @@ describe("consumeTokenForLogin", () => {
 
     it("پس از ۵ تلاش مجاز، حتی رمز درست هم رد می‌شود (سقف تلاش)", async () => {
         const client = makeClient()
-        const raw = await seedToken(client, "abcDEF2345!@")
+        const raw = await seedToken(client, "ab3DEF2345xy")
         // attempts = 5 و maxAttempts = 5 ⇒ هر پنج تلاش مجاز رفته و این ششمین است
         ;(client.passwordResetToken.findFirst.mockResolvedValue)({
             id: "tok_1",
@@ -200,7 +204,7 @@ describe("consumeTokenForLogin", () => {
 
     it("پنجمین تلاش (attempts=4) هنوز مجاز است — سقف دقیقاً ۵ است، نه ۴", async () => {
         const client = makeClient()
-        const raw = await seedToken(client, "abcDEF2345!@")
+        const raw = await seedToken(client, "ab3DEF2345xy")
         ;(client.passwordResetToken.findFirst.mockResolvedValue)({
             id: "tok_1",
             tokenHash: await bcrypt.hash(raw, 4),
@@ -216,7 +220,11 @@ describe("consumeTokenForLogin", () => {
             candidate: raw,
             now: NOW,
         })
-        expect(result).toEqual({ ok: true, tokenId: "tok_1" })
+        expect(result).toEqual({
+            ok: true,
+            tokenId: "tok_1",
+            expiresAt: new Date(NOW.getTime() + PASSWORD_RESET_TTL_MS),
+        })
     })
 
     it("وقتی اصلاً توکنی فعال نیست، رد می‌کند و حتی bcrypt هم اجرا نمی‌شود", async () => {

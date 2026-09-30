@@ -772,6 +772,26 @@ samp {
   line-height: 1.9;
 }
 
+/* لینک کمکی داخل فرم (مثل «رمز عبور را فراموش کرده‌اید؟») که بلافاصله زیر
+   input مربوطه می‌نشیند. فاصلهٔ منفی، فاصلهٔ عمودی grid فرم را نمی‌شکند. */
+.dp-form-helper {
+  margin-top: -8px;
+  font-size: .8rem;
+  color: var(--muted);
+}
+
+.dp-form-helper a {
+  color: var(--primary);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: var(--transition);
+}
+
+.dp-form-helper a:hover {
+  color: var(--primary-dark);
+}
+
 .dp-auth-switch {
   margin-top: 22px;
   text-align: center;

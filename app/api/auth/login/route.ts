@@ -15,7 +15,11 @@ import { getPrisma } from "@/app/lib/getPrisma"
 import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
 import { recordProductEvent } from "@/app/lib/services/productEvent.service"
 import { createOtpChallenge, sendOtpEmail } from "@/app/lib/services/otp.service"
+import { createSession } from "@/app/lib/createSession"
 import { EmailDeliveryFailedError } from "@/app/lib/services/errors"
+
+/** کمینهٔ عمر سشنِ محدود تا کاربر فرصت داشته باشد رمز جدید را تایپ کند. */
+const RESTRICTED_SESSION_MIN_SECONDS = 60
 
 export async function POST(req: NextRequest) {
     const context = createObservabilityContext("/api/auth/login", "auth")
@@ -80,17 +84,27 @@ export async function POST(req: NextRequest) {
         const user = auth.user
         context.userId = user.id
 
-        // رمز موقت = ورود موفق ولی «هنوز کامل نیست». این پرچم تا صفحهٔ OTP و
-        // سشن نهایی حمل می‌شود تا کاربر مستقیم به /auth/set-new-password برود.
-        // OTP همچنان اجباری است — این پرچم هیچ مسیر ورود بدون تأیید ایمیل نمی‌سازد.
+        // رمز موقت = ورود موفق ولی «هنوز کامل نیست».
+        //
+        // چرا این مسیر دیگر OTP نمی‌خواهد؟ تحلیل کامل در کامنت شاخهٔ رمز موقت
+        // پایین‌تر آمده؛ خلاصه‌اش: هر دو راز (رمز موقت و کد OTP) از **یک کانال**
+        // یعنی همان ایمیل می‌آیند، پس OTP یک عامل مستقل (2FA) نیست و فقط
+        // سفر دوم به inbox اضافه می‌کند. رمز موقت خودش ۶۹ بیت آنتروپی دارد و
+        // فقط از طریق همان ایمیل به کاربر می‌رسد، پس **دسترسی به inbox را ثابت
+        // می‌کند**. جایگزینِ guard این است که سشنِ حاصل «محدود» باشد:
+        //   ۱) `mustChangePassword` در DB ⇒ همهٔ endpointهای محافظت‌شده ۴۰۳
+        //      و layoutها redirect می‌شوند (تنها کارِ ممکن، تعیین رمز جدید است)،
+        //   ۲) سشن به `resetTokenId` **سنجاق** می‌شود — فقط همان توکن کار را می‌کند،
+        //   ۳) عمر سشن و JWT به بازهٔ باقی‌ماندهٔ توکن محدود می‌شود (نه ۷ روز).
+        // بدون این سه، حذف OTP ریسک را واقعاً بالا می‌برد.
         const mustChangePassword = auth.kind === "TEMPORARY"
 
         // ورود با رمز موقت یعنی حساب وارد وضعیت «باید رمز جدید تعیین شود» شد.
-        // فلگ **همین‌جا** در DB نوشته می‌شود، نه در verify-otp، چون تنها جایی که
-        // «رمز موقت بود» را می‌داند همین‌جاست؛ OtpCode چنین ستونی ندارد و
-        // افزودنش schema را بدون فایده‌ی دیگری بزرگ می‌کرد.
-        // اثرش بی‌خطر است تا وقتی سشنی وجود ندارد: سشن فقط در verify-otp صادر
-        // می‌شود، پس تا آن لحظه این فلگ هیچ مسیری را باز نمی‌کند.
+        // فلگ **همین‌جا** در DB نوشته می‌شود، نه در set-new-password، چون تنها
+        // جایی که «رمز موقت بود» را می‌داند همین‌جاست؛ هر جای دیگری فقط پرچم را
+        // *می‌خواند* و نمی‌تواند حدس بزد چرا باید صفر شود.
+        // ترتیب حیاتی است: اول فلگ، بعد سشن. اگر نوشتن فلگ شکست بخورد و سشن
+        // ساخته شود، enforcement خنثی می‌شود ⇒ صریحاً خطا می‌دهیم.
         if (mustChangePassword) {
             try {
                 await getPrisma().user.update({
@@ -98,10 +112,6 @@ export async function POST(req: NextRequest) {
                     data: { mustChangePassword: true },
                 })
             } catch (error) {
-                // نگسستن به ورود: OTP هنوز باید تأیید شود و ساخت سشن در verify-otp
-                // دوباره فلگ را از DB می‌خواند؛ اگر این نوشتن شکست بخورد، سشن
-                // ساخته می‌شود ولی بدون فلگ — که یعنی enforcement خنثی. پس صریحاً
-                // خطا می‌دهیم تا کاربر پیام درست بگیرد.
                 await recordError(error, context)
                 return errorResponse(
                     503,
@@ -136,9 +146,60 @@ export async function POST(req: NextRequest) {
             // fail-open — analytics failure هرگز login را fail نمی‌کند
         }
 
-        // ورود دو مرحله‌ای (2FA): رمز عبور تأیید شد، اما **سشن نهایی اینجا ساخته
-        // نمی‌شود**. یک چالش OTP ساخته و ایمیل می‌شود؛ سشن فقط پس از تأیید کد در
-        // /api/auth/verify-otp صادر می‌شود.
+        // ── شاخهٔ رمز موقت: سشنِ محدود، بدون چالش OTP ────────────────────────
+        //
+        // چرا اینجا سشن صادر می‌شود و `verify-otp` در جریان نیست؟
+        //   • هر دو راز (رمز موقت و کد OTP) به **یک کانال** می‌رسند: همان inbox.
+        //     پس OTP عامل مستقل نیست؛ چیزی که اضافه می‌کند یک سفر دوم به inbox
+        //     است، نه یک لایهٔ اعتماد جدید.
+        //   • رمز موقت خودش یک رازِ تازه‌ساخت با ~۶۹ بیت آنتروپی است که فقط از
+        //     طریق همان ایمیل به کاربر می‌رسد ⇒ رسیدنش اثباتِ دسترسی به inbox است.
+        //   • آنچه OTP واقعاً اضافه می‌کرد: محافظت در برابر «لو رفتن جزئی» رمز
+        //     (پیش‌نمایش ایمیل، shoulder-surfing). این با سه guard زیر تا حد زیادی
+        //     پوشش داده می‌شود: پرچم DB، سنجاق سشن به توکن، و سقف عمر سشن.
+        if (auth.kind === "TEMPORARY") {
+            // عمر سشن = بازهٔ باقی‌ماندهٔ توکن (نه ۷ روز). کف ۶۰ ثانیه فقط برای اینکه
+            // کاربر در لبهٔ انقضا فرصت تایپ داشته باشد؛ مرجع نهایی، چک توکن در
+            // set-new-password است.
+            const remainingSeconds = Math.floor((auth.resetExpiresAt.getTime() - Date.now()) / 1000)
+            const restrictedMaxAge = Math.max(RESTRICTED_SESSION_MIN_SECONDS, remainingSeconds)
+
+            console.log("[login] temporary password accepted — restricted session issued", {
+                requestId: context.requestId,
+                userId: user.id,
+                resetTokenId: auth.resetTokenId,
+                sessionMaxAgeSeconds: restrictedMaxAge,
+            })
+
+            const restrictedResponse = NextResponse.json(
+                {
+                    ok: true,
+                    data: {
+                        nextStep: "SET_PASSWORD",
+                        email: user.email,
+                        mustChangePassword: true,
+                    },
+                },
+                { status: 200 },
+            )
+            restrictedResponse.headers.set("X-Request-ID", context.requestId)
+
+            return createSession(
+                {
+                    id: user.id,
+                    email: user.email,
+                    mustChangePassword: true,
+                    resetTokenId: auth.resetTokenId,
+                },
+                restrictedResponse,
+                { maxAgeSeconds: restrictedMaxAge },
+            )
+        }
+
+        // ── شاخهٔ عادی: ورود دو مرحله‌ای (۲FA) — دست‌نخورده ────────────────────
+        // رمز عبور تأیید شد، اما **سشن نهایی اینجا ساخته نمی‌شود**. یک چالش OTP
+        // ساخته و ایمیل می‌شود؛ سشن فقط پس از تأیید کد در /api/auth/verify-otp
+        // صادر می‌شود.
         const challenge = await createOtpChallenge(user.email)
         const delivery = await sendOtpEmail(user.email, challenge.code)
 

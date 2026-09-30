@@ -2,7 +2,7 @@
 
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { useRef, useState } from "react"
+import { Fragment, useRef, useState } from "react"
 import CaptchaWidget, { type CaptchaWidgetHandle } from "@/app/components/CaptchaWidget"
 import { CAPTCHA_ACTIONS } from "@/app/lib/captchaActions"
 import { loginSchema } from "@/app/schema/formSchema"
@@ -17,12 +17,19 @@ import { api } from "@/app/lib/api/client"
 
 export type LoginInput = z.infer<typeof loginSchema>
 
-/** بخش data پاسخ موفقیت‌آمیز /api/auth/login — قرارداد ورود دو مرحله‌ای. */
+/**
+ * بخش data پاسخ موفقیت‌آمیز /api/auth/login.
+ *
+ * دو مسیر خروجی متفاوت:
+ *   • `nextStep: "OTP"`          → ورود عادی، مرحلهٔ دوم: کد ایمیل.
+ *   • `nextStep: "SET_PASSWORD"` → ورود با **رمز موقت**: نشستِ محدود صادر شده و
+ *     کاربر باید مستقیم رمز دائمی تعیین کند (OTP در این مسیر ندارد).
+ */
 type LoginResult = {
     nextStep?: string
     challengeId?: string
     email?: string
-    /** رمز موقت بوده ⇒ بعد از OTP باید رمز دائمی تعیین شود. */
+    /** رمز موقت بوده ⇒ باید رمز دائمی تعیین شود. */
     mustChangePassword?: boolean
 }
 
@@ -71,6 +78,14 @@ export default function LoginForm() {
                 body: JSON.stringify({ ...data, turnstileToken: token }),
             })
 
+            // رمز موقت: نشستِ محدود صادر شده و کاربر باید رمز دائمی تعیین کند.
+            // OTP در این مسیر وجود ندارد — مستقیم به صفحهٔ تعیین رمز می‌رویم.
+            if (result?.nextStep === "SET_PASSWORD") {
+                router.replace("/auth/set-new-password")
+                router.refresh()
+                return
+            }
+
             // ورود دو مرحله‌ای: سرور هنوز سشنی نساخته و منتظر تأیید کد ایمیل است.
             // اینجا reset نمی‌کنیم: توکن مصرف شده و صفحه در حال ترک است.
             if (result?.nextStep === "OTP" && result.challengeId) {
@@ -83,7 +98,7 @@ export default function LoginForm() {
                 return
             }
 
-            // مسیر جایگزین (سازگاری): اگر پاسخ، مرحلهٔ OTP را اعلام نکند
+            // مسیر جایگزین (سازگاری): اگر پاسخ هیچ مرحله‌ای را اعلام نکند
             toast.success("ورود موفق بود")
             router.push("/dashboard")
             router.refresh()
@@ -103,19 +118,29 @@ export default function LoginForm() {
         >
             <AuthCard
                 title="ورود به روزساز"
-                subtitle="روزت را با خلبان خودکار برنامه ریزی کن"
+                subtitle="روزت را هوشمند برنامه ریزی کن"
             >
                 <form
                     onSubmit={handleSubmit(onCredentialSubmit)}
                     className="dp-form"
                 >
                     {loginFields.map((item) => (
-                        <FormInput
-                            key={item.name}
-                            formItem={item}
-                            register={register}
-                            errors={errors}
-                        />
+                        <Fragment key={item.name}>
+                            <FormInput
+                                formItem={item}
+                                register={register}
+                                errors={errors}
+                            />
+                            {/* لینک بازیابی دقیقاً زیر فیلد رمز — همان‌جایی که
+                                کاربر موقع تایپ رمز به آن نیاز دارد. */}
+                            {item.name === "password" && (
+                                <p className="dp-form-helper">
+                                    <Link href="/auth/forgot-password">
+                                        رمز عبور را فراموش کرده‌اید؟
+                                    </Link>
+                                </p>
+                            )}
+                        </Fragment>
                     ))}
 
                     <CaptchaWidget
@@ -136,10 +161,6 @@ export default function LoginForm() {
                 <div className="dp-auth-switch">
                     حساب کاربری نداری؟{" "}
                     <Link href="/auth/register">ثبت‌نام کن</Link>
-                </div>
-
-                <div className="dp-auth-switch">
-                    <Link href="/auth/forgot-password">رمز عبور را فراموش کرده‌اید؟</Link>
                 </div>
             </AuthCard>
         </motion.div>

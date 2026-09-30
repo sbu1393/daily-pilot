@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { getCurrentUser } from "@/app/lib/getCurrentUser"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { isRateLimited } from "@/app/lib/rateLimit"
+import { createSession } from "@/app/lib/createSession"
 import { setNewPasswordSchema } from "@/app/schema/formSchema"
 import {
     consumeTokenAndSetPassword,
@@ -115,12 +116,41 @@ export async function POST(req: NextRequest) {
             })
         })
 
-        console.log(`${LOG_PREFIX} permanent password set; forced-change cleared`, {
+        console.log(`${LOG_PREFIX} permanent password set; forced-change cleared; normal session issued`, {
             requestId: context.requestId,
             userId: user.id,
         })
 
-        return okMessageResponse("رمز عبور با موفقیت تغییر یافت ✅", 200, context.requestId)
+        /**
+         * نشستِ محدود را با یک نشستِ عادی **تعویض** می‌کنیم.
+         *
+         * نشستی که `/api/auth/login` با رمز موقت ساخت، عمداً تا انقضای توکن (≈۱۵ دقیقه)
+         * عمر داشت. اگر اینجا سشن تازه‌ای صادر نشود، کاربر با همان کوکی کوتاه‌عمر
+         * می‌ماند و حدود ۱۵ دقیقه بعد بی‌سروصدا logout می‌شود — با اینکه رمزش را
+         * عوض کرده است. پس همان الگوی `verify-otp` را تکرار می‌کنیم: یک
+         * `createSession` روی همان response موفق.
+         *
+         * چرا امن است:
+         *   • فراخوانی **بعد از** تراکنش است؛ اگر consume شکست بخورد اصلاً به این
+         *     نقطه نمی‌رسیم و سشنِ عادی صادر نمی‌شود.
+         *   • توکن در همان تراکنش با `deleteMany` مصرف شده ⇒ نشستِ قبلی (که به آن
+         *     توکن سنجاق بود) دیگر هیچ grant فعالی ندارد و `set-new-password`
+         *     را دوباره قبول نمی‌کند.
+         *   • claimهای سشن جدید: `resetTokenId: null` و `mustChangePassword: false`
+         *     — یعنی دقیقاً یک نشست عادی، با عمر پیش‌فرض ۷ روزه (بدون پاس دادن
+         *     `maxAgeSeconds`، پس سقف عمرِ توکن اعمال نمی‌شود).
+         */
+        const response = okMessageResponse("رمز عبور با موفقیت تغییر یافت ✅", 200, context.requestId)
+
+        return createSession(
+            {
+                id: user.id,
+                email: user.email,
+                mustChangePassword: false,
+                resetTokenId: null,
+            },
+            response,
+        )
     } catch (error) {
         await recordError(error, context)
         const mapped = toServiceErrorResponse(error, context.requestId)

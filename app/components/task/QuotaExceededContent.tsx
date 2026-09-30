@@ -13,13 +13,13 @@ import styles from "./task.module.css"
 // متن ثابت و مستقل از پیام سرور است؛ تصمیم‌گیری بر اساس code انجام می‌شود، نه متن.
 
 export const QUOTA_EXCEEDED_MESSAGE =
-    "سهمیه استفاده از هوش مصنوعی شما برای این ماه به پایان رسیده است."
+    "سهمیه هوش مصنوعی شما برای این ماه به پایان رسیده است. برای دریافت سهمیه بیشتر، حساب کاربری خود را به حساب ویژه ارتقا دهید."
 
 export default function QuotaExceededContent({ onClose }: { onClose: () => void }) {
     return (
-        <div role="dialog" aria-modal="true" aria-label="سهمیه هوش مصنوعی تمام شده است">
+        <div role="dialog" aria-modal="true" aria-label="سهمیه هوش مصنوعی شما تمام شده است">
             <div className={styles.modalHead}>
-                <h4>سهمیه هوش مصنوعی تمام شده است</h4>
+                <h4>سهمیه هوش مصنوعی شما تمام شده است</h4>
                 <button className={styles.closeBtn} onClick={onClose} aria-label="بستن">
                     ✕
                 </button>
@@ -29,7 +29,7 @@ export default function QuotaExceededContent({ onClose }: { onClose: () => void 
 
             <div className={styles.modalActions}>
                 <Link href="/subscription" className={styles.btnPrimary}>
-                    خرید اشتراک
+                    ارتقا به حساب ویژه
                 </Link>
                 <button className={styles.btnGhost} onClick={onClose}>
                     بستن

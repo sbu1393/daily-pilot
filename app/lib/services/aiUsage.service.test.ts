@@ -10,6 +10,7 @@ import {
     createReservedEvent,
     findEventStatusByRequestId,
     markReleaseFailed,
+    recordReservationLedger,
     transitionEventToConsumed,
     transitionEventToReleased,
 } from "./aiUsage.service"
@@ -92,6 +93,44 @@ describe("createReservedEvent", () => {
             code: "QUOTA_UNAVAILABLE",
             status: 503,
         })
+    })
+})
+
+describe("recordReservationLedger (ledger واقعیِ مصرف)", () => {
+    it("قفلِ «هنوز RESERVED» را نگه می‌دارد و جفت quotaSource/bucketId را می‌نویسد", async () => {
+        const prisma = makePrisma()
+        prisma.aiUsageEvent.updateMany.mockResolvedValue({ count: 1 })
+
+        await expect(
+            recordReservationLedger(prisma, {
+                requestId: "req-1",
+                quotaSource: "PROMO",
+                bucketId: 55,
+            }),
+        ).resolves.toBe(true)
+
+        expect(prisma.aiUsageEvent.updateMany).toHaveBeenCalledWith({
+            where: { requestId: "req-1", status: "RESERVED" },
+            data: { quotaSource: "PROMO", bucketId: 55 },
+        })
+    })
+
+    it("رویداد نبود ⇒ false (نه throw)", async () => {
+        const prisma = makePrisma()
+        prisma.aiUsageEvent.updateMany.mockResolvedValue({ count: 0 })
+
+        await expect(
+            recordReservationLedger(prisma, { requestId: "gone", quotaSource: "BASE", bucketId: null }),
+        ).resolves.toBe(false)
+    })
+
+    it("خطای DB ⇒ fail-closed (تا complete/release روی ledger اشتباه ننشینند)", async () => {
+        const prisma = makePrisma()
+        prisma.aiUsageEvent.updateMany.mockRejectedValue(new Error("db down"))
+
+        await expect(
+            recordReservationLedger(prisma, { requestId: "req-1", quotaSource: "PROMO", bucketId: 1 }),
+        ).rejects.toMatchObject({ code: "QUOTA_UNAVAILABLE" })
     })
 })
 

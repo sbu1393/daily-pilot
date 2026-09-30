@@ -36,12 +36,19 @@
 // - PROMO فقط از راه bucketهای `grantedUnits` وارد می‌شود، و آن bucketها **فقط**
 //   در `redeemPromoCode` ساخته/افزایش می‌یابند. پس کدِ redeem‌نشده به‌طور ذاتی در
 //   این محاسبه نیست و لازم نیست جدول `PromoCode` اصلاً خوانده شود.
+// - **در هر دو mode** (LEGACY و NEW) بونوس همان بُعد به `remaining` همان بُعد اضافه
+//   می‌شود، چون enforcement در هر دو مسیر از همان bucket PROMO مصرف می‌کند. نمایش
+//   نمی‌تواند از رزرو جلوتر یا عقب‌تر باشد.
 
 import type { AiFeature } from "@prisma/client"
 
 import { getMonthlyPeriod, resolvePlanPolicy } from "./planPolicy.service"
 import { readCutoverAt, resolveQuotaMode, type QuotaMode } from "./aiQuotaCutover.service"
-import { readQuotaBuckets } from "./aiQuotaV2.service"
+import {
+    readPromoBucketView,
+    readQuotaBuckets,
+    type QuotaBucketView,
+} from "./aiQuotaV2.service"
 import { QuotaUnavailableError } from "./errors"
 import type { PrismaClientLike } from "./aiUsage.service"
 
@@ -155,13 +162,26 @@ async function readV2Dimensions(
  *
  * همان فرمول invariant استفاده می‌شود: capacity - reserved - consumed.
  *
- * `@param _periodStart` نگه داشته شده برای هم‌راستایی با مسیر V2 و برای تست‌پذیری؛
+ * ── سهمیهٔ هدیه (PROMO) در legacy ───────────────────────────────────────────
+ * استخرِ legacy یک ردیفِ **مشترک** بدون تفکیک بُعد است، اما هر بُعد سخت‌افزارِ
+ * خودش را دارد: `AiQuotaBucket(source="PROMO", feature=...)` که `redeemPromoCode`
+ * در همان `periodStart` پر می‌کند و `reserveQuota` از آن مصرف می‌کند. پس برای اینکه
+ * نمایش با enforcement **عیناً یکی** باشد (وگرنه UI می‌گوید هست و reserve می‌گوید
+ * نیست)، PROMO هم خوانده و به remaining همان بُعد اضافه می‌شود:
+ *
+ *   remaining = max(0, base_remaining) + promo_remaining
+ *
+ * جمع «دو بُعد» نیست: مصرف ANALYZE از سهمیهٔ PLAN کم نمی‌کند (همان قرارداد V2)،
+ * پس هر بُعد فقط بونوسِ خودش را می‌بیند. بونوسِ دورهٔ قبل اصلاً خوانده نمی‌شود،
+ * چون کلید خواندن همان `periodStart` جاریِ کاربر است.
+ *
+ * `@param periodStart` نگه داشته شده برای هم‌راستایی با مسیر V2 و برای تست‌پذیری؛
  * در legacy از طریق کلید composite خوانده می‌شود.
  */
 async function readLegacyDimensions(
     prisma: PrismaClientLike,
     input: ReadAiQuotaStatusInput,
-    _periodStart: Date,
+    periodStart: Date,
 ): Promise<{ analyze: AiQuotaDimensionStatus; plan: AiQuotaDimensionStatus }> {
     const allowedUnits = resolvePlanPolicy({ plan: input.plan }).allowedUnits
 
@@ -173,7 +193,7 @@ async function readLegacyDimensions(
                 userId_periodType_periodStart: {
                     userId: input.userId,
                     periodType: "MONTHLY",
-                    periodStart: _periodStart,
+                    periodStart,
                 },
             },
             select: { reservedUnits: true, consumedUnits: true },
@@ -184,13 +204,23 @@ async function readLegacyDimensions(
         throw new QuotaUnavailableError()
     }
 
-    // یک استخر مشترک بین هر دو بُعد — عمداً برای هر دو یکسان.
-    const status: AiQuotaDimensionStatus = {
-        remaining: Math.max(0, allowedUnits - reserved - consumed),
-        granted: allowedUnits,
-        consumed,
-        promoRemaining: 0,
-    }
+    const baseRemaining = Math.max(0, allowedUnits - reserved - consumed)
 
-    return { analyze: status, plan: status }
+    // Fail-closed درست مثل بقیهٔ مسیر: خطای DB ⇒ کل status خطا، نه «PROMO = صفر».
+    const [analyzePromo, planPromo] = await Promise.all([
+        readPromoBucketView(prisma, { userId: input.userId, feature: "ANALYZE", periodStart }),
+        readPromoBucketView(prisma, { userId: input.userId, feature: "PLAN", periodStart }),
+    ])
+
+    /** یک استخر مشترک BASE بین دو بُعد، + بونوسِ مستقلِ همان بُعد. */
+    const dimension = (promo: QuotaBucketView): AiQuotaDimensionStatus => ({
+        // چون PROMO جدا حساب می‌شود و بعد جمع می‌گردد، هرگز دوبار شمرده نمی‌شود:
+        // `baseRemaining` فقط از `AiUsage` می‌آید و `promo.remaining` فقط از bucket PROMO.
+        remaining: baseRemaining + promo.remaining,
+        granted: allowedUnits + promo.capacity,
+        consumed: consumed + promo.consumed,
+        promoRemaining: promo.remaining,
+    })
+
+    return { analyze: dimension(analyzePromo), plan: dimension(planPromo) }
 }

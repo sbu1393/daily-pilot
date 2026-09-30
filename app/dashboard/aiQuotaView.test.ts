@@ -30,6 +30,56 @@ describe("quotaFeatureLabel", () => {
     })
 })
 
+// ── سهمیهٔ هدیه در نمایش ───────────────────────────────────────────────────────
+// regression لایهٔ نمایش برای باگ کاربر: وقتی BASE تمام بوده ولی PROMO باقی مانده،
+// نباید «تمام شده» نشان داده شود. ورودی از سرور می‌آید و `remaining` از قبل
+// BASE+PROMO است، پس این فقط باید همان عدد را درست ترجمه کند.
+describe("describeQuotaDimension — سهمیهٔ هدیه", () => {
+    it("BASE تمام ولی PROMO باقی مانده ⇒ exhausted نیست و راهنمای هدیه دیده می‌شود", () => {
+        const view = describeQuotaDimension("analyze", {
+            remaining: 5, // فقط از بونوس آمده
+            granted: 20,
+            consumed: 15,
+            promoRemaining: 5,
+        })
+
+        expect(view.tone).not.toBe("exhausted")
+        expect(view.text).not.toMatch(/تمام شده/)
+        expect(view.promoHint).toBe("۵ مورد هدیه")
+    })
+
+    it("بونوسِ خیلی کم هم «تمام شده» نیست (لحن «کم»، نه exhausted)", () => {
+        const view = describeQuotaDimension("analyze", {
+            remaining: 1,
+            granted: 16,
+            consumed: 15,
+            promoRemaining: 1,
+        })
+
+        expect(view.tone).toBe("low")
+        expect(view.text).toBe("۱ تحلیل هوشمند باقی‌مانده")
+    })
+
+    it("بونوس تمام‌شده ⇒ exhausted، بدون راهنمای هدیه", () => {
+        const view = describeQuotaDimension("analyze", {
+            remaining: 0,
+            granted: 20,
+            consumed: 20,
+            promoRemaining: 0,
+        })
+
+        expect(view.tone).toBe("exhausted")
+        expect(view.text).toBe("سهمیهٔ تحلیل هوشمند این دوره تمام شده است.")
+        expect(view.promoHint).toBeUndefined()
+    })
+
+    it("بدون PROMO اصلاً راهنمای هدیه نشان داده نمی‌شود", () => {
+        const view = describeQuotaDimension("analyze", dim(10, { promoRemaining: 0 }))
+
+        expect(view.promoHint).toBeUndefined()
+    })
+})
+
 describe("quotaTone", () => {
     it("آستانهٔ لحن درست است", () => {
         expect(quotaTone(0)).toBe("exhausted")

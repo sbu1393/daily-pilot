@@ -270,7 +270,7 @@ describe("readAiQuotaStatus — دورهٔ LEGACY", () => {
 
         expect(s.analyze).toEqual(s.plan)
         expect(s.analyze.remaining).toBe(15 - 1 - 4)
-        expect(s.analyze.promoRemaining).toBe(0) // PROMO در legacy وجود ندارد
+        expect(s.analyze.promoRemaining).toBe(0) // بدون کد هدیه، PROMO وجود ندارد
     })
 
     it("در legacy سقفِ V2 policy استفاده نمی‌شود", async () => {
@@ -301,6 +301,146 @@ describe("readAiQuotaStatus — دورهٔ LEGACY", () => {
         const s = await readAiQuotaStatus(prisma, { ...base, plan: "PRO" })
 
         expect(s.analyze.remaining).toBe(300)
+    })
+})
+
+// ── سهمیهٔ هدیه (PROMO) در دورهٔ legacy ───────────────────────────────────────
+// این دسته دقیقاً باگ گزارش‌شده را قفل می‌کند: بونوس در DB ثبت شده بود ولی در
+// مسیر legacy اصلاً خوانده نمی‌شد، پس Dashboard «تمام شده» می‌گفت و enforcement هم
+// QUOTA_EXCEEDED می‌داد. قرارداد: `remaining = base_remaining + promo_remaining` و
+// بونوسِ هر بُعد فقط به همان بُعد اضافه می‌شود.
+describe("readAiQuotaStatus — دورهٔ LEGACY با PROMO", () => {
+    const promo = (feature: string, grantedUnits: number, extra: Partial<Bucket> = {}) => ({
+        feature,
+        source: "PROMO",
+        periodStart: PERIOD,
+        grantedUnits,
+        ...extra,
+    })
+
+    it("بدون PROMO ⇒ دقیقاً رفتار قبلی (بدون هیچ تغییری)", async () => {
+        const { prisma } = makeFakePrisma({
+            cutoverAt: CUTOVER_LEGACY,
+            usage: { reservedUnits: 1, consumedUnits: 4 },
+        })
+        const s = await readAiQuotaStatus(prisma, base)
+
+        expect(s.analyze.remaining).toBe(15 - 1 - 4)
+        expect(s.analyze.promoRemaining).toBe(0)
+        expect(s.analyze.granted).toBe(15)
+    })
+
+    it("BASE تمام + PROMO موجود ⇒ remaining مثبت و promoRemaining درست", async () => {
+        const { prisma } = makeFakePrisma({
+            cutoverAt: CUTOVER_LEGACY,
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            buckets: [promo("ANALYZE", 5)],
+        })
+        const s = await readAiQuotaStatus(prisma, base)
+
+        expect(s.analyze.remaining).toBe(5)
+        expect(s.analyze.promoRemaining).toBe(5)
+        // جمع است، جایگزینی نیست
+        expect(s.analyze.granted).toBe(20)
+        expect(s.analyze.consumed).toBe(15)
+    })
+
+    it("PROMO مصرف‌شده از remaining خودش کم می‌شود و به consumed اضافه می‌گردد", async () => {
+        const { prisma } = makeFakePrisma({
+            cutoverAt: CUTOVER_LEGACY,
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            buckets: [promo("ANALYZE", 5, { consumedUnits: 2 })],
+        })
+        const s = await readAiQuotaStatus(prisma, base)
+
+        expect(s.analyze.promoRemaining).toBe(3)
+        expect(s.analyze.remaining).toBe(3)
+        expect(s.analyze.consumed).toBe(17)
+    })
+
+    it("رزرو فعالِ PROMO هم از remaining کم می‌شود (remaining ≠ granted - consumed)", async () => {
+        const { prisma } = makeFakePrisma({
+            cutoverAt: CUTOVER_LEGACY,
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            buckets: [promo("ANALYZE", 5, { reservedUnits: 2 })],
+        })
+        const s = await readAiQuotaStatus(prisma, base)
+
+        expect(s.analyze.promoRemaining).toBe(3)
+        expect(s.analyze.remaining).toBe(3)
+    })
+
+    it("PROMO ناکافی ⇒ remaining صفر و عملاً exhausted (عدمِ overspend نمایشی)", async () => {
+        const { prisma } = makeFakePrisma({
+            cutoverAt: CUTOVER_LEGACY,
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            buckets: [promo("ANALYZE", 1, { consumedUnits: 1 })],
+        })
+        const s = await readAiQuotaStatus(prisma, base)
+
+        expect(s.analyze.promoRemaining).toBe(0)
+        expect(s.analyze.remaining).toBe(0)
+    })
+
+    it("PROMO مربوط به دورهٔ قبل مصرف نمی‌شود", async () => {
+        const { prisma } = makeFakePrisma({
+            cutoverAt: CUTOVER_LEGACY,
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            buckets: [
+                {
+                    feature: "ANALYZE",
+                    source: "PROMO",
+                    // دورهٔ قبل: کلید خواندن `periodStart` جاری است، پس نادیده می‌ماند
+                    periodStart: "2026-08-01T00:00:00.000Z",
+                    grantedUnits: 99,
+                },
+            ],
+        })
+        const s = await readAiQuotaStatus(prisma, base)
+
+        expect(s.analyze.remaining).toBe(0)
+        expect(s.analyze.promoRemaining).toBe(0)
+    })
+
+    it("ANALYZE و PLAN مستقل‌اند: بونوسِ یکی به دیگری نشت نمی‌کند", async () => {
+        const { prisma } = makeFakePrisma({
+            cutoverAt: CUTOVER_LEGACY,
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            buckets: [promo("PLAN", 3)],
+        })
+        const s = await readAiQuotaStatus(prisma, base)
+
+        expect(s.plan.remaining).toBe(3)
+        expect(s.analyze.remaining).toBe(0)
+        expect(s.analyze.promoRemaining).toBe(0)
+    })
+
+    it("PROMO دوبار شمرده نمی‌شود: base از AiUsage می‌آید، promo فقط از bucket", async () => {
+        const { prisma, buckets } = makeFakePrisma({
+            cutoverAt: CUTOVER_LEGACY,
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            buckets: [promo("ANALYZE", 5)],
+        })
+        const s = await readAiQuotaStatus(prisma, base)
+
+        // اگر PROMO دوبار جمع می‌شد، remaining می‌شد ۱۰
+        expect(s.analyze.remaining).toBe(5)
+        // و اگر از روی `AiUsage` دوباره خوانده می‌شد، مصرفِ BASE را دوباره می‌کشت
+        expect(s.analyze.consumed).toBe(15)
+        // تنها منبعِ عددِ promo همان یک ردیف است
+        expect([...buckets.values()].filter((b) => b.source === "PROMO")).toHaveLength(1)
+    })
+
+    it("BASE هنوز جا دارد ⇒ PROMO دست‌نخورده می‌ماند و remaining همان سقف است", async () => {
+        const { prisma } = makeFakePrisma({
+            cutoverAt: CUTOVER_LEGACY,
+            usage: { reservedUnits: 0, consumedUnits: 0 },
+            buckets: [promo("ANALYZE", 5)],
+        })
+        const s = await readAiQuotaStatus(prisma, base)
+
+        expect(s.analyze.remaining).toBe(20)
+        expect(s.analyze.promoRemaining).toBe(5)
     })
 })
 

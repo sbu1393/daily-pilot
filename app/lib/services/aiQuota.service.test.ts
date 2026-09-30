@@ -73,7 +73,10 @@ describe("reserveQuota", () => {
     })
 
     it("reserves 1 unit atomically (event + conditional increment inside transaction)", async () => {
-        await expect(reserveQuota(prisma, makeInput())).resolves.toBeUndefined()
+        await expect(reserveQuota(prisma, makeInput())).resolves.toEqual({
+            quotaSource: "BASE",
+            bucketId: null,
+        })
 
         expect(prisma.$transaction).toHaveBeenCalledTimes(1)
         expect(prisma.aiUsageEvent.create).toHaveBeenCalledWith({
@@ -129,7 +132,10 @@ describe("reserveQuota", () => {
 
         // اما 13+1+1=15 <= 15 → موفق
         prisma.aiUsage.findUnique.mockResolvedValue({ reservedUnits: 13, consumedUnits: 1 })
-        await expect(reserveQuota(prisma, makeInput({ units: 1 }))).resolves.toBeUndefined()
+        await expect(reserveQuota(prisma, makeInput({ units: 1 }))).resolves.toEqual({
+            quotaSource: "BASE",
+            bucketId: null,
+        })
     })
 
     it.each(["RESERVED", "CONSUMED", "RELEASED"])(
@@ -173,7 +179,10 @@ describe("reserveQuota", () => {
             .mockRejectedValueOnce(race)
             .mockResolvedValueOnce({ id: 100 })
 
-        await expect(reserveQuota(prisma, makeInput())).resolves.toBeUndefined()
+        await expect(reserveQuota(prisma, makeInput())).resolves.toEqual({
+            quotaSource: "BASE",
+            bucketId: null,
+        })
         expect(prisma.aiUsage.upsert).toHaveBeenCalledTimes(3)
     })
 
@@ -196,7 +205,10 @@ describe("reserveQuota", () => {
             .mockResolvedValueOnce({ count: 0 }) // CAS باخت
             .mockResolvedValueOnce({ count: 1 }) // دور بعد موفق
 
-        await expect(reserveQuota(prisma, makeInput({ units: 1 }))).resolves.toBeUndefined()
+        await expect(reserveQuota(prisma, makeInput({ units: 1 }))).resolves.toEqual({
+            quotaSource: "BASE",
+            bucketId: null,
+        })
 
         expect(prisma.aiUsage.findUnique).toHaveBeenCalledTimes(2)
         expect(prisma.aiUsage.updateMany).toHaveBeenCalledTimes(2)
@@ -481,7 +493,9 @@ describe("§18 service boundaries + transaction client (D3)", () => {
         tx.aiUsageEvent.create.mockResolvedValue({ id: 1 })
         wireTransactionClient(root, tx)
 
-        await expect(reserveQuota(root, makeInput())).resolves.toBeUndefined()
+        await expect(reserveQuota(root, makeInput())).resolves.toMatchObject({
+            quotaSource: "BASE",
+        })
 
         // creation + CAS روی همان tx تراکنش (§18 / atomicity)
         expect(tx.aiUsageEvent.create).toHaveBeenCalledTimes(1)
@@ -567,5 +581,271 @@ describe("HTTP independence", () => {
         )
         expect(quotaSrc).not.toMatch(/from\s+["']next/)
         expect(usageSrc).not.toMatch(/from\s+["']next/)
+    })
+})
+
+// ── سهمیهٔ هدیه در دورهٔ legacy ────────────────────────────────────────────────
+// واحد تست این بخش «کدام شمارنده حرکت کرد» است، نه ریاضی (که در تست یکپارچهٔ
+// `aiQuota.legacyPromo.test.ts` با fake حالت‌دار پوشش داده شده).
+describe("reserveQuota / complete / release با PROMO در legacy", () => {
+    const BUCKET_ID = 55
+
+    /** fake‌ای که هم `AiUsage` و هم bucket PROMO را دارد و CAS را واقعاً اعمال می‌کند */
+    function makePromoPrisma(opts: {
+        usage: { reservedUnits: number; consumedUnits: number }
+        promo: { grantedUnits: number; reservedUnits: number; consumedUnits: number } | null
+        /** دفعات اولِ CAS روی `AiUsage` که باید «ببازد» (شبیه‌سازی هم‌زمانی) */
+        baseContention?: number
+        promoContention?: number
+    }) {
+        const usage = { ...opts.usage }
+        const promo = opts.promo ? { ...opts.promo, id: BUCKET_ID } : null
+        const state = { baseContention: opts.baseContention ?? 0, promoContention: opts.promoContention ?? 0 }
+
+        const prisma: any = {
+            aiUsageEvent: {
+                findUnique: vi.fn(async ({ where }: any) => {
+                    const e = prisma.__events.get(where.requestId)
+                    return e ? { status: e.status, units: e.units, userId: e.userId, bucketId: e.bucketId } : null
+                }),
+                create: vi.fn(async ({ data }: any) => {
+                    prisma.__events.set(data.requestId, {
+                        requestId: data.requestId,
+                        userId: data.userId,
+                        units: data.units,
+                        status: "RESERVED",
+                        quotaSource: data.quotaSource ?? null,
+                        bucketId: data.bucketId ?? null,
+                    })
+                    return { id: 1 }
+                }),
+                updateMany: vi.fn(async ({ where, data }: any) => {
+                    const e = prisma.__events.get(where.requestId)
+                    if (!e) return { count: 0 }
+                    if (where.status !== undefined && e.status !== where.status) return { count: 0 }
+                    Object.assign(e, data)
+                    return { count: 1 }
+                }),
+            },
+            aiUsage: {
+                upsert: vi.fn(async () => ({ id: 100 })),
+                findUnique: vi.fn(async () => ({ ...usage })),
+                updateMany: vi.fn(async ({ where, data }: any) => {
+                    if (where.reservedUnits !== usage.reservedUnits || where.consumedUnits !== usage.consumedUnits) {
+                        return { count: 0 }
+                    }
+                    if (state.baseContention > 0) {
+                        state.baseContention -= 1
+                        return { count: 0 }
+                    }
+                    usage.reservedUnits += data.reservedUnits?.increment ?? 0
+                    usage.reservedUnits -= data.reservedUnits?.decrement ?? 0
+                    usage.consumedUnits += data.consumedUnits?.increment ?? 0
+                    return { count: 1 }
+                }),
+            },
+            aiQuotaBucket: {
+                findUnique: vi.fn(async ({ where }: any) => {
+                    const k = where.userId_feature_source_periodType_periodStart
+                    if (!promo) return null
+                    if (k.feature !== "ANALYZE" || k.source !== "PROMO" || k.periodType !== "MONTHLY") return null
+                    if (k.periodStart.getTime() !== NOW.getTime()) return null
+                    return { ...promo }
+                }),
+                updateMany: vi.fn(async ({ where, data }: any) => {
+                    if (!promo || where.id !== promo.id) return { count: 0 }
+                    if (where.reservedUnits?.gte !== undefined && promo.reservedUnits < where.reservedUnits.gte) {
+                        return { count: 0 }
+                    }
+                    if (state.promoContention > 0) {
+                        state.promoContention -= 1
+                        return { count: 0 }
+                    }
+                    promo.reservedUnits += data.reservedUnits?.increment ?? 0
+                    promo.reservedUnits -= data.reservedUnits?.decrement ?? 0
+                    promo.consumedUnits += data.consumedUnits?.increment ?? 0
+                    return { count: 1 }
+                }),
+            },
+            __events: new Map<string, any>(),
+            __usage: usage,
+            __promo: promo,
+        }
+        prisma.$transaction = vi.fn(async (fn: (tx: any) => Promise<any>) => fn(prisma))
+        return prisma
+    }
+
+    const promoInput = (overrides: Partial<ReserveQuotaInput> = {}): ReserveQuotaInput => ({
+        ...makeInput({ allowedUnits: 15, units: 1 }),
+        feature: "analyze",
+        dimension: "ANALYZE",
+        ...overrides,
+    })
+
+    it("BASE جا دارد ⇒ اول BASE مصرف می‌شود و PROMO دست‌نخورده می‌ماند", async () => {
+        const prisma = makePromoPrisma({
+            usage: { reservedUnits: 0, consumedUnits: 2 },
+            promo: { grantedUnits: 5, reservedUnits: 0, consumedUnits: 0 },
+        })
+
+        await expect(reserveQuota(prisma, promoInput())).resolves.toEqual({
+            quotaSource: "BASE",
+            bucketId: null,
+        })
+        expect(prisma.aiQuotaBucket.updateMany).not.toHaveBeenCalled()
+        expect(prisma.__promo!.reservedUnits).toBe(0)
+    })
+
+    it("BASE پر ⇒ فقط PROMO مصرف می‌شود و AiUsage اصلاً تغییر نمی‌کند", async () => {
+        const prisma = makePromoPrisma({
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            promo: { grantedUnits: 5, reservedUnits: 0, consumedUnits: 0 },
+        })
+
+        await expect(reserveQuota(prisma, promoInput())).resolves.toEqual({
+            quotaSource: "PROMO",
+            bucketId: BUCKET_ID,
+        })
+        expect(prisma.aiUsage.updateMany).not.toHaveBeenCalled()
+        expect(prisma.__usage).toEqual({ reservedUnits: 0, consumedUnits: 15 })
+        expect(prisma.__promo!.reservedUnits).toBe(1)
+    })
+
+    it("ledger واقعی روی رویداد ثبت می‌شود تا complete/release بدانند کدام bucket", async () => {
+        const prisma = makePromoPrisma({
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            promo: { grantedUnits: 5, reservedUnits: 0, consumedUnits: 0 },
+        })
+
+        await reserveQuota(prisma, promoInput())
+
+        expect(prisma.__events.get("req-1")).toMatchObject({ quotaSource: "PROMO", bucketId: BUCKET_ID })
+    })
+
+    it("BASE + PROMO هر دو ناکافی ⇒ QUOTA_EXCEEDED (بدون overspend در هیچ‌کدام)", async () => {
+        const prisma = makePromoPrisma({
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            promo: { grantedUnits: 1, reservedUnits: 1, consumedUnits: 0 },
+        })
+
+        await expect(reserveQuota(prisma, promoInput())).rejects.toMatchObject({
+            code: "QUOTA_EXCEEDED",
+            status: 429,
+        })
+        expect(prisma.__usage.reservedUnits).toBe(0)
+        expect(prisma.__promo!.reservedUnits).toBe(1)
+    })
+
+    it("بدون PROMO ⇒ رفتار قبلی: exceed بدون هیچ خواندنی از bucket", async () => {
+        const prisma = makePromoPrisma({
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            promo: null,
+        })
+
+        await expect(reserveQuota(prisma, promoInput())).rejects.toMatchObject({
+            code: "QUOTA_EXCEEDED",
+        })
+        expect(prisma.aiQuotaBucket.findUnique).toHaveBeenCalledTimes(1) // فقط برای تشخیص نبودن
+    })
+
+    it("بدون `dimension` ⇒ سهمیهٔ هدیه اصلاً دیده نمی‌شود (caller قدیمی مثل قبل)", async () => {
+        const prisma = makePromoPrisma({
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            promo: { grantedUnits: 5, reservedUnits: 0, consumedUnits: 0 },
+        })
+
+        await expect(
+            reserveQuota(prisma, promoInput({ dimension: undefined })),
+        ).rejects.toMatchObject({ code: "QUOTA_EXCEEDED" })
+        expect(prisma.aiQuotaBucket.findUnique).not.toHaveBeenCalled()
+    })
+
+    it("هم‌زمانی روی BASE ⇒ retry با مقادیر تازه (نه denial جعلی)", async () => {
+        // یک واحد جا مانده: 14 مصرف + 1 درخواست = 15 ⇒ باید روی BASE بنشیند
+        const prisma = makePromoPrisma({
+            usage: { reservedUnits: 0, consumedUnits: 14 },
+            promo: { grantedUnits: 5, reservedUnits: 0, consumedUnits: 0 },
+            baseContention: 2,
+        })
+
+        await expect(reserveQuota(prisma, promoInput())).resolves.toEqual({
+            quotaSource: "BASE",
+            bucketId: null,
+        })
+        // دو CAS باخت و سومی موفق ⇒ سه تلاش، و PROMO اصلاً لمس نشده
+        expect(prisma.aiUsage.updateMany).toHaveBeenCalledTimes(3)
+        expect(prisma.aiQuotaBucket.findUnique).not.toHaveBeenCalled()
+        expect(prisma.__usage.reservedUnits).toBe(1)
+    })
+
+    it("هم‌زمانی روی PROMO ⇒ retry با مقادیر تازه، بدون overspend", async () => {
+        const prisma = makePromoPrisma({
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            promo: { grantedUnits: 5, reservedUnits: 0, consumedUnits: 0 },
+            promoContention: 2,
+        })
+
+        await expect(reserveQuota(prisma, promoInput())).resolves.toEqual({
+            quotaSource: "PROMO",
+            bucketId: BUCKET_ID,
+        })
+        // فقط **یک** واحد واقعاً رزرو شده، نه سه تا
+        expect(prisma.__promo!.reservedUnits).toBe(1)
+    })
+
+    it("contention تمام‌عیار ⇒ fail-closed (QUOTA_UNAVAILABLE، نه QUOTA_EXCEEDED جعلی)", async () => {
+        const prisma = makePromoPrisma({
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            promo: { grantedUnits: 5, reservedUnits: 0, consumedUnits: 0 },
+            promoContention: 99,
+        })
+
+        await expect(reserveQuota(prisma, promoInput())).rejects.toMatchObject({
+            code: "QUOTA_UNAVAILABLE",
+        })
+    })
+
+    it("complete ⇒ تحویل روی همان bucket PROMO، نه روی AiUsage", async () => {
+        const prisma = makePromoPrisma({
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            promo: { grantedUnits: 5, reservedUnits: 0, consumedUnits: 0 },
+        })
+        await reserveQuota(prisma, promoInput())
+
+        await expect(
+            completeQuota(prisma, "req-1", undefined, { periodStart: NOW }),
+        ).resolves.toBe(true)
+
+        expect(prisma.__promo).toMatchObject({ reservedUnits: 0, consumedUnits: 1 })
+        expect(prisma.aiUsage.updateMany).not.toHaveBeenCalled()
+    })
+
+    it("release ⇒ همان واحد به همان bucket برمی‌گردد (بدون نشت و بدون منفی‌شدن)", async () => {
+        const prisma = makePromoPrisma({
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            promo: { grantedUnits: 5, reservedUnits: 0, consumedUnits: 0 },
+        })
+        await reserveQuota(prisma, promoInput())
+
+        await expect(
+            releaseQuota(prisma, "req-1", undefined, { periodStart: NOW }),
+        ).resolves.toBe(true)
+
+        expect(prisma.__promo).toMatchObject({ reservedUnits: 0, consumedUnits: 0 })
+        expect(prisma.aiUsage.updateMany).not.toHaveBeenCalled()
+    })
+
+    it("fail-closed: اگر bucket نتواند رزرو را تحویل بگیرد ⇒ QUOTA_UNAVAILABLE", async () => {
+        const prisma = makePromoPrisma({
+            usage: { reservedUnits: 0, consumedUnits: 15 },
+            promo: { grantedUnits: 5, reservedUnits: 0, consumedUnits: 0 },
+        })
+        await reserveQuota(prisma, promoInput())
+        // رزرو گم شد (مثلاً crash بین reserve و complete)
+        prisma.__promo!.reservedUnits = 0
+
+        await expect(
+            completeQuota(prisma, "req-1", undefined, { periodStart: NOW }),
+        ).rejects.toMatchObject({ code: "QUOTA_UNAVAILABLE" })
     })
 })

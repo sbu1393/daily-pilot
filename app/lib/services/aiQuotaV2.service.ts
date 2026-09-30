@@ -32,6 +32,20 @@
 // split ممنوع است، آن رزرو اصلاً انجام نمی‌شود (BASE می‌گوید جا نیست، PROMO هم
 // تنها ۱ واحد دارد). در عوض صفت `multiUnit` صریح شده تا این وضعیت یک تصمیمِ
 // ناخواسته به‌نظر نرسد.
+//
+// ── چرا بعضی primitiveها export شده‌اند ────────────────────────────────────────
+// تا لحظهٔ `cutover`، دوره در حالت LEGACY است و ledgerِ فعال `AiUsage` است — اما
+// سهمیهٔ هدیه در هر دو mode یک جدول دارد (`AiQuotaBucket(source="PROMO")`).
+// برای اینکه مسیر legacy بتواند همان بونوس را **ببیند و مصرف کند** بدون اینکه
+// ریاضیِ دومی اختراع کند، سه primitive از همین فایل بیرون داده شده‌اند:
+//
+//   • `readPromoBucketView`  — خواندن PROMO برای نمایش (`readLegacyDimensions`)
+//   • `tryReservePromoBucket` — یک تلاش CAS روی PROMO (ترتیبِ برعکسِ legacy)
+//   • `applyBucketFinalization` — تحویل/آزادسازی روی همان bucket
+//
+// هر سه از همان `readBucket`/`hasRoom`/`casReserve` داخلی ساخته شده‌اند، پس تعریفِ
+// «ظرفیت» و «شرط جا شدن» در هر دو mode یکی است. خودِ `reserveFromLedger` و قاعدهٔ
+// PROMO→BASE دست‌نخورده ماندند؛ مسیر NEW هیچ تغییری نکرده است.
 
 import type { AiFeature } from "@prisma/client"
 
@@ -220,6 +234,50 @@ async function reserveFromLedger(
     throw new QuotaUnavailableError()
 }
 
+/**
+ * نتیجهٔ **یک** تلاش برای رزرو از PROMO.
+ *
+ * سه حالت لازم است تا caller بتواند «ظرفیت نیست» (denial واقعی) را از «هم‌زمانی»
+ * (باید دور بعد) تشخیص دهد — دقیقاً مثل تمایزی که خود `reserveFromLedger` می‌گیرد.
+ */
+export type PromoReserveAttempt =
+    | { status: "reserved"; bucketId: number }
+    | { status: "no_room" }
+    | { status: "contended" }
+
+/**
+ * **یک** تلاش اتمیک برای رزرو از bucket PROMO (بدون حلقه).
+ *
+ * چرا جدا از `reserveFromLedger` صدا زده می‌شود: مسیر `NEW` ترتیب خودش را دارد
+ * (PROMO → BASE) و حلقهٔ bounded خودش، پس **دست‌نخورده** می‌ماند. مسیر `LEGACY`
+ * ترتیب معکوس دارد (BASE → PROMO) و حلقهٔ خودش را در `aiQuota.service` دارد؛ این
+ * تابع همان **primitives** را (خواندن، `hasRoom`، `casReserve`) به‌صورت مشترک
+ * در اختیارش می‌گذارد تا دو مسیر هرگز دو ریاضیِ جدا نداشته باشند.
+ *
+ * single-shot عمداً است: retry در حلقهٔ caller می‌ماند، پس سقف تلاش‌ها در هر
+ * مسیر یکی و محدود است (نه ضرب).
+ *
+ * @returns `reserved` با `bucketId`، `no_room` وقتی ظرفیت واقعاً نیست، `contended`
+ *          وقتی CAS باخت (یعنی باید با مقادیر تازه دوباره خوانده شود).
+ */
+export async function tryReservePromoBucket(
+    tx: any,
+    ctx: { userId: number; feature: AiFeature; periodStart: Date; units: number },
+): Promise<PromoReserveAttempt> {
+    // نبودن bucket یعنی «ظرفیت صفر» (ساختنش با بونوس صفر فقط صدا بی‌فایده است)
+    const promo = await readBucket(tx, ctx.userId, ctx.feature, "PROMO", ctx.periodStart)
+    if (!promo) return { status: "no_room" }
+
+    const capacity = promo.grantedUnits ?? 0
+    if (!hasRoom(promo.reservedUnits, promo.consumedUnits, capacity, ctx.units)) {
+        return { status: "no_room" }
+    }
+    if (await casReserve(tx, promo, ctx.units)) {
+        return { status: "reserved", bucketId: promo.id }
+    }
+    return { status: "contended" }
+}
+
 /** invariant: reservedUnits + consumedUnits + units <= capacity */
 function hasRoom(
     reserved: number,
@@ -228,6 +286,19 @@ function hasRoom(
     units: number,
 ): boolean {
     return reserved + consumed + units <= capacity
+}
+
+/**
+ * ظرفیت باقی‌ماندهٔ یک bucket از روی همان سه شمارنده.
+ *
+ * **تعریف یکتا و مشترک** بین مسیر `NEW` و مسیر `LEGACY` (که برای دیدن و مصرف
+ * PROMO از همین ماژول کمک می‌گیرد) تا دو فرمول موازی هرگز واگرا نشوند: یک
+ * `capacity` متفاوت در دو جا یعنی «UI یک عدد، enforcement عدد دیگر».
+ */
+export function bucketRemaining(row: BucketRow | null): number {
+    if (!row) return 0
+    const capacity = row.grantedUnits ?? 0
+    return Math.max(0, capacity - row.reservedUnits - row.consumedUnits)
 }
 
 interface BucketRow {
@@ -380,24 +451,45 @@ async function finalizeBucketQuota(
             }
 
             const delta = event.units
-            // گارد `reservedUnits >= delta` invariant عدم‌منفی‌شدن را حفظ می‌کند
-            const applied = await tx.aiQuotaBucket.updateMany({
-                where: { id: event.bucketId, reservedUnits: { gte: delta } },
-                data:
-                    target === "CONSUMED"
-                        ? {
-                              reservedUnits: { decrement: delta },
-                              consumedUnits: { increment: delta },
-                          }
-                        : { reservedUnits: { decrement: delta } },
+            const applied = await applyBucketFinalization(tx, {
+                bucketId: event.bucketId,
+                units: delta,
+                target,
             })
-            if (applied.count === 0) throw new QuotaUnavailableError()
+            if (!applied) throw new QuotaUnavailableError()
             return true
         })
     } catch {
         // fail-closed. برای release، event در RESERVED می‌ماند تا reconcilable بماند.
         throw new QuotaUnavailableError()
     }
+}
+
+/**
+ * نوشتن نهایی رزرو روی **همان** bucketی که از آن آمده — تعریف یکتای این mutation.
+ *
+ * مشترک بین `completeBucketQuota`/`releaseBucketQuota` (مسیر NEW) و
+ * `completeQuota`/`releaseQuota` وقتی رزروِ legacy از PROMO آمده باشد. یک تعریف
+ * یعنی گاردِ `reservedUnits >= delta` و شکلِ `data` هرگز دو جا ناسازگار نمی‌شوند.
+ *
+ * @returns `false` یعنی گارد رد شد (rzروی متناظر پیدا نشد) ⇒ caller fail-closed می‌کند.
+ */
+export async function applyBucketFinalization(
+    tx: any,
+    args: { bucketId: number; units: number; target: "CONSUMED" | "RELEASED" },
+): Promise<boolean> {
+    // گارد `reservedUnits >= delta` invariant عدم‌منفی‌شدن را حفظ می‌کند
+    const applied = await tx.aiQuotaBucket.updateMany({
+        where: { id: args.bucketId, reservedUnits: { gte: args.units } },
+        data:
+            args.target === "CONSUMED"
+                ? {
+                      reservedUnits: { decrement: args.units },
+                      consumedUnits: { increment: args.units },
+                  }
+                : { reservedUnits: { decrement: args.units } },
+    })
+    return applied.count === 1
 }
 
 /* ──────────────────────────────────────────────────────────────────────────── */
@@ -435,7 +527,8 @@ export async function readQuotaBuckets(
             capacity: promoCapacity,
             reserved: promo?.reservedUnits ?? 0,
             consumed: promo?.consumedUnits ?? 0,
-            remaining: Math.max(0, promoCapacity - (promo?.reservedUnits ?? 0) - (promo?.consumedUnits ?? 0)),
+            // فرمولِ مشترک (بالا) — عیناً همان چیزی که مسیر legacy هم می‌خواند.
+            remaining: bucketRemaining(promo),
         })
 
         const base = await readBucketOrRoot(prisma, input.userId, feature, "BASE", periodStart)
@@ -467,5 +560,33 @@ async function readBucketOrRoot(
         return await readBucket(prisma, userId, feature, source, periodStart)
     } catch {
         throw new QuotaUnavailableError()
+    }
+}
+
+/**
+ * وضعیت bucket PROMO برای **همان** `periodStart` — تنها منبعِ خواندن PROMO در
+ * مسیر `LEGACY`.
+ *
+ *_fail-closed_: خطای DB → `QuotaUnavailableError` (نه عدد ساختگی). نبودن ردیف
+ * «ظرفیت صفر» است، نه خطا — دقیقاً مثل `readQuotaBuckets`.
+ */
+export async function readPromoBucketView(
+    prisma: PrismaClientLike,
+    input: { userId: number; feature: AiFeature; periodStart: Date },
+): Promise<QuotaBucketView> {
+    const promo = await readBucketOrRoot(
+        prisma,
+        input.userId,
+        input.feature,
+        "PROMO",
+        input.periodStart,
+    )
+    return {
+        feature: input.feature,
+        source: "PROMO",
+        capacity: promo?.grantedUnits ?? 0,
+        reserved: promo?.reservedUnits ?? 0,
+        consumed: promo?.consumedUnits ?? 0,
+        remaining: bucketRemaining(promo),
     }
 }

@@ -9,6 +9,8 @@
 // - AI call هرگز داخل transaction کووتا نیست (§10) — این سرویس فقط reserve/complete/release دارد.
 // - کاملاً مستقل از HTTP: هیچ import از next/Request/NextResponse (§18).
 
+import type { AiFeature } from "@prisma/client"
+
 import {
     AiUsageConflictError,
     IdempotencyConflictError,
@@ -21,10 +23,29 @@ import {
     assertTransitionAllowed,
     createReservedEvent,
     findEventStatusByRequestId,
+    recordReservationLedger,
     transitionEventToConsumed,
     transitionEventToReleased,
     type PrismaClientLike,
 } from "./aiUsage.service"
+// ── سهمیهٔ هدیه (PROMO) در دورهٔ legacy ─────────────────────────────────────
+// `AiUsage` در legacy یک استخرِ **مشترک** بدون تفکیک بُعد است، پس کد هدیه (که
+// per-feature اسنپ‌شات می‌شود) در آن جایی نداشت و بونوسِ ریدم‌شده عملاً بی‌اثر بود.
+//
+// راه‌حل بدون تغییر schema و بدون مسیر موازی: BASE همان `AiUsage` می‌ماند (رفتار
+// موجود، دست‌نخورده) و **کسری** از bucket PROMO موجود در `AiQuotaBucket` مصرف
+// می‌شود — دقیقاً همان جدولی که `redeemPromoCode` در آن بونوس را می‌نویسد و همان
+// جدولی که مسیر `NEW` از آن می‌خواند.
+//
+// سه چیز عمداً از `aiQuotaV2.service` **import** می‌شود و بازنویسی نمی‌شود:
+// primitive های خواندن/رزرو CAS و mutation نهایی. یعنی «ظرفیت»، «شرط جا شدن» و
+// «برگرداندن رزرو» در هر دو مسیر از یک تعریف می‌آیند؛ دو مسیر نمی‌توانند دو ریاضی
+// داشته باشند (که یعنی UI یک عدد و enforcement عدد دیگر).
+import {
+    applyBucketFinalization,
+    tryReservePromoBucket,
+    type QuotaSource,
+} from "./aiQuotaV2.service"
 
 export { getMonthlyPeriod, resolvePlanPolicy } from "./planPolicy.service"
 
@@ -38,6 +59,29 @@ export interface ReserveQuotaInput {
     model?: string
     /** شروع پریود ماهانه (00:00:00.000 UTC) — از getMonthlyPeriod */
     periodStart: Date
+    /**
+     * بُعد سهمیه (`ANALYZE` / `PLAN`) برای مصرف PROMO در legacy.
+     *
+     * اختیاری و **صریحاً** از `AI_FEATURE_SPECS[feature].dimension` می‌آید (نه از
+     * حدس‌زدن رشته‌ی `feature` و نه از hard-code). نبودش یعنی «این رزرو به سهمیهٔ
+     * هدیه ربطی ندارد» و رفتار کاملاً legacy باقی می‌ماند — پس callerهای قدیمی و
+     * تست‌ها بدون تغییر کار می‌کنند.
+     */
+    dimension?: AiFeature
+}
+
+/**
+ * نتیجهٔ رزرو: از کدام ledger مصرف شد.
+ *
+ * `bucketId` فقط وقتی پر است که پشتِ رزرو یک ردیف `AiQuotaBucket` واقعی باشد
+ * (یعنی PROMO). برای BASE در legacy پشتش `AiUsage` است، نه bucket — پس `null`
+ * می‌ماند و `complete`/`release` از همان `null` مسیر `AiUsage` را انتخاب می‌کنند.
+ * همین جفتِ (`quotaSource`، `bucketId`) روی `AiUsageEvent` هم نوشته می‌شود تا
+ * مصرف بعداً قابل ممیزی باشد.
+ */
+export interface ReserveQuotaResult {
+    quotaSource: QuotaSource
+    bucketId: number | null
 }
 
 /**
@@ -64,7 +108,7 @@ const RESERVE_MAX_ATTEMPTS = 5
 export async function reserveQuota(
     prisma: PrismaClientLike,
     input: ReserveQuotaInput,
-): Promise<void> {
+): Promise<ReserveQuotaResult> {
     // 1) Idempotency — قبل از هر چیز (سند §15)
     const existingStatus = await findEventStatusByRequestId(prisma, input.requestId)
     if (existingStatus !== null) {
@@ -75,7 +119,7 @@ export async function reserveQuota(
     const row = await upsertUsageRow(prisma, input.userId, input.periodStart)
 
     try {
-        await prisma.$transaction(async (tx: any) => {
+        return await prisma.$transaction(async (tx: any) => {
             // 3) رویداد RESERVED داخل همان transaction — creation مالکیت aiUsage است (سند §18)
             //    و تکراری بودن هم‌زمان با P2002 رد می‌شود (mapping داخل همان helper).
             //    کلاینت همان `tx` است تا atomicity حفظ شود.
@@ -85,11 +129,18 @@ export async function reserveQuota(
                 feature: input.feature,
                 model: input.model,
                 units: input.units,
+                // سقف در لحظهٔ رزرو snapshot می‌شود تا تغییر بعدیِ policy معنای audit را
+                // عوض نکند (همان تصمیم D5 مسیر NEW).
+                policyAllowedUnits: input.allowedUnits,
             })
 
             // 4) رزرو اتمیک با bounded optimistic retry (سند §8/§9):
             //    در هر دور مقادیر تازه خوانده می‌شوند و increment فقط با CAS روی همان مقادیر
             //    اجرا می‌شود — هرگز overspend، و یک تغییر همزمان باعث denial جعلی نمی‌شود.
+            //
+            //    ترتیب مصرف در legacy: **اول BASE (همان `AiUsage`، رفتار قبلی)**، و اگر
+            //    BASE جا نداشت **کسری از PROMO** همان بُعد و همان دوره. وقتی BASE و
+            //    PROMO هر دو جا نداشته باشند → `QUOTA_EXCEEDED` (exceed واقعی، بدون retry).
             for (let attempt = 0; attempt < RESERVE_MAX_ATTEMPTS; attempt++) {
                 const usage = await tx.aiUsage.findUnique({
                     where: { id: row.id },
@@ -99,20 +150,49 @@ export async function reserveQuota(
 
                 // Invariant دقیق سند: reservedUnits + consumedUnits + units <= allowedUnits
                 const claimedTotal = usage.reservedUnits + usage.consumedUnits + input.units
-                if (claimedTotal > input.allowedUnits) {
-                    throw new QuotaExceededError()
+                if (claimedTotal <= input.allowedUnits) {
+                    const conditional = await tx.aiUsage.updateMany({
+                        where: {
+                            id: row.id,
+                            reservedUnits: usage.reservedUnits,
+                            consumedUnits: usage.consumedUnits,
+                        },
+                        data: { reservedUnits: { increment: input.units } },
+                    })
+                    if (conditional.count === 1) {
+                        // BASE در legacy یعنی ردیف `AiUsage` — نه bucket — پس جفتِ
+                        // audit خالی می‌ماند (دقیقاً رفتار قبلی).
+                        return { quotaSource: "BASE", bucketId: null }
+                    }
+                    // count === 0 → تغییر همزمان؛ دور بعد با مقادیر تازه
+                    continue
                 }
 
-                const conditional = await tx.aiUsage.updateMany({
-                    where: {
-                        id: row.id,
-                        reservedUnits: usage.reservedUnits,
-                        consumedUnits: usage.consumedUnits,
-                    },
-                    data: { reservedUnits: { increment: input.units } },
-                })
-                if (conditional.count === 1) return // رزرو موفق — خروج از transaction
-                // count === 0 → تغییر همزمان؛ دور بعد با مقادیر تازه
+                // BASE پر است: نوبت PROMO. نبودِ `dimension` یعنی این رزرو اصلاً به
+                // سهمیهٔ هدیه ربطی ندارد (caller قدیمی) → همان exceed قبلی.
+                if (input.dimension) {
+                    const promo = await tryReservePromoBucket(tx, {
+                        userId: input.userId,
+                        feature: input.dimension,
+                        periodStart: input.periodStart,
+                        units: input.units,
+                    })
+                    if (promo.status === "reserved") {
+                        // منبع واقعی مصرف روی همان رویداد ثبت می‌شود تا complete/release
+                        // دقیقاً همین bucket را به‌روز کند (نه `AiUsage` را). نوشتنِ خودِ
+                        // رویداد طبق §18 در مالکیت `aiUsage.service` است.
+                        await recordReservationLedger(tx, {
+                            requestId: input.requestId,
+                            quotaSource: "PROMO",
+                            bucketId: promo.bucketId,
+                        })
+                        return { quotaSource: "PROMO", bucketId: promo.bucketId }
+                    }
+                    // CAS باخت ⇒ هم‌زمانی است، نه نبودِ ظرفیت ⇒ دور بعد با مقادیر تازه
+                    if (promo.status === "contended") continue
+                }
+
+                throw new QuotaExceededError()
             }
 
             // exhaustion: فقط contention بوده (نه exceed) → fail-closed، نه QUOTA_EXCEEDED جعلی
@@ -197,6 +277,19 @@ export async function completeQuota(
 
             const delta = event.units ?? units ?? 0
 
+            // اگر رزرو از PROMO آمده بود، تحویل باید روی همان bucket انجام شود —
+            // `AiUsage` اصلاً پشتِ این رزرو نبوده و دست‌زدن به آن یعنی ساختن
+            // مصرفِ جعلی در ledger اشتباه. همان mutation مشترک مسیر NEW.
+            if (typeof event.bucketId === "number") {
+                const applied = await applyBucketFinalization(tx, {
+                    bucketId: event.bucketId,
+                    units: delta,
+                    target: "CONSUMED",
+                })
+                if (!applied) throw new QuotaUnavailableError()
+                return true
+            }
+
             // فقط روی همان periodStart رزرو + گارد `reservedUnits >= delta` (invariant §7).
             const applied = await tx.aiUsage.updateMany({
                 where: {
@@ -261,6 +354,18 @@ export async function releaseQuota(
             if (event === null) return false
 
             const delta = event.units ?? units ?? 0
+
+            // رزروِ PROMO باید **دقیقاً** به همان bucket برگردد؛ آزادکردن روی
+            // `AiUsage` هم سهمیهٔ هدیه را نشت می‌داد و هم `AiUsage` را منفی می‌کرد.
+            if (typeof event.bucketId === "number") {
+                const applied = await applyBucketFinalization(tx, {
+                    bucketId: event.bucketId,
+                    units: delta,
+                    target: "RELEASED",
+                })
+                if (!applied) throw new QuotaUnavailableError()
+                return true
+            }
 
             // فقط روی همان periodStart رزرو + گارد `reservedUnits >= delta` (invariant §7).
             const applied = await tx.aiUsage.updateMany({

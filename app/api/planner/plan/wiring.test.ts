@@ -132,7 +132,10 @@ beforeEach(() => {
     mocks.recordProviderOutcome.mockResolvedValue(true)
 
     mocks.readCutoverAt.mockResolvedValue(new Date("2026-10-01T00:00:00.000Z"))
-    mocks.reserveQuota.mockResolvedValue(undefined)
+    mocks.reserveQuota.mockResolvedValue({
+        quotaSource: "BASE",
+        bucketId: null,
+    })
     mocks.completeQuota.mockResolvedValue(true)
     mocks.releaseQuota.mockResolvedValue(true)
     mocks.reserveBucketQuota.mockResolvedValue(bucketResult())

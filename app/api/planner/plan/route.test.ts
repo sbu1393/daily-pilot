@@ -120,7 +120,10 @@ describe("POST /api/planner/plan", () => {
         mocks.getCanonicalToday.mockReturnValue(DAY_KEY)
         mocks.getPlanGenerationContext.mockResolvedValue(CTX)
         mocks.analyzeBatchPlan.mockResolvedValue({ source: "1xai", plan: AI_PLAN, attempts: 1 })
-        mocks.reserveQuota.mockResolvedValue(undefined)
+        mocks.reserveQuota.mockResolvedValue({
+        quotaSource: "BASE",
+        bucketId: null,
+    })
         mocks.completeQuota.mockResolvedValue(true)
         mocks.releaseQuota.mockResolvedValue(true)
         mocks.markReleaseFailed.mockResolvedValue(true)
@@ -357,7 +360,10 @@ describe("POST /api/planner/plan — concurrent Generate", () => {
         mocks.isRateLimited.mockReturnValue(false)
         mocks.getCanonicalToday.mockReturnValue(DAY_KEY)
         mocks.getPlanGenerationContext.mockResolvedValue(CTX)
-        mocks.reserveQuota.mockResolvedValue(undefined)
+        mocks.reserveQuota.mockResolvedValue({
+        quotaSource: "BASE",
+        bucketId: null,
+    })
         mocks.completeQuota.mockResolvedValue(true)
         mocks.releaseQuota.mockResolvedValue(true)
         mocks.markReleaseFailed.mockResolvedValue(true)
@@ -482,7 +488,10 @@ describe("POST /api/planner/plan — validates its own output against the canoni
         mocks.isRateLimited.mockReturnValue(false)
         mocks.getCanonicalToday.mockReturnValue(DAY_KEY)
         mocks.getPlanGenerationContext.mockResolvedValue(CTX)
-        mocks.reserveQuota.mockResolvedValue(undefined)
+        mocks.reserveQuota.mockResolvedValue({
+        quotaSource: "BASE",
+        bucketId: null,
+    })
         mocks.completeQuota.mockResolvedValue(true)
         mocks.releaseQuota.mockResolvedValue(true)
         mocks.markReleaseFailed.mockResolvedValue(true)

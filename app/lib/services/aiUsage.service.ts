@@ -171,6 +171,39 @@ export async function recordProviderOutcome(
 }
 
 /**
+ * ثبت ledger واقعیِ مصرف روی رویدادِ **از قبل RESERVED**.
+ *
+ * چرا جدا از `createReservedEvent` است: در لحظهٔ ساخت رویداد معلوم نیست مصرف از
+ * کدام منبع تأمین می‌شود (در `NEW` اول PROMO امتحان می‌شود، در `LEGACY` اول BASE).
+ * پس ledger بعد از تصمیمِ رزرو روی **همان** ردیف نوشته می‌شود.
+ *
+ * چرا اینجا و نه در `aiQuota.service`: طبق §18 مالکیت `AiUsageEvent` با همین ماژول
+ * است؛ سرویس سهمیه فقط orchestration و mutation ردیف quota را انجام می‌دهد.
+ * همین مرز باعث می‌شود `complete`/`release` بتوانند به `bucketId` تکیه کنند بدون
+ * آنکه `aiQuota` خودش به جدول رویداد دست بزند.
+ *
+ * برخلاف `recordProviderOutcome` این **best-effort نیست**: اگر ثبت ledger شکست
+ * بخورد، `complete`/`release` نمی‌توانند تشخیص دهند رزرو روی کدام ledger بوده، پس
+ * خطا باید fail-closed (503) باشد تا transaction رزرو rollback شود.
+ *
+ * @returns `true` اگر رویداد به‌روز شد؛ `false` اگر رویداد نبود/پیدا نشد.
+ */
+export async function recordReservationLedger(
+    client: PrismaClientLike,
+    input: { requestId: string; quotaSource: "BASE" | "PROMO"; bucketId: number | null },
+): Promise<boolean> {
+    try {
+        const result = await client.aiUsageEvent.updateMany({
+            where: { requestId: input.requestId, status: "RESERVED" },
+            data: { quotaSource: input.quotaSource, bucketId: input.bucketId },
+        })
+        return result.count > 0
+    } catch {
+        throw new QuotaUnavailableError()
+    }
+}
+
+/**
  * transitionEventToConsumed — RESERVED → CONSUMED و بازگرداندن هویت event (سند §11/§18).
  *
  * مالکیت state transition طبق §18 در همین سرویس است؛ aiQuota فقط orchestration و mutation

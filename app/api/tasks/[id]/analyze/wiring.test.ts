@@ -123,7 +123,10 @@ beforeEach(() => {
 
     // پیش‌فرض: cutover در آینده ⇒ دورهٔ جاری LEGACY است
     mocks.readCutoverAt.mockResolvedValue(new Date("2026-10-01T00:00:00.000Z"))
-    mocks.reserveQuota.mockResolvedValue(undefined)
+    mocks.reserveQuota.mockResolvedValue({
+        quotaSource: "BASE",
+        bucketId: null,
+    })
     mocks.completeQuota.mockResolvedValue(true)
     mocks.releaseQuota.mockResolvedValue(true)
     mocks.reserveBucketQuota.mockResolvedValue(bucketResult())
@@ -412,7 +415,10 @@ describe("analyze — plan کاربر و سقف از policy می‌آید، نه
         vi.clearAllMocks()
         mocks.getCurrentUser.mockResolvedValue(PRO_USER)
         mocks.reanalyzeTask.mockResolvedValue({ task: TASK, aiSource: "1xai" })
-        mocks.reserveQuota.mockResolvedValue(undefined)
+        mocks.reserveQuota.mockResolvedValue({
+        quotaSource: "BASE",
+        bucketId: null,
+    })
         mocks.completeQuota.mockResolvedValue(true)
         mocks.readCutoverAt.mockResolvedValue(new Date("2026-10-01T00:00:00.000Z"))
         await callPATCH()

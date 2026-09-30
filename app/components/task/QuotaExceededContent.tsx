@@ -11,13 +11,17 @@ import styles from "./task.module.css"
 // پوستهٔ مودال جداگانه در QuotaExceededModal است.
 //
 // متن ثابت و مستقل از پیام سرور است؛ تصمیم‌گیری بر اساس code انجام می‌شود، نه متن.
+//
+// تقسیم مسئولیتِ متن: **دلیل** در `<h4>` است و **راه‌حل** در پیام پایین. پیام عمداً
+// جملهٔ «سهمیه تمام شده» را تکرار نمی‌کند (تکرار برای screen-reader فقط متن را طولانی
+// می‌کرد، چون همان جمله یک بار به‌عنوان عنوان خوانده می‌شود).
 
 export const QUOTA_EXCEEDED_MESSAGE =
-    "سهمیه هوش مصنوعی شما برای این ماه به پایان رسیده است. برای دریافت سهمیه بیشتر، حساب کاربری خود را به حساب ویژه ارتقا دهید."
+    "برای دریافت سهمیهٔ بیشتر، حساب خود را به حساب ویژه ارتقا دهید."
 
 export default function QuotaExceededContent({ onClose }: { onClose: () => void }) {
     return (
-        <div role="dialog" aria-modal="true" aria-label="سهمیه هوش مصنوعی شما تمام شده است">
+        <div role="dialog" aria-modal="true" aria-label="سهمیه هوش مصنوعی تمام شده است">
             <div className={styles.modalHead}>
                 <h4>سهمیه هوش مصنوعی شما تمام شده است</h4>
                 <button className={styles.closeBtn} onClick={onClose} aria-label="بستن">

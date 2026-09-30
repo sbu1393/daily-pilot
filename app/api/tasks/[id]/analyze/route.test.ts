@@ -94,7 +94,10 @@ describe("PATCH /api/tasks/[id]/analyze", () => {
         mocks.isRateLimited.mockReturnValue(false)
         mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
         mocks.recordProductEvent.mockResolvedValue({ recorded: true, eventName: "ai.analysis_succeeded" })
-        mocks.reserveQuota.mockResolvedValue(undefined)
+        mocks.reserveQuota.mockResolvedValue({
+        quotaSource: "BASE",
+        bucketId: null,
+    })
         mocks.completeQuota.mockResolvedValue(true)
         mocks.releaseQuota.mockResolvedValue(true)
         mocks.getPrisma.mockReturnValue({})

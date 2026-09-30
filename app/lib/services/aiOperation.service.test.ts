@@ -50,7 +50,9 @@ const prisma = { __fake: true } as any
 
 function reset() {
     vi.clearAllMocks()
-    legacy.reserveQuota.mockResolvedValue(undefined)
+    // `reserveQuota` منبع واقعی مصرف را برمی‌گرداند؛ «BASE» یعنی از استخر مشترکِ
+    // `AiUsage` آمده (رفتار پیشین) و `runAiOperation` آن را «LEGACY» گزارش می‌کند.
+    legacy.reserveQuota.mockResolvedValue({ quotaSource: "BASE", bucketId: null })
     legacy.completeQuota.mockResolvedValue(true)
     legacy.releaseQuota.mockResolvedValue(true)
     v2.reserveBucketQuota.mockResolvedValue({
@@ -97,6 +99,45 @@ describe("runAiOperation — مسیر LEGACY (دورهٔ قبل از cutover)", 
         expect(arg.units).toBe(1)
         expect(arg.feature).toBe("plan")
         expect(arg.userId).toBe(7)
+    })
+
+    it("بُعد سهمیه به reserve قدیمی پاس داده می‌شود تا PROMO همان بُعد مصرف شود", async () => {
+        await runAiOperation({
+            prisma,
+            user,
+            feature: "plan",
+            requestId: "r-2b",
+            now: BEFORE_CUTOVER,
+            execute: async () => ({ result: "ok" }),
+        })
+        // از جدولِ بستهٔ فیچر می‌آید، نه hard-code و نه حدس از رشتهٔ feature
+        expect(legacy.reserveQuota.mock.calls[0][1].dimension).toBe("PLAN")
+
+        await runAiOperation({
+            prisma,
+            user,
+            feature: "analyze",
+            requestId: "r-2c",
+            now: BEFORE_CUTOVER,
+            execute: async () => ({ result: "ok" }),
+        })
+        expect(legacy.reserveQuota.mock.calls[1][1].dimension).toBe("ANALYZE")
+    })
+
+    it("مصرف از PROMO در legacy گزارش می‌شود (و «LEGACY» فقط برای BASE است)", async () => {
+        legacy.reserveQuota.mockResolvedValue({ quotaSource: "PROMO", bucketId: 42 })
+
+        const out = await runAiOperation({
+            prisma,
+            user,
+            feature: "analyze",
+            requestId: "r-2d",
+            now: BEFORE_CUTOVER,
+            execute: async () => ({ result: "ok" }),
+        })
+
+        expect(out.quotaMode).toBe("LEGACY")
+        expect(out.quotaSource).toBe("PROMO")
     })
 
     it("موفقیت ⇒ complete", async () => {
@@ -183,6 +224,28 @@ describe("runAiOperation — مسیر NEW (از لحظهٔ cutover)", () => {
         expect(out.quotaMode).toBe("NEW")
         expect(v2.reserveBucketQuota).toHaveBeenCalledTimes(1)
         expect(legacy.reserveQuota).not.toHaveBeenCalled()
+    })
+
+    it("مسیر NEW بدون regression: ورودی و خروجی همان رفتار قبلی است", async () => {
+        const out = await runAiOperation({
+            prisma,
+            user,
+            feature: "analyze",
+            requestId: "n-1b",
+            now: AT_CUTOVER,
+            execute: async () => ({ result: "ok" }),
+        })
+
+        // منبع مصرف از خودِ ledger می‌آید و پروازِ `dimension` به legacy نشت نمی‌کند
+        expect(out.quotaSource).toBe("BASE")
+        const v2Arg = v2.reserveBucketQuota.mock.calls[0][1]
+        expect(v2Arg.feature).toBe("ANALYZE")
+        expect(v2Arg.units).toBe(1)
+        expect(v2Arg).not.toHaveProperty("dimension")
+        // complete/release همچنان روی سرویس‌های نسخهٔ ۲ می‌مانند
+        expect(v2.completeBucketQuota).toHaveBeenCalledTimes(1)
+        expect(legacy.completeQuota).not.toHaveBeenCalled()
+        expect(legacy.releaseQuota).not.toHaveBeenCalled()
     })
 
     it("بُعد و هزینه از جدول فیچر به ledger تازه می‌رود", async () => {

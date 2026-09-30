@@ -17,6 +17,12 @@
 // یعنی تا پایان دورهٔ فعلی، `AiUsage` معتبر می‌ماند و از دورهٔ بعد `AiQuotaBucket`.
 // هیچ usage تاریخی بین ANALYZE/PLAN تفکیک یا نسبت داده نمی‌شود (بدون backfill).
 //
+// سهمیهٔ هدیه در **هر دو** mode یکسان رفتار می‌کند: BASE اول مصرف می‌شود و اگر
+// جا نداشت، کسری از `AiQuotaBucket(source="PROMO")` همان بُعد می‌آید. در legacy
+// این کار داخل `reserveQuota` انجام می‌شود و `complete`/`release` همان رزرو را از
+// روی `AiUsageEvent.bucketId` به bucket برمی‌گردانند — پس این فایل فقط `dimension`
+// را پاس می‌دهد و lifecycle تغییری نمی‌کند.
+//
 // وضعیت wiring: هر دو caller محصول — `PATCH /api/tasks/[id]/analyze` و
 // `POST /api/planner/plan` — از این مسیر عبور می‌کنند. تنها آنچه در route باقی مانده
 // auth/validation/rate-limit/analytics است؛ هیچ reserve/complete/release دستی باقی
@@ -128,15 +134,20 @@ export async function runAiOperation<T>(
     let quotaSource: QuotaSource | "LEGACY"
     if (mode === "LEGACY") {
         const legacyPolicy = resolvePlanPolicy({ plan: user.plan })
-        await reserveQuota(prisma, {
+        const reservation = await reserveQuota(prisma, {
             userId: user.id,
             requestId,
             allowedUnits: legacyPolicy.allowedUnits,
             units: spec.units,
             feature: input.feature,
             periodStart,
+            // بُعد از جدولِ بستهٔ فیچر می‌آید (نه hard-code، نه حدس از رشتهٔ feature):
+            // در legacy یعنی «اگر BASE پر شد، کسری از سهمیهٔ هدیهٔ همین بُعد مصرف شود».
+            dimension: spec.dimension,
         })
-        quotaSource = "LEGACY"
+        // `"LEGACY"` یعنی مصرف از استخرِ مشترکِ `AiUsage` آمده (رفتار قبلی). اگر از
+        // PROMO آمده باشد، منبع واقعی گزارش می‌شود تا audit/لاگ صادق بماند.
+        quotaSource = reservation.quotaSource === "PROMO" ? "PROMO" : "LEGACY"
     } else {
         const reservation = await reserveBucketQuota(prisma, {
             userId: user.id,

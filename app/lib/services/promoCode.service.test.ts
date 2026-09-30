@@ -323,6 +323,40 @@ describe("redeemPromoCode — grant اتمیک و per-feature", () => {
         expect(plan.update).toEqual({ grantedUnits: { increment: 3 } })
     })
 
+    it("بونوس در همان کلیدی نوشته می‌شود که مسیر legacy می‌خواند (periodStart محلیِ کاربر)", async () => {
+        // قراردادِ بین ریدم و مصرف: هر دو باید «شروع دورهٔ ماهانهٔ محلیِ کاربر» را
+        // کلید بگیرند. اگر این دو کلید واگرا شوند، بونوس ثبت می‌شود ولی هیچ‌وقت
+        // دیده یا مصرف نمی‌شود — دقیقاً باگی که برای کاربر رخ داد.
+        const prisma = basePrisma()
+        prisma.promoCode.findUnique.mockResolvedValue(
+            promoRow({ bonusAnalyzeUnits: 5, bonusPlanUnits: 3 }),
+        )
+        const teheranNow = new Date("2026-09-30T08:45:00.000Z")
+
+        const result = await redeemPromoCode(prisma as never, {
+            userId: 7,
+            code: "GIFT",
+            timezone: "Asia/Tehran",
+            now: teheranNow,
+        })
+
+        const upserts = prisma.aiQuotaBucket.upsert.mock.calls.map((c) => c[0])
+        expect(upserts).toHaveLength(2)
+        for (const u of upserts) {
+            const key = u.where.userId_feature_source_periodType_periodStart
+            expect(key.source).toBe("PROMO")
+            expect(key.periodType).toBe("MONTHLY")
+            expect(key.userId).toBe(7)
+            // کلید = همان periodStart که سرویس به کاربر هم برمی‌گرداند
+            expect(key.periodStart).toEqual(result.periodStart)
+            expect(u.update).toEqual({ grantedUnits: { increment: expect.any(Number) } })
+            // بونوسِ هر بُعد دقیقاً همان چیزی است که کد تعریف کرده
+            expect(u.update.grantedUnits.increment).toBe(
+                key.feature === "ANALYZE" ? 5 : 3,
+            )
+        }
+    })
+
     it("بونوس صفر ⇒ آن بُعد bucket نمی‌سازد (ساختار تمیز می‌ماند)", async () => {
         const prisma = basePrisma()
         prisma.promoCode.findUnique.mockResolvedValue(

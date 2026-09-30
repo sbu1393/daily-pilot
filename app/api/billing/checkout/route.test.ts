@@ -35,6 +35,7 @@ vi.mock("@/app/lib/billing/zarinpal.adapter", () => ({
 }))
 
 import { POST } from "./route"
+import { BILLING_PRODUCT_CATALOG, PRODUCT_CODES, type ProductCode } from "@/app/lib/billing/products"
 import {
     PaymentConfigurationError,
     PaymentIdempotencyConflictError,
@@ -44,7 +45,11 @@ import { PaymentProviderError } from "@/app/lib/billing/provider"
 
 const USER = { id: 7, email: "user@example.com", plan: "FREE" }
 const NOW = new Date("2026-09-17T10:00:00.000Z")
-const AMOUNT = 100000
+/** مقادیر سفارش از کاتالوگ خوانده می‌شوند (route سرویس را mock می‌کند، ولی مقدار
+ *  واقعیِ محصول باید همان کاتالوگ باشد تا تست با قیمت واقعی هم‌خوان بماند). */
+const PRODUCT: ProductCode = "PRO_1M"
+const AMOUNT = BILLING_PRODUCT_CATALOG[PRODUCT].amount
+const DAYS = BILLING_PRODUCT_CATALOG[PRODUCT].entitlementDays
 const SETTINGS = {
     provider: "ZARINPAL" as const,
     orderTtlMs: 1_800_000,
@@ -64,7 +69,8 @@ function pendingOrder(overrides: Record<string, unknown> = {}) {
         status: "PENDING",
         providerAuthority: null,
         providerReference: null,
-        entitlementDays: 30,
+        entitlementDays: DAYS,
+        productCode: PRODUCT,
         requestId: null,
         expiresAt: new Date(NOW.getTime() + SETTINGS.orderTtlMs),
         paidAt: null,
@@ -74,14 +80,21 @@ function pendingOrder(overrides: Record<string, unknown> = {}) {
     }
 }
 
-function post(key: string | null, body?: unknown) {
+/**
+ * بدنه‌ی پیش‌فرض یک خرید معتبر (فقط `productCode`)؛ تست‌هایی که به بدنه‌ی خاص نیاز دارند
+ * آن را صریح پاس می‌دهند و `raw: true` یعنی اصلاً بدنه‌ای فرستاده نشود.
+ */
+const VALID_BODY = { productCode: PRODUCT }
+
+function post(key: string | null, body?: unknown, options: { raw?: boolean } = {}) {
     const headers = new Headers()
     if (key !== null) headers.set("Idempotency-Key", key)
+    const sendBody = options.raw !== true
     return POST(
         new NextRequest("http://localhost/api/billing/checkout", {
             method: "POST",
             headers,
-            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+            ...(sendBody ? { body: JSON.stringify(body ?? VALID_BODY) } : {}),
         }),
     )
 }
@@ -159,8 +172,11 @@ describe("POST /api/billing/checkout (§35 Checkout route tests)", () => {
         const order = pendingOrder({ providerAuthority: "A1" })
         mocks.prepareCheckout.mockResolvedValue({ order, reused: true })
 
-        // بدنه‌ی کامل حمله‌ی price-tampering: قیمت/ارز/مدت/پلن/وضعیت/مالکیت
+        // بدنه‌ی کامل حمله‌ی price-tampering: قیمت/ارز/مدت/پلن/وضعیت/مالکیت. چون schema
+        // `.strict()` است، کلیدهای اضافه یعنی «درخواست نامعتبر» و اصلاً سفارشی ساخته نمی‌شود؛
+        // حتی اگر کلیدهای اضافه نادیده گرفته شوند هم هیچ‌کدام به سرویس نمی‌رسند.
         const res = await post("key-1", {
+            productCode: PRODUCT,
             amount: 1,
             currency: "USD",
             entitlementDays: 9999,
@@ -172,20 +188,10 @@ describe("POST /api/billing/checkout (§35 Checkout route tests)", () => {
             entitlementId: "forged",
         })
 
-        expect(res.status).toBe(200)
-        // قرارداد فراخوانی سرویس دست‌نخورده است: فقط کلید idempotency + تنظیمات سروری
-        // (بدون amount/currency/entitlementDays/plan/status/userId از بدنه).
-        expect(mocks.prepareCheckout).toHaveBeenCalledWith(expect.anything(), {
-            userId: USER.id, // مالکیت از نشست احراز‌شده، نه از بدنه
-            checkoutIdempotencyKey: "key-1",
-            orderTtlMs: SETTINGS.orderTtlMs,
-            requestId: expect.any(String),
-        })
-        // هیچ مقدار کاربر در پاسخ بازتاب نمی‌یابد (redirect فقط از authority ذخیره‌شده‌ی سروری)
-        const payload = JSON.stringify(await res.json())
-        expect(payload).not.toContain("9999")
-        expect(payload).not.toContain("A-ATTACKER")
-        expect(payload).not.toContain("USD")
+        expect(res.status).toBe(400)
+        expect((await res.json()).error.code).toBe("VALIDATION_ERROR")
+        expect(mocks.prepareCheckout).not.toHaveBeenCalled()
+        expect(mocks.createPayment).not.toHaveBeenCalled()
     })
 
     it("trims the key before passing it to the service (route-level shape validation)", async () => {
@@ -198,6 +204,7 @@ describe("POST /api/billing/checkout (§35 Checkout route tests)", () => {
             userId: USER.id,
             checkoutIdempotencyKey: "key-1",
             orderTtlMs: SETTINGS.orderTtlMs,
+            productCode: PRODUCT,
             requestId: expect.any(String),
         })
     })
@@ -240,13 +247,7 @@ describe("POST /api/billing/checkout (§35 Checkout route tests)", () => {
         mocks.createPayment.mockResolvedValue({ authority: "A-NEW", redirectUrl: "ignored" })
         mocks.attachProviderAuthority.mockResolvedValue(pendingOrder({ providerAuthority: "A-NEW" }))
 
-        const res = await post("key-1", {
-            amount: 1,
-            currency: "USD",
-            entitlementDays: 9999,
-            plan: "MAX",
-            merchantOrderId: "client-chosen",
-        })
+        const res = await post("key-1", { productCode: PRODUCT })
 
         expect(res.status).toBe(200)
         expect(mocks.createPayment).toHaveBeenCalledTimes(1)
@@ -255,10 +256,10 @@ describe("POST /api/billing/checkout (§35 Checkout route tests)", () => {
         expect(arg.merchantOrderId).toBe("mo-1") // server-generated
         expect(arg.description).toBe(SETTINGS.description)
         expect(arg.currency).toBe("IRR")
-        // سرویس هرگز ورودی client را نمی‌پذیرد — فقط userId/key/ttl/requestId
+        // سرویس هرگز ورودی client را نمی‌پذیرد — فقط userId/key/ttl/productCode/requestId
         const serviceArg = mocks.prepareCheckout.mock.calls[0][1] as Record<string, unknown>
         expect(Object.keys(serviceArg).sort()).toEqual(
-            ["checkoutIdempotencyKey", "orderTtlMs", "requestId", "userId"].sort(),
+            ["checkoutIdempotencyKey", "orderTtlMs", "productCode", "requestId", "userId"].sort(),
         )
     })
 
@@ -398,5 +399,99 @@ describe("POST /api/billing/checkout (§35 Checkout route tests)", () => {
         await post("key-1")
 
         expect(mocks.buildRedirectUrl).toHaveBeenCalledWith("A-ATTACHED")
+    })
+
+    // ---------------------------------------------------------- انتخاب محصول (سه محصول)
+    describe("product selection (three products, server-side amount)", () => {
+        it("every catalog product code is accepted and forwarded verbatim", async () => {
+            for (const code of PRODUCT_CODES) {
+                mocks.prepareCheckout.mockResolvedValue({ order: pendingOrder(), reused: false })
+                mocks.createPayment.mockResolvedValue({ authority: `A-${code}` })
+                mocks.attachProviderAuthority.mockResolvedValue(
+                    pendingOrder({ providerAuthority: `A-${code}` }),
+                )
+
+                const res = await post(`key-${code}`, { productCode: code })
+
+                expect(res.status).toBe(200)
+                expect(mocks.prepareCheckout).toHaveBeenCalledWith(
+                    expect.anything(),
+                    expect.objectContaining({ productCode: code }),
+                )
+            }
+        })
+
+        it("an unknown product code → 400 and no order is ever prepared", async () => {
+            for (const body of [
+                { productCode: "PRO_6M" },
+                { productCode: "pro_1m" },
+                { productCode: "FREE" },
+                { productCode: 1 },
+                {},
+                { productCode: null },
+            ]) {
+                mocks.prepareCheckout.mockClear()
+
+                const res = await post("key-bad", body)
+
+                expect(res.status).toBe(400)
+                expect((await res.json()).error.code).toBe("VALIDATION_ERROR")
+                expect(mocks.prepareCheckout).not.toHaveBeenCalled()
+                expect(mocks.createPayment).not.toHaveBeenCalled()
+            }
+        })
+
+        it("a request with no body at all → 400 (never a silent default product)", async () => {
+            const res = await post("key-no-body", undefined, { raw: true })
+
+            expect(res.status).toBe(400)
+            expect((await res.json()).error.code).toBe("VALIDATION_ERROR")
+            expect(mocks.prepareCheckout).not.toHaveBeenCalled()
+        })
+
+        it("a client-supplied amount never reaches the order (strict schema rejects it)", async () => {
+            mocks.prepareCheckout.mockResolvedValue({ order: pendingOrder(), reused: false })
+
+            const res = await post("key-amount", { productCode: PRODUCT, amount: 1 })
+
+            expect(res.status).toBe(400)
+            expect(mocks.prepareCheckout).not.toHaveBeenCalled()
+            expect(mocks.createPayment).not.toHaveBeenCalled()
+        })
+
+        it("a client-supplied entitlementDays never reaches the order either", async () => {
+            mocks.prepareCheckout.mockResolvedValue({ order: pendingOrder(), reused: false })
+
+            const res = await post("key-days", {
+                productCode: PRODUCT,
+                entitlementDays: 3650,
+                currency: "IRT",
+            })
+
+            expect(res.status).toBe(400)
+            expect(mocks.prepareCheckout).not.toHaveBeenCalled()
+            expect(mocks.createPayment).not.toHaveBeenCalled()
+        })
+
+        it("a client-supplied currency never reaches the order either", async () => {
+            mocks.prepareCheckout.mockResolvedValue({ order: pendingOrder(), reused: false })
+
+            const res = await post("key-currency", { productCode: PRODUCT, currency: "USD" })
+
+            expect(res.status).toBe(400)
+            expect(mocks.prepareCheckout).not.toHaveBeenCalled()
+            expect(mocks.createPayment).not.toHaveBeenCalled()
+        })
+
+        it("validation happens before server config resolution (client error ≠ config error)", async () => {
+            mocks.resolveCheckoutSettings.mockImplementation(() => {
+                throw new PaymentConfigurationError()
+            })
+
+            const res = await post("key-1", { productCode: "NOPE" })
+
+            expect(res.status).toBe(400)
+            expect(mocks.resolveCheckoutSettings).not.toHaveBeenCalled()
+        })
     })
 })

@@ -1,66 +1,122 @@
 "use client"
 
-// صفحه اشتراک — طراحی نمایشی (Static)؛ اتصال به درگاه زرین‌پال بعداً اضافه می‌شود.
+// صفحه اشتراک — سه محصول اشتراکی، همه از کاتالوگ سروری.
 //
-// ظاهر: توکن‌های دیزاین سیستم در globals.css + کلاس‌های این ماژول.
-// دکمه‌های «خرید» و «پلن فعلی» از primitives مشترک پروژه استفاده می‌کنند
-// (dp-btn / dp-btn-premium / dp-btn-ghost / dp-btn-block) تا با بقیهٔ اپ یکدست بماند.
+// نکته‌ی اصلی: هیچ عددی (قیمت پایه، تخفیف، قیمت نهایی، مدت) در این فایل hard-code نشده —
+// همه از `BILLING_PRODUCTS` در `app/lib/billing/products.ts` می‌آیند، همان ماژولی که سرور
+// مبلغ و مدت را از آن snapshot می‌کند. پس آنچه کاربر می‌بیند و آنچه درگاه می‌گیرد از یک منبع.
 //
-// بخش کد هدیه (PromoRedeemBox) از داشبورد به این‌جا منتقل شده تا داشبورد خلوت
-// بماند؛ `user` از سرور می‌آید و فقط برای کاربر احراز‌شده رندر می‌شود.
+// واحد: کاتالوگ ریال (IRR) است؛ فقط برای نمایش به تومان تبدیل می‌شود (`tomanFromRial`) که
+// یک تبدیل نمایشی است و هیچ نقشی در مبلغ پرداختی ندارد.
+//
+// خرید: `POST /api/billing/checkout` با بدنه‌ی `{ productCode }` و یک هدر `Idempotency-Key`
+// تازه برای هر تلاش (کلید شامل کد محصول است تا replay با محصول دیگر اشتباه نشود). بعد از
+// موفقیت، کاربر به `redirectUrl` درگاه هدایت می‌شود.
+//
+// بخش کد هدیه (PromoRedeemBox) دست‌نخورده باقی مانده است.
 
+import { useState } from "react"
 import Link from "next/link"
-import { ArrowRight, Check, Crown, Sparkles } from "lucide-react"
+import { ArrowRight, Check, Crown, Loader2, Sparkles } from "lucide-react"
+
+import { api, ApiClientError } from "@/app/lib/api/client"
+import { BILLING_PRODUCTS, tomanFromRial, type ProductCode } from "@/app/lib/billing/products"
 import { faDigits } from "@/app/lib/time"
 import PromoRedeemBox from "./PromoRedeemBox"
 import styles from "./subscription.module.css"
 
-interface PlanCard {
+interface ProductCopy {
     title: string
-    price: string
-    period: string
     features: string[]
-    highlight?: boolean
 }
 
-const plans: PlanCard[] = [
-    {
-        title: "رایگان",
-        price: "۰",
-        period: "همیشه",
-        features: [
-            "تا ۱۰ کار روزانه",
-            "برنامه‌ریزی هوشمند پایه",
-            "تقویم شمسی",
-        ],
-    },
-    {
-        title: "اشتراک ۱ ماهه",
-        price: `${faDigits(30000)} تومان`,
-        period: "۳۰ روز",
+/**
+ * متن و ویژگی‌های نمایشی هر محصول. عمداً فقط «متن» است: هر عددی (قیمت/تخفیف/مدت) از
+ * کاتالوگ می‌آید تا UI و بیلینگ هرگز دو نسخه‌ی متفاوت از حقیقت نداشته باشند.
+ *
+ * عمداً هیچ محصولی «پیشنهادی/برنده» برجسته نمی‌شود (نه badge و نه استایل ویژه): تصمیم
+ * تجاریِ برجسته‌کردن یک گزینه باید آگاهانه و جدا از منطق قیمت باشد.
+ */
+const COPY: Record<ProductCode, ProductCopy> = {
+    PRO_1M: {
+        title: "اشتراک ماهانه",
         features: [
             "کارهای نامحدود روزانه",
             "برنامه‌ریزی هوشمند پیشرفته",
             "تحلیل و اولویت‌بندی AI",
             "پشتیبانی اولویت‌دار",
         ],
-        highlight: true,
     },
-    {
-        title: "اشتراک ۲ ماهه",
-        price: `${faDigits(50000)} تومان`,
-        period: "۶۰ روز",
+    PRO_2M: {
+        title: "اشتراک دوماهه",
         features: [
-            "تمام امکانات پلن ۱ ماهه",
-            "صرفه‌جویی ۱۰ هزار تومان",
+            "تمام امکانات اشتراک ماهانه",
+            "پشتیبانی اولویت‌دار",
+            "بهره‌ی کامل از دوره‌ی دوم",
+        ],
+    },
+    PRO_3M: {
+        title: "اشتراک سه‌ماهه",
+        features: [
+            "تمام امکانات اشتراک ماهانه",
+            "بیشترین مدت با همان تخفیف",
             "پشتیبانی اولویت‌دار",
         ],
     },
-]
+}
+
+const FREE_PLAN = {
+    title: "رایگان",
+    price: "۰",
+    period: "همیشه",
+    features: ["تا ۱۰ کار روزانه", "برنامه‌ریزی هوشمند پایه", "تقویم شمسی"],
+}
+
+/** پاسخ checkout — فقط همان چیزهایی که route مجاز به برگرداندن است. */
+interface CheckoutResult {
+    orderId: string
+    status: string
+    redirectUrl?: string
+}
 
 export default function SubscriptionView({ user }: { user: { id: number } | null }) {
-    const handleBuy = () => {
-        alert("درگاه پرداخت در حال آماده‌سازی است")
+    const [pending, setPending] = useState<ProductCode | null>(null)
+    const [error, setError] = useState<string | null>(null)
+
+    const handleBuy = async (productCode: ProductCode) => {
+        // قفل هم‌زمانی سمت کلاینت: تا وقتی درخواست جاری تمام نشده، تلاش دوم ارسال نمی‌شود
+        // (سرور هم با rate limit و کلید idempotency خودش محافظت می‌شود).
+        if (pending !== null) return
+        setPending(productCode)
+        setError(null)
+        try {
+            const result = await api<CheckoutResult>("/api/billing/checkout", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    // کلید تازه در هر تلاش؛ کد محصول داخل کلید هست تا اگر کاربر محصول عوض
+                    // کرد، هرگز به سفارش محصول قبلی برنخورد.
+                    "Idempotency-Key": `checkout-${productCode}-${crypto.randomUUID()}`,
+                },
+                // تنها چیزی که کلاینت می‌فرستد؛ مبلغ/مدت را سرور از کاتالوگ می‌گیرد.
+                body: JSON.stringify({ productCode }),
+            })
+            if (typeof result.redirectUrl === "string" && result.redirectUrl !== "") {
+                window.location.assign(result.redirectUrl)
+                return
+            }
+            // بدون redirect یعنی سفارش از قبل terminal بوده (مثلاً پرداخت‌شده) و نیازی به
+            // فرستادن دوباره‌ی کاربر به درگاه نیست؛ کاربر به داشبورد برمی‌گردد.
+            window.location.assign("/dashboard")
+        } catch (err) {
+            setError(
+                err instanceof ApiClientError
+                    ? err.message
+                    : "شروع پرداخت ناموفق بود؛ کمی بعد دوباره تلاش کن",
+            )
+        } finally {
+            setPending(null)
+        }
     }
 
     return (
@@ -93,62 +149,126 @@ export default function SubscriptionView({ user }: { user: { id: number } | null
             <PromoRedeemBox user={user} />
 
             <div className={styles.grid}>
-                {plans.map((plan) => (
-                    <section
-                        key={plan.title}
-                        className={
-                            plan.highlight ? `${styles.card} ${styles.cardFeatured}` : styles.card
-                        }
-                    >
-                        {plan.highlight && (
-                            <span className={styles.badge}>
-                                <Sparkles size={12} aria-hidden="true" />
-                                پیشنهادی
-                            </span>
-                        )}
+                {/* پلن رایگان — محصول قابل خرید نیست و از کاتالوگ نمی‌آید (قیمت همیشه صفر). */}
+                <section className={styles.card}>
+                    <h2 className={styles.cardTitle}>{FREE_PLAN.title}</h2>
 
-                        <h2 className={styles.cardTitle}>{plan.title}</h2>
+                    <div className={styles.priceRow}>
+                        <span className={styles.priceValue}>{FREE_PLAN.price}</span>
+                        <span className={styles.pricePeriod}>{FREE_PLAN.period}</span>
+                    </div>
 
-                        <div className={styles.priceRow}>
-                            <span className={styles.priceValue}>{plan.price}</span>
-                            <span className={styles.pricePeriod}>{plan.period}</span>
-                        </div>
+                    <ul className={styles.features}>
+                        {FREE_PLAN.features.map((feature) => (
+                            <li key={feature} className={styles.feature}>
+                                <Check size={16} className={styles.check} aria-hidden="true" />
+                                <span>{feature}</span>
+                            </li>
+                        ))}
+                    </ul>
 
-                        <ul className={styles.features}>
-                            {plan.features.map((feature) => (
-                                <li key={feature} className={styles.feature}>
-                                    <Check
-                                        size={16}
-                                        className={plan.highlight ? styles.checkGold : styles.check}
-                                        aria-hidden="true"
-                                    />
-                                    <span>{feature}</span>
-                                </li>
-                            ))}
-                        </ul>
+                    <div className={styles.cta}>
+                        <Link href="/dashboard" className="dp-btn dp-btn-ghost dp-btn-block">
+                            پلن فعلی
+                        </Link>
+                    </div>
+                </section>
 
-                        <div className={styles.cta}>
-                            {plan.price === "۰" ? (
-                                <Link
-                                    href="/dashboard"
-                                    className="dp-btn dp-btn-ghost dp-btn-block"
-                                >
-                                    پلن فعلی
-                                </Link>
-                            ) : (
-                                <button
-                                    type="button"
-                                    onClick={handleBuy}
-                                    className="dp-btn dp-btn-premium dp-btn-block"
-                                >
-                                    <Sparkles size={16} aria-hidden="true" />
-                                    خرید
-                                </button>
-                            )}
-                        </div>
-                    </section>
-                ))}
+                {/* سه محصول اشتراکی — همه‌ی اعداد از کاتالوگ، بدون hard-code */}
+                {BILLING_PRODUCTS.map((product) => {
+                    const copy = COPY[product.code]
+                    const busy = pending === product.code
+                    const blocked = pending !== null && !busy
+                    const saving = product.baseAmount - product.amount
+
+                    return (
+                        <section key={product.code} className={styles.card}>
+                            <h2 className={styles.cardTitle}>{copy.title}</h2>
+
+                            <div className={styles.priceRow}>
+                                <span className={styles.priceValue}>
+                                    {faDigits(tomanFromRial(product.amount))}
+                                    <span className={styles.priceUnit}> تومان</span>
+                                </span>
+                            </div>
+
+                            {/* قیمت پایه (خط‌خورده) + درصد تخفیف — فقط نمایشی؛
+                                مبلغ قابل پرداخت همان `product.amount` است. */}
+                            <p className={styles.priceMeta}>
+                                <span className={styles.priceBase}>
+                                    {faDigits(tomanFromRial(product.baseAmount))} تومان
+                                </span>
+                                <span className={styles.discountBadge}>
+                                    {faDigits(product.discountPercent)}٪ تخفیف
+                                </span>
+                                <span className={styles.priceSaving}>
+                                    سود شما {faDigits(tomanFromRial(saving))} تومان
+                                </span>
+                            </p>
+
+                            <p className={styles.pricePeriod}>
+                                مدت اشتراک: {faDigits(product.entitlementDays)} روز
+                            </p>
+
+                            <ul className={styles.features}>
+                                {copy.features.map((feature) => (
+                                    <li key={feature} className={styles.feature}>
+                                        <Check
+                                            size={16}
+                                            className={styles.check}
+                                            aria-hidden="true"
+                                        />
+                                        <span>{feature}</span>
+                                    </li>
+                                ))}
+                            </ul>
+
+                            <div className={styles.cta}>
+                                {/* مهمان: `/subscription` عمومی می‌ماند، پس به‌جای دکمه‌ی
+                                    خریدِ همیشه‌۴۰۱، مستقیم به ورود هدایت می‌شود. */}
+                                {user === null ? (
+                                    <Link
+                                        href="/auth/login"
+                                        className="dp-btn dp-btn-premium dp-btn-block"
+                                    >
+                                        <Sparkles size={16} aria-hidden="true" />
+                                        ورود و خرید
+                                    </Link>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => void handleBuy(product.code)}
+                                        disabled={blocked}
+                                        className="dp-btn dp-btn-premium dp-btn-block"
+                                    >
+                                        {busy ? (
+                                            <>
+                                                <Loader2
+                                                    size={16}
+                                                    className={styles.spinner}
+                                                    aria-hidden="true"
+                                                />
+                                                در حال اتصال به درگاه
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Sparkles size={16} aria-hidden="true" />
+                                                خرید
+                                            </>
+                                        )}
+                                    </button>
+                                )}
+                            </div>
+                        </section>
+                    )
+                })}
             </div>
+
+            {error !== null && (
+                <p role="alert" className={styles.errorText}>
+                    {error}
+                </p>
+            )}
         </div>
     )
 }

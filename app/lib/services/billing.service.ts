@@ -63,6 +63,7 @@ import { randomUUID } from "node:crypto"
 import type { UserPlan } from "@prisma/client"
 
 import { getBillingConfig, type BillingProviderId } from "../billing/config"
+import { getProduct, type ProductCode } from "../billing/products"
 import type { VerifyPaymentResult } from "../billing/provider"
 import type { PrismaClientLike } from "./aiUsage.service"
 import {
@@ -103,6 +104,8 @@ export interface PaymentOrderRecord {
     providerAuthority: string | null
     providerReference: string | null
     entitlementDays: number
+    /** شناسه محصول snapshot‌شده؛ nullable (سفارش‌های قدیمی محصول تکی داشتند). */
+    productCode: string | null
     requestId: string | null
     expiresAt: Date
     paidAt: Date | null
@@ -116,6 +119,7 @@ interface CheckoutProduct {
     amount: number
     currency: string
     entitlementDays: number
+    productCode: ProductCode
 }
 
 export interface PrepareCheckoutInput {
@@ -131,6 +135,11 @@ export interface PrepareCheckoutInput {
      * است. پس `expiresAt` سروری ساخته می‌شود اما نرخ آن صریحاً از caller می‌آید.
      */
     orderTtlMs: number
+    /**
+     * شناسه محصولِ انتخابی کاربر (اعتبارسنجی‌شده در مرز route). تنها ورودی این عملیات از سمت
+     * کلاینت است و صرفاً یک کلید کاتالوگ است؛ مبلغ و مدت از کاتالوگ سروری خوانده می‌شوند.
+     */
+    productCode: ProductCode
     /** correlation اختیاری (سند §22) — هرگز idempotency نیست (سند §6). */
     requestId?: string
 }
@@ -153,6 +162,14 @@ export interface FinalizePaymentInput {
      */
     verification: VerifyPaymentResult
 }
+
+// (افزودن سه محصول): `readCheckoutProduct` حالا یک `productCode` می‌گیرد و مبلغ/مدت را از
+// کاتالوگ ثابت سروری (`app/lib/billing/products.ts`) می‌خواند، نه از config تک‌محصولی.
+// client فقط کد محصول را می‌فرستد؛ `amount`/`entitlementDays`/`currency` همچنان ۱۰۰٪ سروری‌اند.
+// replay با کلید یکسان و **محصول متفاوت** دیگر سفارش قبلی را برنمی‌گرداند و 409 می‌دهد
+// (کلید یکتای اسکیما فقط `(userId, checkoutIdempotencyKey)` است و محصول را در بر نمی‌گیرد).
+// `finalizeVerifiedPayment` و `applyEntitlement` دست‌نخورده‌اند: مقایسه‌ی دقیق مبلغ با
+// `order.amount` و مدت از `order.entitlementDays` (۳۰/۶۰/۹۰) همچنان تنها منبع است.
 
 /**
  * فاز ۵ — گام ۱۵ (سند §۲۳): کدام mutation روی entitlement در finalization انجام شد.
@@ -209,6 +226,7 @@ const ORDER_SELECT = {
     providerAuthority: true,
     providerReference: true,
     entitlementDays: true,
+    productCode: true,
     requestId: true,
     expiresAt: true,
     paidAt: true,
@@ -240,17 +258,23 @@ function resolveNow(now?: Date): Date {
 }
 
 /**
- * پیکربندی محصول از config سروری (سند §5/§7). خطای config هرگز به بیرون درز نمی‌کند:
+ * پیکربندی محصول از کاتالوگ + config سروری (سند §5/§7). خطای config هرگز به بیرون درز نمی‌کند:
  * پیام آن فقط نام کلید است و این‌جا به PAYMENT_CONFIGURATION_ERROR (500) نگاشت می‌شود.
+ *
+ * تنها ورودی `code` است (کد محصولِ اعتبارسنجی‌شده در مرز route). `amount`/`entitlementDays`
+ * از کاتالوگ ثابت می‌آیند، پس client نمی‌تواند با هیچ body‌ای آن‌ها را تغییر دهد؛ کد ناشناخته
+ * هم «پیکربندی ناسازگار» شمرده می‌شود و هرگز به مقدار پیش‌فرض برنمی‌گردد.
  */
-function readCheckoutProduct(): CheckoutProduct {
+function readCheckoutProduct(code: ProductCode): CheckoutProduct {
     try {
         const config = getBillingConfig()
+        const product = getProduct(code)
         return {
             provider: config.provider,
-            amount: config.pro.amount,
+            amount: product.amount,
             currency: config.pro.currency,
-            entitlementDays: config.pro.entitlementDays,
+            entitlementDays: product.entitlementDays,
+            productCode: product.code,
         }
     } catch {
         throw new PaymentConfigurationError()
@@ -483,7 +507,8 @@ async function readEntitlement(
 /**
  * prepareCheckout — ساخت/بازیابی idempotent سفارش پرداخت (سند §6/§10):
  *
- * 1. پارامترهای محصول فقط از config سروری خوانده می‌شوند (client هیچ‌کدام را نمی‌دهد — سند §5).
+ * 1. پارامترهای محصول فقط از کاتالوگ/config سروری خوانده می‌شوند؛ client تنها `productCode`
+ *    را می‌دهد و نه amount و نه entitlementDays (سند §5).
  * 2. lookup روی `userId + checkoutIdempotencyKey` (unique اسکیمای فاز ۵).
  * 3. موجود → همان سفارش reuse می‌شود (هیچ سفارش دومی با همان کلید ساخته نمی‌شود)؛ تصمیم‌گیری فقط
  *    state-based است (قرارداد گام ۱۰ — B4/B5/B3): سفارش terminal عیناً و بدون هیچ mutation/revive/RESET
@@ -491,6 +516,10 @@ async function readEntitlement(
  *    مقایسه‌ی immutable parameters از مسیر replay حذف شد: همه‌ی پارامترها snapshot سروری‌اند و
  *    client هیچ‌کدام را نمی‌دهد، پس در replay چیزی برای «ناسازگاری» وجود ندارد و هر مسیر انحرافی
  *    فقط یک 409 غیرقابل‌حل برای کلاینت می‌ساخت.
+ *    استثنای این مرحله (تنها پارامترِ اکنون که از client می‌آید): اگر همان کلید قبلاً برای محصول
+ *    دیگری استفاده شده باشد، برگرداندن سفارش قبلی یعنی تحویل اشتباه محصول، پس با
+ *    `PaymentIdempotencyConflictError` (409) رد می‌شود و هیچ mutationی انجام نمی‌گیرد.
+ *    همان کلید + همان محصول دقیقاً مثل قبل idempotent است.
  * 4. در نبود رکورد → سفارش PENDING با merchantOrderId/expiresAt سروری ساخته می‌شود؛ race روی
  *    کلید یکتا با bounded retry/re-read (الگوی موجود repo) مدیریت می‌شود.
  *
@@ -503,12 +532,18 @@ export async function prepareCheckout(
     now?: Date,
 ): Promise<CheckoutPreparation> {
     const at = resolveNow(now)
-    const product = readCheckoutProduct()
+    const product = readCheckoutProduct(input.productCode)
     const ttlMs = assertOrderTtl(input.orderTtlMs)
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         const existing = await findOrderByKey(db, input.userId, input.checkoutIdempotencyKey)
         if (existing) {
+            // کلید یکتای اسکیما محصول را در بر نمی‌گیرد، پس replay با محصول متفاوت یک تناقض
+            // واقعی است (کاربر دارد همان کلید را برای محصول دیگری استفاده می‌کند): 409 بدون
+            // هیچ mutation/expire. رکوردهای قدیمی `productCode = null` سازگار تلقی می‌شوند.
+            if (existing.productCode !== null && existing.productCode !== product.productCode) {
+                throw new PaymentIdempotencyConflictError()
+            }
             // گام ۱۰ — سفارش موجود فقط بر اساس state تصمیم‌گیری می‌شود (قرارداد B4/B5/B3):
             // - سفارش terminal (PAID/FAILED/CANCELED/EXPIRED) عیناً و بدون هیچ mutation، revive یا
             //   RESET برگردانده می‌شود؛ خرید جدید نیازمند کلید idempotency تازه است.
@@ -529,6 +564,8 @@ export async function prepareCheckout(
                     amount: product.amount,
                     currency: product.currency,
                     entitlementDays: product.entitlementDays,
+                    // snapshot محصول برای گزارش/ردیابی؛ منبع حقیقت مبلغ همچنان amount بالاست
+                    productCode: product.productCode,
                     status: "PENDING",
                     expiresAt: new Date(at.getTime() + ttlMs),
                     // correlation اختیاری (سند §22) — idempotency جدا از آن است (سند §6)

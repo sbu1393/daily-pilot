@@ -18,9 +18,7 @@ const BASE_URL = "https://sandbox.zarinpal.com/pg"
 const CALLBACK_URL = "https://app.example.com/api/billing/callback/zarinpal?ref=mo-1"
 
 const TEST_ENV: Record<string, string> = {
-    [BILLING_ENV.proAmount]: "100000",
     [BILLING_ENV.proCurrency]: "IRR",
-    [BILLING_ENV.proEntitlementDays]: "30",
     [BILLING_ENV.merchantId]: MERCHANT,
     [BILLING_ENV.mode]: "sandbox",
     [BILLING_ENV.baseUrl]: BASE_URL,

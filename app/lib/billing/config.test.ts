@@ -11,9 +11,7 @@ import { BILLING_ENV, resolveBillingConfig, type BillingEnvSource } from "./conf
 /** env معتبر پایه — هر تست فقط یک کلید را خراب می‌کند. */
 function validEnv(overrides: BillingEnvSource = {}): BillingEnvSource {
     return {
-        [BILLING_ENV.proAmount]: "100000",
         [BILLING_ENV.proCurrency]: "IRR",
-        [BILLING_ENV.proEntitlementDays]: "30",
         [BILLING_ENV.merchantId]: "merchant-secret-value",
         [BILLING_ENV.mode]: "sandbox",
         [BILLING_ENV.baseUrl]: "https://sandbox.zarinpal.com/pg",
@@ -33,7 +31,9 @@ describe("resolveBillingConfig — valid configuration", () => {
         expect(config).toEqual({
             provider: "ZARINPAL",
             orderTtlMs: 1_800_000,
-            pro: { planCode: "PRO", amount: 100000, currency: "IRR", entitlementDays: 30 },
+            // مبلغ/مدت دیگر از env نمی‌آیند (کاتالوگ محصولات منبع حقیقت آن‌هاست) — پس
+            // `pro` فقط واحد پول و planCode را نگه می‌دارد.
+            pro: { planCode: "PRO", currency: "IRR" },
             zarinpal: {
                 merchantId: "merchant-secret-value",
                 mode: "sandbox",
@@ -92,9 +92,7 @@ describe("resolveBillingConfig — valid configuration", () => {
 
 describe("resolveBillingConfig — missing keys (fail-fast)", () => {
     const REQUIRED_KEYS = [
-        BILLING_ENV.proAmount,
         BILLING_ENV.proCurrency,
-        BILLING_ENV.proEntitlementDays,
         BILLING_ENV.merchantId,
         BILLING_ENV.mode,
         BILLING_ENV.baseUrl,
@@ -145,13 +143,16 @@ describe("resolveBillingConfig — invalid values (fail-fast)", () => {
         }
     })
 
-    it("rejects invalid product amount / entitlement days", () => {
-        expect(() => resolveBillingConfig(validEnv({ [BILLING_ENV.proAmount]: "0" }))).toThrow(
-            /BILLING_PRO_AMOUNT must be a positive integer/,
-        )
-        expect(() =>
-            resolveBillingConfig(validEnv({ [BILLING_ENV.proEntitlementDays]: "-30" })),
-        ).toThrow(/BILLING_PRO_ENTITLEMENT_DAYS must be a positive integer/)
+    it("ignores the removed product amount / entitlement-days keys entirely (they are not read anymore)", () => {
+        // قیمت/مدت از کاتالوگ می‌آید، پس حتی یک کلید env قدیمی هم نباید config را خراب کند
+        // (fail-fast روی کلیدی که دیگر خوانده نمی‌شود یعنی شکست بی‌دلیل checkout).
+        const config = resolveBillingConfig({
+            ...validEnv(),
+            BILLING_PRO_AMOUNT: "100000",
+            BILLING_PRO_ENTITLEMENT_DAYS: "30",
+        })
+
+        expect(config.pro).toEqual({ planCode: "PRO", currency: "IRR" })
     })
 
     it("accepts only IRR (exact, case-sensitive — no unit conversion)", () => {

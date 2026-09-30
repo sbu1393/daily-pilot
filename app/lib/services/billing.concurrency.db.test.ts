@@ -31,6 +31,7 @@ import { PrismaClient } from "@prisma/client"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import { BILLING_ENV, getBillingConfig } from "../billing/config"
+import { BILLING_PRODUCT_CATALOG, type ProductCode } from "../billing/products"
 import {
     attachProviderAuthority,
     finalizeVerifiedPayment,
@@ -65,10 +66,12 @@ const DAY_MS = 24 * 60 * 60 * 1000
  * یک fixture با نام صریح می‌گذارد تا تست از «نبود config» به‌جای «صحت concurrency» قرمز نشود.
  * اگر محیط مقدار واقعی داشته باشد، همان مقدار برنده است و ادعاها با snapshot همان config سنجیده می‌شوند.
  */
+// محصول تستی — قیمت/مدت از خودِ کاتالوگ خوانده می‌شود، پس تست هیچ عدد تجاری نمی‌سازد.
+const PRODUCT: ProductCode = "PRO_1M"
+const product = BILLING_PRODUCT_CATALOG[PRODUCT]
+
 const BILLING_TEST_ENV: readonly (readonly [string, string])[] = [
-    [BILLING_ENV.proAmount, "100000"],
     [BILLING_ENV.proCurrency, "IRR"],
-    [BILLING_ENV.proEntitlementDays, "30"],
     [BILLING_ENV.merchantId, "step19-test-merchant"],
     [BILLING_ENV.mode, "sandbox"],
     [BILLING_ENV.baseUrl, "https://sandbox.zarinpal.test"],
@@ -362,7 +365,7 @@ describe("Phase 5 — real PostgreSQL concurrency (step 19)", () => {
 
             const userId = await createDedicatedUser("idempotency-race")
             const key = `step19-key-${Date.now()}`
-            const { pro, orderTtlMs } = getBillingConfig()
+            const { orderTtlMs } = getBillingConfig()
 
             const settled = await Promise.allSettled(
                 Array.from({ length: CONCURRENCY }, () =>
@@ -370,6 +373,7 @@ describe("Phase 5 — real PostgreSQL concurrency (step 19)", () => {
                         userId,
                         checkoutIdempotencyKey: key,
                         orderTtlMs,
+                        productCode: PRODUCT,
                     }),
                 ),
             )
@@ -386,13 +390,15 @@ describe("Phase 5 — real PostgreSQL concurrency (step 19)", () => {
             // هیچ سفارش دومی برای همان کلید ساخته نشده است (unique سرور-محور + bounded retry)
             expect(rows).toHaveLength(1)
             expect(rows[0].status).toBe("PENDING")
+            // محصول انتخابی هم snapshot می‌شود (فقط برای گزارش؛ نه در کلید یکتا)
+            expect(rows[0].productCode).toBe(PRODUCT)
             // همه‌ی فراخوانی‌های موفق همان سفارش را می‌بینند و فقط یک create واقعی رخ داده است
             expect(fulfilled.every((result) => result.order.id === rows[0].id)).toBe(true)
             expect(fulfilled.filter((result) => !result.reused)).toHaveLength(1)
-            // snapshot سروری از config واحد — هیچ کلاینتی نمی‌تواند مقدار متفاوت بسازد
-            expect(rows[0].amount).toBe(pro.amount)
-            expect(rows[0].currency).toBe(pro.currency)
-            expect(rows[0].entitlementDays).toBe(pro.entitlementDays)
+            // snapshot سروری از کاتالوگ واحد — هیچ کلاینتی نمی‌تواند مقدار متفاوت بسازد
+            expect(rows[0].amount).toBe(product.amount)
+            expect(rows[0].currency).toBe("IRR")
+            expect(rows[0].entitlementDays).toBe(product.entitlementDays)
         },
         30_000,
     )
@@ -409,6 +415,7 @@ describe("Phase 5 — real PostgreSQL concurrency (step 19)", () => {
                 userId,
                 checkoutIdempotencyKey: key,
                 orderTtlMs,
+                productCode: PRODUCT,
             })
 
             const stamp = Date.now()
@@ -469,6 +476,7 @@ describe("Phase 5 — real PostgreSQL concurrency (step 19)", () => {
                 userId,
                 checkoutIdempotencyKey: key,
                 orderTtlMs,
+                productCode: PRODUCT,
             })
 
             const authority = `step19-authority-same-${Date.now()}`
@@ -500,14 +508,15 @@ describe("Phase 5 — real PostgreSQL concurrency (step 19)", () => {
             if (!dbAvailable) ctx.skip(REAL_POSTGRESQL_UNAVAILABLE)
 
             const userId = await createDedicatedUser("finalize-race")
-            const { pro, orderTtlMs } = getBillingConfig()
-            const days = pro.entitlementDays
+            const { orderTtlMs } = getBillingConfig()
+            const days = product.entitlementDays
 
             const key = `step19-finalize-${Date.now()}`
             const prepared = await prepareCheckout(prisma, {
                 userId,
                 checkoutIdempotencyKey: key,
                 orderTtlMs,
+                productCode: PRODUCT,
             })
 
             const authority = `step19-finalize-${Date.now()}`
@@ -595,8 +604,8 @@ describe("Phase 5 — real PostgreSQL concurrency (step 19)", () => {
         async (ctx) => {
             if (!dbAvailable) ctx.skip(REAL_POSTGRESQL_UNAVAILABLE)
 
-            const { pro, orderTtlMs } = getBillingConfig()
-            const days = pro.entitlementDays
+            const { orderTtlMs } = getBillingConfig()
+            const days = product.entitlementDays
             const at = new Date()
             const reference = `step19-shared-ref-${Date.now()}`
 
@@ -614,6 +623,7 @@ describe("Phase 5 — real PostgreSQL concurrency (step 19)", () => {
                     userId,
                     checkoutIdempotencyKey: key,
                     orderTtlMs,
+                    productCode: PRODUCT,
                 })
                 const authority = `step19-shared-ref-auth-${label}-${Date.now()}`
 
@@ -696,6 +706,7 @@ describe("Phase 5 — real PostgreSQL concurrency (step 19)", () => {
                     userId,
                     checkoutIdempotencyKey: key,
                     orderTtlMs,
+                    productCode: PRODUCT,
                 })
 
                 cases.push({ userId, orderId: prepared.order.id, key })

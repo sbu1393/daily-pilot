@@ -212,6 +212,70 @@
     color: var(--muted);
 }
 
+/* واحد پول داخل عدد بزرگ قیمت — کوچک‌تر و کم‌رنگ‌تر تا قیمت را نگه ندارد */
+.priceUnit {
+    font-size: .82rem;
+    font-weight: 800;
+    color: var(--muted);
+}
+
+/* ردیف قیمت پایه (خط‌خورده) + بج تخفیف + سود */
+.priceMeta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0;
+}
+
+.priceBase {
+    font-size: .82rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-decoration: line-through;
+}
+
+.discountBadge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 9px;
+    border-radius: var(--radius-full);
+    background: var(--success-bg);
+    color: var(--success);
+    font-size: .72rem;
+    font-weight: 800;
+}
+
+.priceSaving {
+    font-size: .72rem;
+    font-weight: 600;
+    color: var(--muted);
+}
+
+/* پیام خطای خرید — بیرون از شبکه، تا کارت‌ها را جابه‌جا نکند */
+.errorText {
+    margin: 20px 0 0;
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--danger);
+    background: var(--danger-bg);
+    color: var(--danger);
+    font-size: .84rem;
+    font-weight: 600;
+    text-align: center;
+}
+
+/* چرخهٔ بارگذاری داخل دکمهٔ خرید */
+.spinner {
+    animation: dp-spin 900ms linear infinite;
+}
+
+@keyframes dp-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 /* ---------- لیست ویژگی‌ها ---------- */
 .features {
     list-style: none;

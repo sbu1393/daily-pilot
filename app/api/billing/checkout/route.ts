@@ -8,9 +8,12 @@
 // مرزها:
 // - transaction (سند §10/§28): هیچ DB transactionی هنگام انتظار provider باز نیست؛ در این route
 //   هیچ `$transaction` باز نمی‌شود. finalization (گام ۱۱) تنها مالک transaction است.
-// - دامنه (سند §4/§5): مقادیر authoritative (amount/currency/entitlementDays/provider) فقط از config
-//   سروری، userId فقط از context احراز‌شده، و merchantOrderId/expiresAt سمت سرور ساخته می‌شوند.
-//   client هیچ‌یک از این‌ها را تعیین نمی‌کند.
+// - دامنه (سند §4/§5): مقادیر authoritative (amount/currency/entitlementDays/provider) فقط از کاتالوگ
+//   و config سروری، userId فقط از context احراز‌شده، و merchantOrderId/expiresAt سمت سرور ساخته
+//   می‌شوند. client هیچ‌یک از این‌ها را تعیین نمی‌کند.
+// - (افزودن سه محصول) تنها ورودی بدنه `productCode` است (schema سخت‌گیر `checkoutRequestSchema`):
+//   مبلغ و مدت هر سه محصول از کاتالوگ ثابت `app/lib/billing/products.ts` خوانده و روی سفارش
+//   snapshot می‌شوند. بدنه‌ی حاوی `amount`/`currency`/`entitlementDays` به‌خاطر `.strict()` رد می‌شود.
 // - provider (سند §7): هیچ retry خودکاری وجود ندارد؛ timeout/outage → سفارش PENDING +
 //   PAYMENT_PROVIDER_UNAVAILABLE؛ رد → PAYMENT_PROVIDER_REJECTED؛ پاسخ نامعتبر →
 //   PAYMENT_PROVIDER_INVALID_RESPONSE؛ وضعیت نامعلوم پس از تعامل موفق → PAYMENT_STATE_UNRESOLVED.
@@ -33,6 +36,7 @@ import { PaymentProviderError } from "@/app/lib/billing/provider"
 import { buildRedirectUrl, zarinpalProvider } from "@/app/lib/billing/zarinpal.adapter"
 import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
 import { getPrisma } from "@/app/lib/getPrisma"
+import { checkoutRequestSchema } from "@/app/schema/billingSchema"
 import { isRateLimited } from "@/app/lib/rateLimit"
 import {
     errorResponse,
@@ -165,6 +169,25 @@ export async function POST(req: NextRequest) {
             )
         }
 
+        // ۳.۱) بدنه‌ی درخواست — فقط `productCode`. این تنها جایی است که client می‌تواند
+        //       محصول را انتخاب کند و باز هم «انتخابِ مقدارها» نیست: مبلغ/مدت از کاتالوگ
+        //       سروری می‌آید. بدنه‌ی خراب، ناموجود یا دارای کلید اضافه ⇒ ۴۰۰ پیش از هر DB write
+        //       و پیش از resolve config (بی‌ربطی خطای کلاینت از نقص پیکربندی سرور).
+        let body: unknown
+        try {
+            body = await req.json()
+        } catch {
+            body = null
+        }
+        const parsed = checkoutRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return validationErrorResponse(
+                { productCode: "محصول انتخاب‌شده معتبر نیست" },
+                undefined,
+                context.requestId,
+            )
+        }
+
         // ۴) config سروری (سند §10) — خطای config به PAYMENT_CONFIGURATION_ERROR نگاشت شده است
         const settings = resolveCheckoutSettings()
         const provider = resolveCheckoutProvider(settings.provider)
@@ -175,6 +198,8 @@ export async function POST(req: NextRequest) {
             userId: user.id,
             checkoutIdempotencyKey: idempotencyKey,
             orderTtlMs: settings.orderTtlMs,
+            // تنها ورودی محصول — کاتالوگ سروری مبلغ/مدت را تعیین می‌کند (سند §5)
+            productCode: parsed.data.productCode,
             // correlation فقط (سند §22) — هرگز جای Idempotency-Key نیست (سند §6)
             requestId: context.requestId,
         })

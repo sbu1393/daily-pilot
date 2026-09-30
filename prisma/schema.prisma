@@ -440,6 +440,10 @@ model PaymentOrder {
   checkoutIdempotencyKey String
   amount                 Int
   currency               String
+  // شناسه محصول خریداری‌شده (PRO_1M|PRO_2M|PRO_3M) — فقط برای گزارش/ردیابی؛ منبع
+  // حقیقت قیمت و مدت همچنان amount/entitlementDays اسنپ‌شات این ردیف است. nullable و
+  // کاملاً additive است تا سفارش‌های قدیمی (که محصول تکی داشتند) بدون backfill سالم بمانند.
+  productCode            String?
   status                 PaymentOrderStatus
   providerAuthority      String?
   providerReference      String?

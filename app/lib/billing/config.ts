@@ -14,6 +14,11 @@
 // - timeout یک مقدار فنی است (نه business value) و مانند الگوی موجود پروژه
 //   (app/lib/ai/analyzeTask.ts) با clamp خوانده می‌شود.
 //
+// (افزودن سه محصول): مبلغ و مدت دیگر از این ماژول نمی‌آیند. سه محصول با سه قیمت وجود دارد
+// و قیمت‌ها ثابت‌اند، پس منبع حقیقت‌شان کاتالوگ `app/lib/billing/products.ts` است و کلیدهای
+// `BILLING_PRO_AMOUNT` / `BILLING_PRO_ENTITLEMENT_DAYS` حذف شدند (دیگر خوانده نمی‌شوند).
+// واحد پول (`BILLING_PRO_CURRENCY`) همچنان همین‌جا و fail-fast اعتبارسنجی می‌شود.
+
 // خارج از scope این گام: هیچ HTTP call، adapter، service، route، entity، Error taxonomy
 // بیلینگ یا ProductEvent‌ای این‌جا ساخته نمی‌شود (سند §36 مراحل ۵–۷ بعدی هستند).
 
@@ -33,12 +38,17 @@ export type BillingProviderId = "ZARINPAL"
 /** حالت محیطی provider — سند §9 («base URL / sandbox-production mode»). */
 export type ZarinpalMode = "sandbox" | "production"
 
-/** product تجاری PRO — سند §5: plan/amount/currency/entitlementDays سرور-محور. */
+/**
+ * مشخصات عمومی محصول PRO — سند §5: واحد پول و planCode سرور-محور.
+ *
+ * تغییر (افزودن سه محصول): `amount` و `entitlementDays` دیگر از env خوانده نمی‌شوند و
+ * به کاتالوگ ثابت `app/lib/billing/products.ts` منتقل شده‌اند، چون اکنون سه محصول با
+ * سه مبلغ/مدت متفاوت وجود دارد و یک کلید `BILLING_PRO_AMOUNT` نمی‌تواند همه را بگوید.
+ * قیمت/مدت دیگر هیچ مسیر env ندارند (قیمت‌ها ثابت‌اند و نیازی به secret/credential ندارند).
+ */
 export interface BillingProductConfig {
     readonly planCode: UserPlan
-    readonly amount: number
     readonly currency: string
-    readonly entitlementDays: number
 }
 
 export interface ZarinpalBillingConfig {
@@ -97,9 +107,7 @@ export const BILLING_PRO_PLAN_CODE: UserPlan = "PRO"
 
 /** نام کلیدهای environment (فقط نام‌ها عمومی‌اند؛ مقدارها secret/deployment config). */
 export const BILLING_ENV = {
-    proAmount: "BILLING_PRO_AMOUNT",
     proCurrency: "BILLING_PRO_CURRENCY",
-    proEntitlementDays: "BILLING_PRO_ENTITLEMENT_DAYS",
     merchantId: "BILLING_ZARINPAL_MERCHANT_ID",
     mode: "BILLING_ZARINPAL_MODE",
     baseUrl: "BILLING_ZARINPAL_BASE_URL",
@@ -208,11 +216,11 @@ export function resolveBillingConfig(env: BillingEnvSource): BillingConfig {
     return {
         provider: BILLING_PROVIDER,
         orderTtlMs: positiveInt(env, BILLING_ENV.orderTtlMs),
+        // مبلغ/مدت عمداً این‌جا نیستند: منبع حقیقت‌شان کاتالوگ محصولات است
+        // (`app/lib/billing/products.ts`) و در `readCheckoutProduct` خوانده می‌شوند.
         pro: {
             planCode: BILLING_PRO_PLAN_CODE,
-            amount: positiveInt(env, BILLING_ENV.proAmount),
             currency: irrCurrency(env),
-            entitlementDays: positiveInt(env, BILLING_ENV.proEntitlementDays),
         },
         zarinpal: {
             merchantId: requiredString(env, BILLING_ENV.merchantId),

@@ -10,6 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { BILLING_ENV } from "../billing/config"
+import { BILLING_PRODUCT_CATALOG, type ProductCode } from "../billing/products"
 import {
     PaymentConfigurationError,
     PaymentIdempotencyConflictError,
@@ -33,13 +34,17 @@ const NOW = new Date("2026-09-17T10:00:00.000Z")
 const USER = 7
 const KEY = "idem-key-1"
 const TTL = 1_800_000
-const AMOUNT = 100000
-const DAYS = 30
+
+/**
+ * مقدارهای تست از خودِ کاتالوگ خوانده می‌شوند (نه عدد hard-code)، پس اگر قیمت/مدت محصول
+ * عوض شود این تست دروغ نمی‌گوید. `AMOUNT`/`DAYS` همچنان انتظار تست‌های موجود را نگه می‌دارند.
+ */
+const PRODUCT: ProductCode = "PRO_1M"
+const AMOUNT = BILLING_PRODUCT_CATALOG[PRODUCT].amount
+const DAYS = BILLING_PRODUCT_CATALOG[PRODUCT].entitlementDays
 
 const TEST_ENV: Record<string, string> = {
-    [BILLING_ENV.proAmount]: String(AMOUNT),
     [BILLING_ENV.proCurrency]: "IRR",
-    [BILLING_ENV.proEntitlementDays]: String(DAYS),
     [BILLING_ENV.merchantId]: "merchant-id-for-tests",
     [BILLING_ENV.mode]: "sandbox",
     [BILLING_ENV.baseUrl]: "https://sandbox.zarinpal.com/pg",
@@ -66,6 +71,7 @@ function order(overrides: Record<string, unknown> = {}) {
         providerAuthority: null,
         providerReference: null,
         entitlementDays: DAYS,
+        productCode: PRODUCT,
         requestId: null,
         expiresAt: new Date(NOW.getTime() + TTL),
         paidAt: null,
@@ -243,7 +249,7 @@ describe("billing.service", () => {
         it("creates a PENDING order from server-side values with a server-generated reference", async () => {
             const result = await prepareCheckout(
                 db as never,
-                { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL, requestId: "req-1" },
+                { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL, requestId: "req-1", productCode: PRODUCT },
                 NOW,
             )
 
@@ -254,6 +260,7 @@ describe("billing.service", () => {
                 amount: AMOUNT,
                 currency: "IRR",
                 entitlementDays: DAYS,
+                productCode: PRODUCT,
                 status: "PENDING",
                 checkoutIdempotencyKey: KEY,
                 requestId: "req-1",
@@ -268,7 +275,7 @@ describe("billing.service", () => {
         })
 
         it("omits requestId when no correlation id was provided", async () => {
-            await prepareCheckout(db as never, { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL }, NOW)
+            await prepareCheckout(db as never, { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL, productCode: PRODUCT }, NOW)
 
             expect("requestId" in db.paymentOrder.create.mock.calls[0][0].data).toBe(false)
         })
@@ -279,7 +286,7 @@ describe("billing.service", () => {
 
             const result = await prepareCheckout(
                 db as never,
-                { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL },
+                { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL, productCode: PRODUCT },
                 NOW,
             )
 
@@ -299,7 +306,7 @@ describe("billing.service", () => {
 
             const result = await prepareCheckout(
                 db as never,
-                { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL },
+                { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL, productCode: PRODUCT },
                 NOW,
             )
 
@@ -321,7 +328,7 @@ describe("billing.service", () => {
 
                 const result = await prepareCheckout(
                     db as never,
-                    { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL },
+                    { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL, productCode: PRODUCT },
                     NOW,
                 )
 
@@ -335,7 +342,7 @@ describe("billing.service", () => {
         it("treats an invalid order TTL as a configuration failure (no invented default)", async () => {
             for (const ttl of [0, -1, 1.5, Number.NaN]) {
                 await expect(
-                    prepareCheckout(db as never, { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: ttl }, NOW),
+                    prepareCheckout(db as never, { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: ttl, productCode: PRODUCT }, NOW),
                 ).rejects.toBeInstanceOf(PaymentConfigurationError)
             }
             expect(db.paymentOrder.create).not.toHaveBeenCalled()
@@ -345,7 +352,7 @@ describe("billing.service", () => {
             db.paymentOrder.create.mockRejectedValue({ code: "P2002" })
 
             await expect(
-                prepareCheckout(db as never, { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL }, NOW),
+                prepareCheckout(db as never, { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL, productCode: PRODUCT }, NOW),
             ).rejects.toBeInstanceOf(PaymentIdempotencyConflictError)
             expect(db.paymentOrder.create).toHaveBeenCalledTimes(3)
         })
@@ -355,7 +362,7 @@ describe("billing.service", () => {
             db.paymentOrder.create.mockRejectedValue(infra)
 
             await expect(
-                prepareCheckout(db as never, { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL }, NOW),
+                prepareCheckout(db as never, { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL, productCode: PRODUCT }, NOW),
             ).rejects.toBe(infra)
         })
 
@@ -365,7 +372,7 @@ describe("billing.service", () => {
 
             const result = await prepareCheckout(
                 db as never,
-                { userId: USER, checkoutIdempotencyKey: "idem-key-2", orderTtlMs: TTL },
+                { userId: USER, checkoutIdempotencyKey: "idem-key-2", orderTtlMs: TTL, productCode: PRODUCT },
                 NOW,
             )
 
@@ -379,7 +386,7 @@ describe("billing.service", () => {
 
             const result = await prepareCheckout(
                 db as never,
-                { userId: USER + 1, checkoutIdempotencyKey: KEY, orderTtlMs: TTL },
+                { userId: USER + 1, checkoutIdempotencyKey: KEY, orderTtlMs: TTL, productCode: PRODUCT },
                 NOW,
             )
 
@@ -390,7 +397,7 @@ describe("billing.service", () => {
         it("persists the key verbatim (shape validation is the route's job — never trimmed here)", async () => {
             await prepareCheckout(
                 db as never,
-                { userId: USER, checkoutIdempotencyKey: "  key-with-spaces  ", orderTtlMs: TTL },
+                { userId: USER, checkoutIdempotencyKey: "  key-with-spaces  ", orderTtlMs: TTL, productCode: PRODUCT },
                 NOW,
             )
 
@@ -401,7 +408,7 @@ describe("billing.service", () => {
         })
 
         it("creates the order without any provider authority or reference (provider work stays in the route)", async () => {
-            await prepareCheckout(db as never, { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL }, NOW)
+            await prepareCheckout(db as never, { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL, productCode: PRODUCT }, NOW)
 
             const data = (db.paymentOrder.create.mock.calls[0] as unknown[])[0] as {
                 data: Record<string, unknown>
@@ -409,6 +416,121 @@ describe("billing.service", () => {
             expect(data.data).not.toHaveProperty("providerAuthority")
             expect(data.data).not.toHaveProperty("providerReference")
             expect(data.data.status).toBe("PENDING")
+        })
+
+        // ------------------------------------------------- سه محصول (snapshot قیمت/مدت)
+        describe("product catalog snapshot", () => {
+            it("snapshots the catalog amount/days/productCode for each of the three products", async () => {
+                const expected = [
+                    { code: "PRO_1M", amount: 350_000, days: 30 },
+                    { code: "PRO_2M", amount: 600_000, days: 60 },
+                    { code: "PRO_3M", amount: 900_000, days: 90 },
+                ] as const
+
+                for (const product of expected) {
+                    byKey = new Map()
+                    byId = new Map()
+                    byMerchant = new Map()
+                    db = makeDb()
+
+                    await prepareCheckout(
+                        db as never,
+                        {
+                            userId: USER,
+                            checkoutIdempotencyKey: `key-${product.code}`,
+                            orderTtlMs: TTL,
+                            productCode: product.code,
+                        },
+                        NOW,
+                    )
+
+                    const data = (db.paymentOrder.create.mock.calls[0] as unknown[])[0] as {
+                        data: Record<string, unknown>
+                    }
+                    expect(data.data.amount).toBe(product.amount)
+                    expect(data.data.entitlementDays).toBe(product.days)
+                    expect(data.data.productCode).toBe(product.code)
+                    expect(data.data.currency).toBe("IRR")
+                }
+            })
+
+            it("never lets an unknown product code become an order (no invented default)", async () => {
+                await expect(
+                    prepareCheckout(
+                        db as never,
+                        {
+                            userId: USER,
+                            checkoutIdempotencyKey: KEY,
+                            orderTtlMs: TTL,
+                            productCode: "PRO_9M" as ProductCode,
+                        },
+                        NOW,
+                    ),
+                ).rejects.toBeInstanceOf(PaymentConfigurationError)
+                expect(db.paymentOrder.create).not.toHaveBeenCalled()
+            })
+        })
+
+        // ------------------------- replay با محصول متفاوت (کلید یکتا محصول را ندارد)
+        describe("idempotency key scope across products", () => {
+            it("same key + different product → 409 and the previous order is never returned", async () => {
+                seed(order({ productCode: "PRO_1M" }))
+
+                await expect(
+                    prepareCheckout(
+                        db as never,
+                        {
+                            userId: USER,
+                            checkoutIdempotencyKey: KEY,
+                            orderTtlMs: TTL,
+                            productCode: "PRO_2M",
+                        },
+                        NOW,
+                    ),
+                ).rejects.toBeInstanceOf(PaymentIdempotencyConflictError)
+
+                // نه سفارش دوم، نه حتی lazy-expire یا هر mutation دیگری
+                expect(db.paymentOrder.create).not.toHaveBeenCalled()
+                expect(db.paymentOrder.updateMany).not.toHaveBeenCalled()
+            })
+
+            it("same key + same product keeps the previous idempotent behaviour", async () => {
+                seed(order({ productCode: "PRO_2M" }))
+                const existing = byId.get("ord_1")
+
+                const result = await prepareCheckout(
+                    db as never,
+                    {
+                        userId: USER,
+                        checkoutIdempotencyKey: KEY,
+                        orderTtlMs: TTL,
+                        productCode: "PRO_2M",
+                    },
+                    NOW,
+                )
+
+                expect(result.reused).toBe(true)
+                expect(result.order).toEqual(existing)
+                expect(db.paymentOrder.create).not.toHaveBeenCalled()
+            })
+
+            it("a legacy order with no productCode stays replayable (additive migration)", async () => {
+                seed(order({ productCode: null }))
+
+                const result = await prepareCheckout(
+                    db as never,
+                    {
+                        userId: USER,
+                        checkoutIdempotencyKey: KEY,
+                        orderTtlMs: TTL,
+                        productCode: "PRO_3M",
+                    },
+                    NOW,
+                )
+
+                expect(result.reused).toBe(true)
+                expect(db.paymentOrder.create).not.toHaveBeenCalled()
+            })
         })
     })
 
@@ -763,6 +885,64 @@ describe("billing.service", () => {
             expect(result.order.status).toBe("PAID")
         })
 
+        it("all three products still grant planCode = PRO with their own duration", async () => {
+            const cases = [
+                { code: "PRO_1M", amount: 350_000, days: 30 },
+                { code: "PRO_2M", amount: 600_000, days: 60 },
+                { code: "PRO_3M", amount: 900_000, days: 90 },
+            ] as const
+
+            for (const product of cases) {
+                db.entitlement.create.mockClear()
+                db.paymentOrder.updateMany.mockClear()
+                byAuthority.set("A1", order({ providerAuthority: "A1", amount: product.amount, entitlementDays: product.days, productCode: product.code }))
+                db.paymentOrder.updateMany.mockResolvedValue({ count: 1 })
+                db.paymentOrder.update.mockResolvedValue(
+                    order({ status: "PAID", providerAuthority: "A1", paidAt: NOW, providerReference: "REF-1", entitlementId: "ent_1", amount: product.amount, entitlementDays: product.days, productCode: product.code }),
+                )
+
+                const result = await finalizeVerifiedPayment(
+                    db as never,
+                    { authority: "A1", verification: { reference: "REF-1", amount: product.amount } },
+                    NOW,
+                )
+
+                expect(result.finalized).toBe(true)
+                const entitlementData = db.entitlement.create.mock.calls[0][0].data
+                // `UserPlan` دست‌نخورده: هر سه محصول `PRO` می‌دهند و فقط مدت فرق می‌کند.
+                expect(entitlementData.planCode).toBe("PRO")
+                expect(entitlementData.currentPeriodEnd).toEqual(
+                    new Date(NOW.getTime() + product.days * DAY),
+                )
+                expect(db.user.updateMany).toHaveBeenCalledWith({
+                    where: { id: USER },
+                    data: { plan: "PRO" },
+                })
+            }
+        })
+
+        it("keeps rejecting a verified amount that differs from the order snapshot (per product)", async () => {
+            const cases = [
+                { code: "PRO_1M", amount: 350_000 },
+                { code: "PRO_2M", amount: 600_000 },
+                { code: "PRO_3M", amount: 900_000 },
+            ] as const
+
+            for (const product of cases) {
+                byAuthority.set("A1", order({ providerAuthority: "A1", amount: product.amount, productCode: product.code }))
+
+                await expect(
+                    finalizeVerifiedPayment(
+                        db as never,
+                        { authority: "A1", verification: { reference: "REF-1", amount: 1 } },
+                        NOW,
+                    ),
+                ).rejects.toBeInstanceOf(PaymentInvalidAmountError)
+            }
+            expect(db.paymentOrder.updateMany).not.toHaveBeenCalled()
+            expect(db.entitlement.create).not.toHaveBeenCalled()
+        })
+
         it("extends an active period and reports the RENEWED action", async () => {
             const active = entitlementRow()
             db.entitlement.findUnique.mockResolvedValue(active)
@@ -838,7 +1018,7 @@ describe("billing.service", () => {
             seed(order({ providerAuthority: "A1" }))
             db.paymentOrder.update.mockResolvedValue(order({ status: "PAID" }))
 
-            await prepareCheckout(db as never, { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL }, NOW)
+            await prepareCheckout(db as never, { userId: USER, checkoutIdempotencyKey: KEY, orderTtlMs: TTL, productCode: PRODUCT }, NOW)
             await attachProviderAuthority(db as never, {
                 userId: USER,
                 checkoutIdempotencyKey: KEY,

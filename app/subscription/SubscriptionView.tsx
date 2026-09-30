@@ -10,7 +10,7 @@
 // بماند؛ `user` از سرور می‌آید و فقط برای کاربر احراز‌شده رندر می‌شود.
 
 import Link from "next/link"
-import { Check, Crown, Sparkles } from "lucide-react"
+import { ArrowRight, Check, Crown, Sparkles } from "lucide-react"
 import { faDigits } from "@/app/lib/time"
 import PromoRedeemBox from "./PromoRedeemBox"
 import styles from "./subscription.module.css"
@@ -66,6 +66,19 @@ export default function SubscriptionView({ user }: { user: { id: number } | null
     return (
         <div className={styles.page}>
             <header className={styles.head}>
+                {/* مسیر برگشت — این صفحه `layout.tsx` ندارد، پس نه `Header` و نه
+                    `AppShell` روی آن رندر نمی‌شود و بدون این دکمه تنها راه خروج،
+                    لینکِ «پلن فعلی» داخل کارت پلن است که برچسبش ناوبری را توصیف
+                    نمی‌کند. مقصد عمداً ثابت است (`/dashboard`): کاربر از داشبورد،
+                    نوار سهمیه یا مودال سهمیه می‌آید، و صفحه ممکن است مستقیم در PWA
+                    هم باز شود — پس به حدس‌زدن از `history` نیازی نیست. */}
+                <div className={styles.backLink}>
+                    <Link href="/dashboard" className="dp-btn dp-btn-ghost">
+                        <ArrowRight size={16} aria-hidden="true" />
+                        بازگشت به داشبورد
+                    </Link>
+                </div>
+
                 <h1 className={styles.title}>
                     <Crown className={styles.titleIcon} size={28} aria-hidden="true" />
                     اشتراک ویژه

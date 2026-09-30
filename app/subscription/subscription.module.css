@@ -16,6 +16,13 @@
     margin-bottom: 38px;
 }
 
+/* مسیر برگشت — بالای عنوان، هم‌راستا با لبهٔ شروع (راست در RTL) تا با
+   `text-align: center` خودِ `.head` ناسازگار نشود. */
+.backLink {
+    text-align: start;
+    margin-bottom: 16px;
+}
+
 .title {
     margin: 0;
     display: flex;

@@ -402,7 +402,12 @@ describe("complete / release روی همان bucket", () => {
 
 /* ──────────────────────────────────────────────────────────────────────────── */
 
-describe("تغییر policy توسط ادمین وسط ماه", () => {
+/**
+ * از مسیر A، ظرفیت هر دوره **snapshot** می‌شود: تغییرِ بعدیِ `AiQuotaPolicy` نباید
+ * سقفِ دوره‌ای را که کاربر در حالش مصرف می‌کند عوض کند (وگرنه تضمین محصول
+ * «۹۰ روزه = ۸۱۰ تحلیل» می‌شکست). اثرِ تغییر policy از **دورهٔ بعد** شروع می‌شود.
+ */
+describe("تغییر policy توسط ادمین وسط دوره", () => {
     it("پایین آوردن سقف crash نمی‌کند و شمارنده‌ها سالم می‌مانند", async () => {
         const fake = makeFakePrisma()
         for (let i = 0; i < 10; i++) {
@@ -414,7 +419,7 @@ describe("تغییر policy توسط ادمین وسط ماه", () => {
         // ادمین سقف را از ۱۵ به ۵ می‌آورد
         fake.setPolicy("FREE:ANALYZE", 5)
 
-        // نه crash، نه دادهٔ از‌دست‌رفته
+        // نه crash، نه دادهٔ از‌دست‌رفته — و سقفِ همین دوره همان snapshot اولیه می‌ماند.
         const views = await readQuotaBuckets(fake.prisma, {
             userId: 1,
             plan: "FREE",
@@ -422,21 +427,36 @@ describe("تغییر policy توسط ادمین وسط ماه", () => {
             now: NOW,
         })
         const base = views.find((v) => v.feature === "ANALYZE" && v.source === "BASE")!
-        expect(base.capacity).toBe(5)
+        expect(base.capacity).toBe(15)
         expect(base.consumed).toBe(10)
-        expect(base.remaining).toBe(0)
+        expect(base.remaining).toBe(5)
 
-        // رزرو بعدی قفل است چون مصرف (۱۰) از ظرفیت جدید (۵) بیشتر است
-        await expect(reserve(fake, { requestId: "s-after" })).rejects.toBeInstanceOf(QuotaExceededError)
+        // رزروهای باقی‌ماندهٔ همین دوره مجازند (ظرفیت snapshot هنوز ۱۵ است).
+        await expect(reserve(fake, { requestId: "s-after" })).resolves.toBeTruthy()
     })
 
-    it("بالا بردن سقف بلافاصله اثر می‌کند (ظرفیت زنده است)", async () => {
+    it("بالا بردن سقف روی دورهٔ در جریان اثر نمی‌کند، ولی از دورهٔ بعد اثر می‌کند", async () => {
         const fake = makeFakePrisma({ policy: { "FREE:ANALYZE": 1, "FREE:PLAN": 2, "PRO:ANALYZE": 1, "PRO:PLAN": 1 } })
         await reserve(fake, { requestId: "u-1" })
         await expect(reserve(fake, { requestId: "u-2" })).rejects.toBeInstanceOf(QuotaExceededError)
 
         fake.setPolicy("FREE:ANALYZE", 5)
-        await expect(reserve(fake, { requestId: "u-3" })).resolves.toBeTruthy()
+        // دورهٔ جاری قفل است…
+        await expect(reserve(fake, { requestId: "u-3" })).rejects.toBeInstanceOf(QuotaExceededError)
+
+        // …ولی در دورهٔ بعد، سقف تازه snapshot می‌شود.
+        const nextPeriod = new Date(PERIOD.getTime() + 30 * 24 * 60 * 60 * 1000)
+        await expect(
+            reserveBucketQuota(fake.prisma, {
+                userId: 1,
+                requestId: "u-4",
+                feature: "ANALYZE",
+                units: 1,
+                plan: "FREE",
+                timezone: "UTC",
+                now: new Date(nextPeriod.getTime() + 60 * 1000),
+            } as any),
+        ).resolves.toBeTruthy()
     })
 })
 

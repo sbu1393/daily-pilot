@@ -47,6 +47,9 @@ describe("registerUser (E1 — uniqueness race)", () => {
                 username: "testuser",
                 email: "test@example.com",
                 password: "hashed-password",
+                // لنگر دورهٔ سهمیه از لحظهٔ ثبت‌نام (مسیر A). مقدار `expect.any(Date)`
+                // چون زمان دقیق در اختیار تست نیست.
+                quotaAnchorAt: expect.any(Date),
             },
         })
     })

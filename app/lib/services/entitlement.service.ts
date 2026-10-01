@@ -119,6 +119,26 @@ async function readEntitlement(
 }
 
 /**
+ * لنگر دورهٔ سهمیهٔ کاربر (`User.quotaAnchorAt`).
+ *
+ * برای کاربرِ اشتراکی این ستون **مرجع نیست** — مرجع، `Entitlement.currentPeriodStart`
+ * است و هر خرید/تمدیدِ معتبر آن را بازنویسی می‌کند. این ستون فقط لنگرِ پایهٔ کاربری است
+ * که هیچ اشتراک فعالی ندارد (رایگان)، تا دوره‌های او هم از تقویم جدا شود.
+ *
+ * نوشتن آن در `applyPurchasedPeriod` انجام می‌شود تا خرید و لنگر **هم‌زمان و در همان
+ * مسیر** حرکت کنند؛ نوشتنش جداگانه در route یا cron یعنی پنجره‌ای که لنگر هنوز قدیمی
+ * است ولی اشتراک فعال شده — یعنی دقیقاً همان باگی که این تغییر دارد درستش می‌کند.
+ */
+async function setQuotaAnchor(db: PrismaClientLike, userId: number, anchor: Date): Promise<void> {
+    // conditional: فقط وقتی هنوز مقداری ندارد. کاربری که لنگر دارد (مثلاً رایگانِ
+    // فعال) آن را نگه می‌دارد تا دورهٔ جاری‌اش وسط خرید نشکند.
+    await db.user.updateMany({
+        where: { id: userId, quotaAnchorAt: null },
+        data: { quotaAnchorAt: anchor },
+    })
+}
+
+/**
  * آینه‌ی سروری `User.plan` (سند §18) — این write فقط از همین لایه‌ی billing/entitlement مجاز است.
  * ردیف کاربر نبودن = نقض invariant جریان finalization → ENTITLEMENT_CONFLICT.
  */
@@ -173,6 +193,7 @@ async function applyPurchasedPeriod(
                     select: ENTITLEMENT_SELECT,
                 })
                 await setUserPlan(db, input.userId, "PRO")
+                await setQuotaAnchor(db, input.userId, at)
                 return created as EntitlementRecord
             } catch (error) {
                 // P2002 → ردیف هم‌زمان ساخته شده است؛ re-read و ادامه از مسیر update
@@ -211,6 +232,7 @@ async function applyPurchasedPeriod(
         }
 
         await setUserPlan(db, input.userId, "PRO")
+        await setQuotaAnchor(db, input.userId, nextStart)
 
         const final = await readEntitlement(db, input.userId)
         if (!final) throw new EntitlementConflictError()

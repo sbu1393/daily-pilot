@@ -42,7 +42,8 @@
 
 import type { AiFeature } from "@prisma/client"
 
-import { getMonthlyPeriod, resolvePlanPolicy } from "./planPolicy.service"
+import { resolvePlanPolicy } from "./planPolicy.service"
+import { resolveQuotaWindowFor } from "./quotaWindow"
 import { readCutoverAt, resolveQuotaMode, type QuotaMode } from "./aiQuotaCutover.service"
 import {
     readPromoBucketView,
@@ -99,7 +100,14 @@ export async function readAiQuotaStatus(
     input: ReadAiQuotaStatusInput,
 ): Promise<AiQuotaStatus> {
     const now = input.now ?? new Date()
-    const periodStart = getMonthlyPeriod(now, input.timezone).periodStart
+    // همان پنجره‌ای که رزرو استفاده می‌کند — نه اول ماه تقویمی.
+    const periodStart = (
+        await resolveQuotaWindowFor(prisma, {
+            userId: input.userId,
+            now,
+            timezone: input.timezone,
+        })
+    ).periodStart
 
     // همان تصمیمی که `runAiOperation` می‌گیرد — نه یک نسخهٔ موازی.
     const cutoverAt = await readCutoverAt(prisma)

@@ -20,7 +20,8 @@
 import { getPrisma } from "@/app/lib/getPrisma"
 import type { PrismaClientLike } from "./aiUsage.service"
 import { QuotaUnavailableError, UserNotFoundError } from "./errors"
-import { getMonthlyPeriod, resolvePlanPolicy } from "./planPolicy.service"
+import { resolvePlanPolicy } from "./planPolicy.service"
+import { resolveQuotaWindowFor } from "./quotaWindow"
 import { readCutoverAt, resolveQuotaMode, type QuotaMode } from "./aiQuotaCutover.service"
 import { readQuotaBuckets, type QuotaBucketView } from "./aiQuotaV2.service"
 import { resolveEffectivePlan } from "./entitlement.service"
@@ -584,9 +585,14 @@ export async function getAdminOverview(options: AdminOverviewOptions = {}): Prom
         const aggregateClient =
             options.prisma ?? (process.env.VITEST ? undefined : makeDefaultAdminClient())
         if (aggregateClient) {
-            const periodStart = getMonthlyPeriod(now).periodStart
+            // این ویجت **پلتفرمی** است (کاربر مشخصی ندارد) و لنگر فردی معنا ندارد،
+            // پس یک پنجرهٔ غلتان ۳۰روزه گزارش می‌کند — همان طول هر دورهٔ سهمیه.
+            const periodStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
             const agg = (await aggregateClient.aiUsage.aggregate({
-                where: { periodType: "MONTHLY", periodStart },
+                where: {
+                    periodType: "MONTHLY",
+                    periodStart: { gte: periodStart, lte: now },
+                },
                 _sum: { reservedUnits: true, consumedUnits: true },
             })) as { _sum?: Record<string, unknown> }
             aiQuota = {
@@ -906,6 +912,7 @@ export async function getUserDetail(
             role: true,
             timezone: true,
             lastSeenAt: true,
+            quotaAnchorAt: true,
         },
     })) as Record<string, unknown> | null
     const user = row === null ? null : toAdminUserView(row)
@@ -932,9 +939,18 @@ export async function getUserDetail(
     try {
         const plan = (typeof row?.plan === "string" ? row.plan : "FREE") as AdminPlan
         const policy = resolvePlanPolicy({ plan })
-        // فاز ۱ — period در timezone همان کاربر (نه UTC)؛ tz از همان read ردیف کاربر
+        // فاز ۱ — period از لنگر همان کاربر (timezone فقط fallback تقویمی است)
         const timezone = row && typeof row.timezone === "string" ? row.timezone : undefined
-        const periodStart = getMonthlyPeriod(now, timezone).periodStart
+        const periodStart = (
+            await resolveQuotaWindowFor(client, {
+                userId,
+                now,
+                timezone,
+                // ردیف کاربر همین بالا خوانده شده — read دوم روی `User` لازم نیست.
+                knownFreeAnchor:
+                    row?.quotaAnchorAt instanceof Date ? row.quotaAnchorAt : null,
+            })
+        ).periodStart
         const quotaRow = (await client.aiUsage.findUnique({
             where: { userId_periodType_periodStart: { userId, periodType: "MONTHLY", periodStart } },
             select: { reservedUnits: true, consumedUnits: true },
@@ -1042,15 +1058,24 @@ export async function getUserAiUsage(
 
     const userRow = (await client.user.findUnique({
         where: { id: userId },
-        select: { plan: true, timezone: true },
-    })) as { plan?: unknown; timezone?: unknown } | null
+        select: { plan: true, timezone: true, quotaAnchorAt: true },
+    })) as { plan?: unknown; timezone?: unknown; quotaAnchorAt?: unknown } | null
     if (userRow === null || typeof userRow.plan !== "string") throw new UserNotFoundError()
     const plan = userRow.plan as AdminPlan
 
     const policy = resolvePlanPolicy({ plan })
-    // فاز ۱ — period در timezone همان کاربر (نه UTC)
+    // فاز ۱ — period از لنگر همان کاربر (timezone فقط fallback تقویمی است)
     const timezone = typeof userRow.timezone === "string" ? userRow.timezone : undefined
-    const periodStart = getMonthlyPeriod(now, timezone).periodStart
+    const periodStart = (
+        await resolveQuotaWindowFor(client, {
+            userId,
+            now,
+            timezone,
+            // همین ردیف را قبلاً خوانده‌ایم — read دوم روی `User` لازم نیست.
+            knownFreeAnchor:
+                userRow.quotaAnchorAt instanceof Date ? userRow.quotaAnchorAt : null,
+        })
+    ).periodStart
 
     const quotaRow = (await client.aiUsage.findUnique({
         where: { userId_periodType_periodStart: { userId, periodType: "MONTHLY", periodStart } },
@@ -1640,7 +1665,7 @@ export async function getAdminUserQuotaDetail(
     const effectivePlan = (await resolveEffectivePlan(client, userId, now)) as AdminPlan
 
     const cutoverAt = await readCutoverAt(client)
-    const periodStart = getMonthlyPeriod(now, timezone).periodStart
+    const periodStart = (await resolveQuotaWindowFor(client, { userId, now, timezone })).periodStart
     const mode = resolveQuotaMode(periodStart, cutoverAt, timezone)
 
     if (mode === "NEW") {

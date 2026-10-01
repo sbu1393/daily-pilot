@@ -44,6 +44,10 @@ export async function registerUser(input: {
                 username,
                 email,
                 password: hashedPassword,
+                // لنگر دورهٔ سهمیه از لحظهٔ ثبت‌نام — تا دوره‌های کاربر از تقویم جدا و
+                // به زمانِ واقعاً فعالیتش چسبیده باشد (مسیر A). مقدار `null` نبودنش یعنی
+                // fallback تقویمی؛ پس گذاشتنش اختیاری است ولی مسیر عادی همین است.
+                quotaAnchorAt: new Date(),
             },
         })
     } catch (error) {

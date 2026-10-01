@@ -56,6 +56,11 @@ import {
     QuotaUnavailableError,
 } from "./errors"
 import { getMonthlyPeriod } from "./planPolicy.service"
+import {
+    QUOTA_PERIOD_DAYS,
+    periodCapacityUnits,
+    resolveQuotaWindowFor,
+} from "./quotaWindow"
 import { readQuotaPolicy, normalizePlan, MultiUnitNotAllowedError } from "./quotaPolicy.service"
 import {
     assertTransitionAllowed,
@@ -92,7 +97,10 @@ export interface ReserveBucketQuotaInput {
     multiUnit?: boolean
     /** plan کاربر از session؛ فقط برای خواندن policy. */
     plan: string | null | undefined
-    /** timezone کاربر — periodStart از آن مشتق می‌شود. */
+    /**
+     * timezone کاربر — فقط برای **fallback تقویمی** وقتی کاربر هنوز لنگر ندارد.
+     * در مسیر عادی لنگر از `User.quotaAnchorAt` / `Entitlement` می‌آید.
+     */
     timezone: string
     now?: Date
     model?: string
@@ -128,9 +136,19 @@ export async function reserveBucketQuota(
     }
 
     const now = input.now ?? new Date()
-    const periodStart = getMonthlyPeriod(now, input.timezone).periodStart
 
-    // ظرفیت BASE زنده از DB می‌آید (و در audit snapshot می‌شود)
+    // پنجرهٔ دوره از **لنگر اشتراک** می‌آید، نه از اول ماه تقویمی؛ وگرنه عبور از مرز ماه
+    // یک دورهٔ اضافه به کاربر می‌داد بدون اینکه روزی از اشتراکش کم شود.
+    const window = await resolveQuotaWindowFor(prisma, {
+        userId: input.userId,
+        now,
+        timezone: input.timezone,
+    })
+    const periodStart = window.periodStart
+
+    // ظرفیت BASE زنده از DB می‌آید (و در audit snapshot می‌شود). این مقدار هنگام
+    // **ساخت دوره** داخل `ensureBucket` snapshot می‌شود تا تغییر بعدیِ policy، سقف
+    // دوره‌های قبلی را عوض نکند.
     const allowedUnits = await readQuotaPolicy(prisma, normalizePlan(input.plan), input.feature)
 
     // Idempotency قبل از هر نوشتنی
@@ -217,9 +235,13 @@ async function reserveFromLedger(
             continue // تغییر هم‌زمان → دور بعد با مقادیر تازه (نه denial جعلی)
         }
 
-        // ── BASE (سقف زندهٔ policy) ─────────────────────────────────────────────
-        const base = await ensureBucket(tx, ctx.userId, ctx.feature, "BASE", ctx.periodStart)
-        if (hasRoom(base.reservedUnits, base.consumedUnits, ctx.allowedUnits, ctx.units)) {
+        // ── BASE (snapshot ظرفیت دوره) ─────────────────────────────────────────
+        const base = await ensureBucket(tx, ctx.userId, ctx.feature, "BASE", ctx.periodStart, {
+            monthlyUnits: ctx.allowedUnits,
+            daysInPeriod: QUOTA_PERIOD_DAYS,
+        })
+        const baseCapacity = base.capacityUnits ?? ctx.allowedUnits
+        if (hasRoom(base.reservedUnits, base.consumedUnits, baseCapacity, ctx.units)) {
             if (await casReserve(tx, base, ctx.units)) {
                 return { source: "BASE", bucketId: base.id }
             }
@@ -306,6 +328,8 @@ interface BucketRow {
     reservedUnits: number
     consumedUnits: number
     grantedUnits: number | null
+    /** snapshot سقف BASE؛ `null` فقط برای PROMO و ردیف‌های پیش از مهاجرت. */
+    capacityUnits: number | null
 }
 
 /** bucket موجود را می‌خواند؛ نبودنش برای PROMO یعنی «ظرفیت صفر» نه خطا. */
@@ -326,21 +350,41 @@ async function readBucket(
                 periodStart,
             },
         },
-        select: { id: true, reservedUnits: true, consumedUnits: true, grantedUnits: true },
+        select: {
+            id: true,
+            reservedUnits: true,
+            consumedUnits: true,
+            grantedUnits: true,
+            capacityUnits: true,
+        },
     })
     return (row as BucketRow | null) ?? null
 }
 
-/** BASE همیشه باید وجود داشته باشد (حتی با مصرف صفر) تا capacity زنده قابل خواندن باشد. */
+/**
+ * BASE همیشه باید وجود داشته باشد (حتی با مصرف صفر) تا ظرفیت snapshot قابل خواندن
+ * باشد؛ و ظرفیتش **دقیقاً یک بار** نوشته می‌شود.
+ *
+ * چرا ظرفیت داخل همین تابع snapshot می‌شود و نه بعد از ساخت: دو رزروی هم‌زمان در
+ * لحظهٔ rollover هر دو مقدار policy را می‌خوانند. اگر ظرفیت بعد از `create` نوشته
+ * می‌شد، ممکن بود یکی ردیف را با ظرفیت `null` ببیند و بی‌صدا رهایش کند. اینجا با یک
+ * `updateMany` شرطی نوشته می‌شود، پس حتی صد رزروی هم‌زمان هم یک snapshot می‌سازند.
+ */
 async function ensureBucket(
     tx: any,
     userId: number,
     feature: AiFeature,
     source: QuotaSource,
     periodStart: Date,
+    options?: { monthlyUnits?: number; daysInPeriod?: number },
 ): Promise<BucketRow> {
     const existing = await readBucket(tx, userId, feature, source, periodStart)
-    if (existing) return existing
+    if (existing) return backfillCapacity(tx, existing, source, options)
+
+    const capacityUnits =
+        source === "BASE"
+            ? periodCapacityUnits(options?.monthlyUnits ?? 0, options?.daysInPeriod ?? 0)
+            : null
 
     try {
         const created = await tx.aiQuotaBucket.create({
@@ -352,16 +396,53 @@ async function ensureBucket(
                 periodStart,
                 // BASE ⇒ null (CHECK)؛ PROMO ⇒ 0 (CHECK)
                 grantedUnits: source === "PROMO" ? 0 : null,
+                capacityUnits,
             },
-            select: { id: true, reservedUnits: true, consumedUnits: true, grantedUnits: true },
+            select: {
+                id: true,
+                reservedUnits: true,
+                consumedUnits: true,
+                grantedUnits: true,
+                capacityUnits: true,
+            },
         })
         return created as BucketRow
     } catch (error) {
         if ((error as { code?: unknown })?.code === "P2002") {
             // رزرو هم‌زمان همان ردیف را ساخته → بخوان و ادامه بده
             const raced = await readBucket(tx, userId, feature, source, periodStart)
-            if (raced) return raced
+            if (raced) return backfillCapacity(tx, raced, source, options)
         }
+        throw new QuotaUnavailableError()
+    }
+}
+
+/**
+ * snapshot ظرفیت را برای ردیف BASE فاقد ظرفیت پر می‌کند (idempotent).
+ *
+ * شرط `capacityUnits: null` تضمین می‌کند ظرفیتِ **قبلاً** نوشته‌شده هرگز بازنویسی
+ * نمی‌شود — پس حتی بعد از تغییر `AiQuotaPolicy` هم دوره‌های گذشته سقفشان ثابت
+ * می‌ماند. همین شرط، دو رزروی هم‌زمان را هم بی‌خطر می‌کند: دومی `count = 0` می‌گیرد
+ * و مقدار نوشته‌شدهٔ اولی را برمی‌گرداند.
+ */
+async function backfillCapacity(
+    tx: any,
+    bucket: BucketRow,
+    source: QuotaSource,
+    options?: { monthlyUnits?: number; daysInPeriod?: number },
+): Promise<BucketRow> {
+    if (source !== "BASE" || bucket.capacityUnits !== null) return bucket
+    const capacityUnits = periodCapacityUnits(
+        options?.monthlyUnits ?? 0,
+        options?.daysInPeriod ?? 0,
+    )
+    try {
+        await tx.aiQuotaBucket.updateMany({
+            where: { id: bucket.id, capacityUnits: null },
+            data: { capacityUnits },
+        })
+        return { ...bucket, capacityUnits }
+    } catch {
         throw new QuotaUnavailableError()
     }
 }
@@ -511,7 +592,13 @@ export async function readQuotaBuckets(
     input: { userId: number; plan: string | null | undefined; timezone: string; now?: Date },
 ): Promise<QuotaBucketView[]> {
     const now = input.now ?? new Date()
-    const periodStart = getMonthlyPeriod(now, input.timezone).periodStart
+    // عینِ همان پنجره‌ای که رزرو استفاده می‌کند — تا UI و enforcement هرگز واگرا نشوند.
+    const window = await resolveQuotaWindowFor(prisma, {
+        userId: input.userId,
+        now,
+        timezone: input.timezone,
+    })
+    const periodStart = window.periodStart
     const plan = normalizePlan(input.plan)
     const features: AiFeature[] = ["ANALYZE", "PLAN"]
     const views: QuotaBucketView[] = []
@@ -534,15 +621,18 @@ export async function readQuotaBuckets(
         const base = await readBucketOrRoot(prisma, input.userId, feature, "BASE", periodStart)
         const baseReserved = base?.reservedUnits ?? 0
         const baseConsumed = base?.consumedUnits ?? 0
+        // ظرفیت از snapshot دوره خوانده می‌شود؛ `null` یعنی ردیفِ پیش از مهاجرت
+        // (یا هنوز ساخته‌نشده) و آن‌وقت مقدار زندهٔ policy معتبر است.
+        const baseCapacity = base?.capacityUnits ?? allowedUnits
         views.push({
             feature,
             source: "BASE",
-            capacity: allowedUnits,
+            capacity: baseCapacity,
             reserved: baseReserved,
             consumed: baseConsumed,
-            // اگر ادمین سقف را وسط ماه پایین آورده باشد، remaining صفر می‌شود و
+            // اگر ادمین سقف را وسط دوره پایین آورده باشد، remaining صفر می‌شود و
             // شمارنده‌ها **دست‌نخورده** می‌مانند (هیچ negative/clamp دائمی نمی‌شود).
-            remaining: Math.max(0, allowedUnits - baseReserved - baseConsumed),
+            remaining: Math.max(0, baseCapacity - baseReserved - baseConsumed),
         })
     }
 

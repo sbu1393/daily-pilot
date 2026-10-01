@@ -120,6 +120,9 @@ model User {
   reminderEnabled Boolean @default(false) // آیا یادآور فعال است؟
   reminderTime    String  @default("09:00") // "HH:MM" به وقت محلی کاربر
   reminderSentOn  String? // dayKey محلیِ آخرین ارسال موفق (ضد ارسال تکراری)
+  /// لنگر دورهٔ سهمیه — پایهٔ محاسبهٔ همهٔ دوره‌های ۳۰ روزهٔ این کاربر.
+  /// NULL یعنی هنوز backfill نشده ⇒ رفتار قدیمی (اول ماه تقویمی) حفظ می‌شود.
+  quotaAnchorAt   DateTime?
   // رمز عبور موقت — کاربر با رمز موقت لاگین کرده ولی هنوز رمز دائمی تعیین نکرده.
   // DB تنها منبع حقیقت است؛ JWT می‌تواند آن را حمل کند ولی مرجع نیست.
   mustChangePassword Boolean @default(false)
@@ -337,8 +340,12 @@ model AiQuotaBucket {
   feature       AiFeature
   source        AiQuotaSource
   periodType    AiUsagePeriodType @default(MONTHLY)
-  /// شروع دوره‌ی محلی کاربر (00:00 در timezone کاربر، به شکل instant پایدار UTC)
+  /// شروع دوره‌ی سهمیه — برای اشتراکی‌ها لنگرِ چرخهٔ خرید + k×۳۰ روز، برای رایگان
+  /// لنگر کاربر + k×۳۰ روز (و برای ردیف‌های قدیمی، اول ماه تقویمی)
   periodStart   DateTime
+  /// snapshot ظرفیت BASE در لحظهٔ ایجاد دوره (NULL = ردیفِ پیش از این مهاجرت).
+  /// تغییر بعدیِ `AiQuotaPolicy` دیگر سقف دوره‌های گذشته را عوض نمی‌کند.
+  capacityUnits Int?
   /// PROMO: مجموع bonus ریدیمپشن‌های همان دوره (غیر-null)
   /// BASE:  null — سقف از AiQuotaPolicy زنده خوانده می‌شود
   grantedUnits  Int?

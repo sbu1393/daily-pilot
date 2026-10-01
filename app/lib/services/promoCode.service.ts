@@ -21,7 +21,7 @@
 import type { PromoCode } from "@prisma/client"
 
 import { writeAdminAuditLog } from "./adminAudit.service"
-import { getMonthlyPeriod } from "./planPolicy.service"
+import { resolveQuotaWindowFor } from "./quotaWindow"
 import { QuotaUnavailableError, ServiceError } from "./errors"
 import { normalizePromoCode } from "@/app/schema/aiQuotaSchema"
 import type { PrismaClientLike } from "./aiUsage.service"
@@ -444,7 +444,15 @@ export async function redeemPromoCode(
         throw new QuotaUnavailableError()
     }
 
-    const periodStart = getMonthlyPeriod(now, input.timezone).periodStart
+    // بونوس به **دورهٔ جاری کاربر** تعلق می‌گیرد (لنگر اشتراک/کاربر)، نه اولِ ماه تقویمی؛
+    // پس در پایان همان دوره منقضی می‌شود و طبق تصمیم محصول به دورهٔ بعد منتقل نمی‌شود.
+    const periodStart = (
+        await resolveQuotaWindowFor(prisma, {
+            userId: input.userId,
+            now,
+            timezone: input.timezone,
+        })
+    ).periodStart
     const maxRedemptions = promo.maxRedemptions
 
     // 4) transaction: CAS سقف + ساخت ریدیمپشن + grant اتمیک bucket

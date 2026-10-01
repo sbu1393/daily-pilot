@@ -32,7 +32,8 @@
 // تشخیصی است، در production ۴۰۴ می‌دهد و سهمیهٔ محصول مصرف نمی‌کند.
 
 import { AiProviderUnavailableError, QuotaUnavailableError } from "./errors"
-import { getMonthlyPeriod, resolvePlanPolicy } from "./planPolicy.service"
+import { resolvePlanPolicy } from "./planPolicy.service"
+import { resolveQuotaWindowFor } from "./quotaWindow"
 import { readCutoverAt, resolveQuotaMode, type QuotaMode } from "./aiQuotaCutover.service"
 import { assertQuotaUnitsAllowed, resolveQuotaFeature, type AiFeatureName } from "./quotaPolicy.service"
 import {
@@ -124,7 +125,13 @@ export async function runAiOperation<T>(
 
     // 2) تصمیم legacy/جدید برای همین کاربر و همین لحظه
     const cutoverAt = await readCutoverAt(prisma)
-    const periodStart = getMonthlyPeriod(now, timezone).periodStart
+    // پنجرهٔ دوره از لنگر اشتراک/کاربر می‌آید، نه از اول ماه تقویمی.
+    const window = await resolveQuotaWindowFor(prisma, {
+        userId: user.id,
+        now,
+        timezone,
+    })
+    const periodStart = window.periodStart
     const mode = resolveQuotaMode(periodStart, cutoverAt, timezone)
 
     // 3) reserve

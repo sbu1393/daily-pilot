@@ -270,7 +270,7 @@ export default function SubscriptionView({ user }: { user: { id: number } | null
                                     {faGrouped(quota.plan)} برنامه‌ریزی هوشمند
                                 </p>
                                 <p className={styles.quotaScope}>
-                                    در {faDigits(quota.months)} ماه
+                                    در {faDigits(quota.months)} دورهٔ ۳۰ روزه
                                 </p>
                                 {copy.note !== undefined && (
                                     <p className={styles.quotaNote}>{copy.note}</p>

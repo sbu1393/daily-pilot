@@ -224,7 +224,9 @@ describe("getAdminOverview — independent widgets (§12)", () => {
         expect(result.users).toEqual({ total: null, dau: 0, wau: 0, mau: 0 })
     })
 
-    it("aiQuota widget aggregates the current period — read-only aggregate only", async () => {
+    it("aiQuota widget aggregates a rolling 30-day window — read-only aggregate only", async () => {
+        // ویجت پلتفرمی است و کاربرِ مشخصی ندارد، پس لنگرِ فردی معنا ندارد: یک پنجرهٔ
+        // غلتان ۳۰روزه (طول هر دورهٔ سهمیه) گزارش می‌شود، نه اولِ ماه تقویمی.
         const aggregate = vi.fn().mockResolvedValue({
             _sum: { reservedUnits: 30, consumedUnits: 12 },
         })
@@ -235,13 +237,17 @@ describe("getAdminOverview — independent widgets (§12)", () => {
             prismaClient: { user: { count: vi.fn().mockResolvedValue(0) } },
         })
 
+        const windowStart = new Date(NOW.getTime() - 30 * 24 * 60 * 60 * 1000)
         expect(result.aiQuota).toEqual({
-            periodStart: "2026-09-01T00:00:00.000Z",
+            periodStart: windowStart.toISOString(),
             reservedUnits: 30,
             consumedUnits: 12,
         })
         const args = aggregate.mock.calls[0][0] as { where: Record<string, unknown> }
-        expect(args.where).toEqual({ periodType: "MONTHLY", periodStart: new Date("2026-09-01T00:00:00.000Z") })
+        expect(args.where).toEqual({
+            periodType: "MONTHLY",
+            periodStart: { gte: windowStart, lte: NOW },
+        })
     })
 
     it("aiQuota widget failure leaves only that widget unavailable (§12)", async () => {

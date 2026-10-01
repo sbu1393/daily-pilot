@@ -12,9 +12,10 @@
 //   شمارش attempt و backoff بین همهٔ قابلیت‌ها یکسان بماند.
 
 /** شناسهٔ پایدار هر سرویس‌دهنده — در لاگ و تست‌ها قابل تشخیص است. */
-export type ProviderId = "1xai" | "openrouter"
+
 
 export type ChatMessage = { role: string; content: string }
+export type ProviderId = "openrouter" | "1xai" | "cloudflare"
 
 /** خطایی که تلاش مجدد مجاز است (HTTP قابل‌تلاش، شبکه، timeout، محتوای خالی). */
 export class RetryableError extends Error {}

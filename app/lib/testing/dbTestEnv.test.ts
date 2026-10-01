@@ -118,7 +118,18 @@ describe("assertTestDatabase — throw روی پروداکشن", () => {
     })
 
     it("throws when no URL is provided at all", () => {
-        expect(() => assertTestDatabase(undefined)).toThrow(/DB_TEST_NOT_ALLOWED/)
+        // این تست نباید به محیطِ اجرا وابسته باشد. طبق قرارداد تابع، پاس‌دادنِ
+        // `undefined` یعنی «از process.env.DATABASE_URL بخوان» (پارامتر پیش‌فرض)،
+        // پس برای اثبات حالتِ «بدون URL» باید متغیر محیطیِ اطراف موقتاً حذف شود —
+        // وگرنه وقتی DATABASE_URL به یک دیتابیس تستِ معتبر اشاره کند، تست
+        // درست‌کارکردنِ تابع را اشتباهاً «failure» می‌بیند.
+        const original = process.env.DATABASE_URL
+        delete process.env.DATABASE_URL
+        try {
+            expect(() => assertTestDatabase(undefined)).toThrow(/DB_TEST_NOT_ALLOWED/)
+        } finally {
+            if (original !== undefined) process.env.DATABASE_URL = original
+        }
     })
 })
 

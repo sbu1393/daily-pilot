@@ -8,6 +8,15 @@
 
 import { api, ApiClientError } from "@/app/lib/api/client"
 import type {
+    StaffTicketUpdateInput,
+    TicketDetailView,
+    TicketMessagePageView,
+    TicketMessageView,
+    TicketPage,
+    TicketView,
+    TicketWithMessagesView,
+} from "@/app/lib/tickets/ticketTypes"
+import type {
     AdminActivityPage,
     AdminAiUsagePage,
     AdminAuditLogsPage,
@@ -158,4 +167,57 @@ export async function fetchAdminAuditLogs(
     signal?: AbortSignal,
 ): Promise<AdminAuditLogsPage> {
     return api<AdminAuditLogsPage>(`/api/admin/audit-log?${query}`, { signal })
+}
+
+// ---------- Ticketing (T5): /admin/tickets ----------
+//
+// همه‌چیز از مسیر `/api/admin/tickets/*` می‌آید — هرگز از مسیر کاربر با
+// `role=ADMIN` دستکاری‌شده. گارد نقش، سمت سرور و روی همین endpointهاست
+// (`requireAdmin`)؛ اینجا فقط transport است.
+
+function jsonBody(payload: unknown): RequestInit {
+    return {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    }
+}
+
+export async function fetchAdminTickets(query: string, signal?: AbortSignal): Promise<TicketPage> {
+    return api<TicketPage>(`/api/admin/tickets?${query}`, { signal })
+}
+
+/**
+ * `query` رشتهٔ `messagesPage`/`messagesLimit` است (همان الگوی `fetchAdminTickets`).
+ * پاسخ شامل `messagePage` است تا پنل بداند صفحهٔ بعدی وجود دارد یا نه (R1).
+ */
+export async function fetchAdminTicket(
+    id: string,
+    query = "",
+    signal?: AbortSignal,
+): Promise<TicketDetailView> {
+    const suffix = query ? `?${query}` : ""
+    const data = await api<{ ticket: TicketWithMessagesView; messagePage: TicketMessagePageView }>(
+        `/api/admin/tickets/${encodeURIComponent(id)}${suffix}`,
+        { signal },
+    )
+    return { ticket: data.ticket, messagePage: data.messagePage }
+}
+
+export async function updateAdminTicket(
+    id: string,
+    input: StaffTicketUpdateInput,
+): Promise<TicketView> {
+    const data = await api<{ ticket: TicketView }>(
+        `/api/admin/tickets/${encodeURIComponent(id)}`,
+        { method: "PATCH", ...jsonBody(input) },
+    )
+    return data.ticket
+}
+
+export async function replyAdminTicket(id: string, body: string): Promise<TicketMessageView> {
+    const data = await api<{ message: TicketMessageView }>(
+        `/api/admin/tickets/${encodeURIComponent(id)}/messages`,
+        { method: "POST", ...jsonBody({ body }) },
+    )
+    return data.message
 }

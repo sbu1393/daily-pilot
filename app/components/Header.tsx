@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 // rebase: UI نسخه‌ی remote (lucide + logo.png) حفظ شد؛ importهای H2 پروژه باقی ماندند
 import { toast } from "react-toastify"
-import { CalendarDays, DoorOpen, Settings, Shield } from "lucide-react"
+import { CalendarDays, DoorOpen, LifeBuoy, Settings, Shield } from "lucide-react"
 import Avatar, { type AvatarUser } from "./Avatar"
 import { clearOfflineForLogout } from "@/app/lib/offline"
 import { faDigits } from "@/app/lib/time"
@@ -95,6 +95,13 @@ export default function Header({ user }: { user: AvatarUser | null }) {
 
                             {menuOpen && (
                                 <div className="header-menu" role="menu">
+                                    <Link
+                                        href="/support"
+                                        className="header-menu-item"
+                                        onClick={() => setMenuOpen(false)}
+                                    >
+                                        <LifeBuoy />پشتیبانی و تیکت‌ها
+                                    </Link>
                                     <Link
                                         href="/dashboard/settings"
                                         className="header-menu-item"

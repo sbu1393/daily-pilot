@@ -2,13 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
     fetchAdminErrors,
     fetchAdminOverview,
+    fetchAdminTicket,
+    fetchAdminTickets,
     fetchAdminUserAiUsage,
     fetchAdminUserActivity,
     fetchAdminUserDetail,
     fetchAdminUserErrors,
     fetchAdminUsers,
+    replyAdminTicket,
     toAdminRequestError,
     toAdminErrorMessage,
+    updateAdminTicket,
 } from "./adminClient"
 import { ApiClientError } from "@/app/lib/api/client"
 
@@ -107,6 +111,99 @@ describe("admin client — خطاها مطابق ADR-04", () => {
             code,
             message,
         })
+    })
+})
+
+// ---------- Ticketing (T5): صف و جزئیات تیکت ----------
+
+describe("admin client — /admin/tickets", () => {
+    const ticket = {
+        id: 5,
+        userId: 1,
+        subject: "خطا در ثبت تسک",
+        status: "OPEN",
+        priority: "MEDIUM",
+        category: null,
+        lastMessageAt: null,
+        closedAt: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+    }
+
+    it("fetchAdminTickets hits the ADMIN endpoint with the query", async () => {
+        const page = { items: [ticket], page: 1, limit: 20, total: 1, hasMore: false }
+        vi.mocked(fetch).mockReturnValue(ok(page) as never)
+
+        await expect(fetchAdminTickets("page=1&limit=20")).resolves.toEqual(page)
+        expect(vi.mocked(fetch)).toHaveBeenCalledWith("/api/admin/tickets?page=1&limit=20", expect.anything())
+    })
+
+    it("never falls back to the user endpoint (no role=ADMIN spoofing from the client)", async () => {
+        vi.mocked(fetch).mockReturnValue(ok({ items: [] }) as never)
+
+        await fetchAdminTickets("page=1")
+
+        expect(String(vi.mocked(fetch).mock.calls[0][0]).startsWith("/api/admin/tickets")).toBe(true)
+    })
+
+    it("fetchAdminTicket unwraps { ticket, messagePage }", async () => {
+        const messagePage = { page: 1, limit: 20, total: 0, hasMore: false }
+        vi.mocked(fetch).mockReturnValue(
+            ok({ ticket: { ...ticket, messages: [] }, messagePage }) as never,
+        )
+
+        const result = await fetchAdminTicket("5")
+
+        expect(result.ticket.messages).toEqual([])
+        expect(result.messagePage).toEqual(messagePage)
+        expect(vi.mocked(fetch)).toHaveBeenCalledWith("/api/admin/tickets/5", expect.anything())
+    })
+
+    it("fetchAdminTicket appends the message-page query and never leaves the admin path", async () => {
+        vi.mocked(fetch).mockReturnValue(
+            ok({ ticket: { ...ticket, messages: [] }, messagePage: { page: 3, limit: 20, total: 55, hasMore: false } }) as never,
+        )
+
+        const result = await fetchAdminTicket("5", "messagesPage=3&messagesLimit=20")
+
+        expect(String(vi.mocked(fetch).mock.calls[0][0])).toBe(
+            "/api/admin/tickets/5?messagesPage=3&messagesLimit=20",
+        )
+        expect(result.messagePage.page).toBe(3)
+    })
+
+    it("updateAdminTicket sends a PATCH with exactly the staff payload", async () => {
+        vi.mocked(fetch).mockReturnValue(ok({ ticket }) as never)
+
+        await updateAdminTicket("5", { status: "CLOSED", priority: "URGENT" })
+
+        const [url, init] = vi.mocked(fetch).mock.calls[0] as unknown as [string, RequestInit]
+        expect(url).toBe("/api/admin/tickets/5")
+        expect(init.method).toBe("PATCH")
+        expect(JSON.parse(String(init.body))).toEqual({ status: "CLOSED", priority: "URGENT" })
+    })
+
+    it("replyAdminTicket POSTs only the body to the messages endpoint", async () => {
+        const message = { id: "m1", ticketId: 5, authorUserId: 1, body: "بررسی شد", isStaff: true, createdAt: "2026-01-01T00:00:00.000Z" }
+        vi.mocked(fetch).mockReturnValue(ok({ message }) as never)
+
+        await expect(replyAdminTicket("5", "بررسی شد")).resolves.toEqual(message)
+        const [url, init] = vi.mocked(fetch).mock.calls[0] as unknown as [string, RequestInit]
+        expect(url).toBe("/api/admin/tickets/5/messages")
+        expect(JSON.parse(String(init.body))).toEqual({ body: "بررسی شد" })
+    })
+
+    it.each([
+        [401, "UNAUTHORIZED"],
+        [403, "ADMIN_FORBIDDEN"],
+        [404, "TICKET_NOT_FOUND"],
+        [409, "TICKET_INVALID_TRANSITION"],
+        [409, "TICKET_CLOSED"],
+        [409, "TICKET_CONFLICT"],
+    ])("maps HTTP %i %s from the ticket endpoints", async (status, code) => {
+        vi.mocked(fetch).mockReturnValue(fail(status, code, "پیام") as never)
+
+        await expect(fetchAdminTickets("page=1")).rejects.toMatchObject({ status, code })
     })
 })
 

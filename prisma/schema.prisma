@@ -91,6 +91,23 @@ enum EntitlementStatus {
   EXPIRED
 }
 
+// ─── Ticketing — فاز T1 (schema only) ────────────────────────────────────────
+
+/// چرخهٔ حیات تیکت. `PENDING` = «در انتظار پاسخ کاربر» پس از پاسخ کارکنان.
+enum TicketStatus {
+  OPEN
+  PENDING
+  CLOSED
+}
+
+/// اولویت تیکت — مقادیر مطابق واژگان رایج پشتیبانی.
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
 model User {
   id            Int            @id @default(autoincrement())
   username      String         @unique
@@ -130,6 +147,8 @@ model User {
   aiQuotaBuckets   AiQuotaBucket[] // AI Quota v2 — ledger مصرف BASE/PROMO (بدون تغییر رفتار)
   promoRedemptions PromoRedemption[] // AI Quota v2 — ریدیمپشن‌های کد هدیه (هر کد یک‌بار)
   passwordResetTokens PasswordResetToken[] // رمز عبور موقت — lifecycle جدا از User.password
+  tickets          Ticket[] // Ticketing — تیکت‌هایی که این کاربر (مالک) ساخته است
+  ticketMessages   TicketMessage[] // Ticketing — پیام‌هایی که این کاربر نوشته است (author)
 }
 
 /// رمز عبور موقت — عمداً جدول جدا و NOT روی User.password.
@@ -519,4 +538,65 @@ model OtpCode {
   createdAt DateTime @default(now())
 
   @@index([email])
+}
+
+// ─── Ticketing — فاز T1 (schema only) ────────────────────────────────────────
+//
+// دامنهٔ MVP تیکتینگ عمداً کوچک نگه داشته شده است:
+// - دسترسی کارکنان فقط با نقش `ADMIN` (بدون `SUPPORT`/RBAC جدید).
+// - بدون attachment (هیچ زیرساخت ذخیره‌سازی فایل وجود ندارد).
+// - بدون `TicketCategory` (دسته دقیقاً مثل `Task.category` یک رشتهٔ validated است).
+// - بدون `assignedToUserId` (assignment در MVP وجود ندارد).
+// - بدون `TicketAuditLog` (در فازهای بعدی می‌توان از `AdminAuditLog` استفاده کرد).
+// - بدون هیچ تغییر در Web Push / FCM / device-token.
+
+/// تیکت پشتیبانی — موجودیت ریشهٔ دامنه.
+///
+/// تصمیم‌ها:
+/// - `id` از نوع `Int @default(autoincrement())` (هم‌راستا با `Task` به‌عنوان
+///   موجودیت دامنه‌ای متعلق به کاربر).
+/// - `category` یک رشتهٔ nullable است (هم‌راستا با `Task.category`)؛ اعتبارسنجی
+///   واژگان آن در لایهٔ schema/API فاز T2 انجام می‌شود، نه با جدول.
+/// - هیچ unique constraint غیرضروری اضافه نشده است.
+model Ticket {
+  id            Int            @id @default(autoincrement())
+  userId        Int
+  subject       String
+  status        TicketStatus   @default(OPEN)
+  priority      TicketPriority @default(MEDIUM)
+  category      String?
+  /// آخرین پیام ثبت‌شده روی تیکت — مبنای مرتب‌سازی صف/لیست بدون join به پیام‌ها.
+  lastMessageAt DateTime?
+  closedAt      DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages TicketMessage[]
+
+  /// access pattern کاربر: «تیکت‌های من، جدیدترین اول» (§گزارش ممیزی).
+  @@index([userId, createdAt])
+  /// access pattern صف ادمین: «تیکت‌های یک وضعیت، تازه‌به‌روزشده‌ها اول».
+  @@index([status, updatedAt])
+}
+
+/// پیام روی تیکت — دقیقاً همان الگوی `TaskEvent` روی والد (cuid + index ترکیبی).
+///
+/// - `authorUserId` نویسندهٔ پیام است؛ `isStaff` در لحظهٔ نوشتن snapshot می‌شود تا
+///   تغییر بعدیِ نقشِ نویسنده معنای پیام تاریخی را عوض نکند.
+/// - رابطهٔ `author` فقط برای برآورده‌کردن back-reference اجباری Prisma روی
+///   `User.ticketMessages` است؛ حذف کاربر، پیام‌های نوشتهٔ او را هم می‌برد.
+/// - حذف تیکت، همهٔ پیام‌های آن را cascade می‌کند.
+model TicketMessage {
+  id           String   @id @default(cuid())
+  ticketId     Int
+  authorUserId Int
+  body         String
+  isStaff      Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author User   @relation(fields: [authorUserId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
 }

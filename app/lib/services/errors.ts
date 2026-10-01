@@ -404,3 +404,59 @@ export class PaymentStateUnresolvedError extends ServiceError {
         super(503, "PAYMENT_STATE_UNRESOLVED", "وضعیت پرداخت قابل تعیین نیست؛ برای پیگیری با پشتیبانی تماس بگیر", undefined, "EXTERNAL_SERVICE", "ERROR")
     }
 }
+
+// ---------- Ticketing — فاز T3 ----------
+// فقط خطاهای دامنه‌ایِ لازم. نکتهٔ امنیتیِ عمدی:
+//
+//   `TicketNotFoundError` **عمداً** برای «تیکت وجود ندارد» و «تیکتِ کاربرِ دیگر»
+//   یکسان است. سرویس (`ticket.service.ts`) مالکیت را با `findFirst({id, userId})`
+//   در همان query اعمال می‌کند، پس پاسخِ «۴۰۳ برای تیکتِ دیگران» — که وجود رکورد را
+//   افشا می‌کند — هرگز تولید نمی‌شود. خطای ۴۰۳ فقط جایی است که خودِ actor احراز
+//   شده ولی **عملیات** برای نقشِ او مجاز نیست (مثلاً کاربر عادی که می‌خواهد
+//   `status` را عوض کند) و در آنجا افشای اطلاعاتی در کار نیست.
+
+/** 404 — تیکت وجود ندارد **یا** متعلق به این کاربر نیست (پاسخ یکسان برای هر دو). */
+export class TicketNotFoundError extends ServiceError {
+    constructor() {
+        super(404, "TICKET_NOT_FOUND", "تیکت پیدا نشد")
+    }
+}
+
+/** 403 — عملیات برای نقشِ این actor مجاز نیست (کاربر عادی درخواست staff-only داده). */
+export class TicketForbiddenError extends ServiceError {
+    constructor() {
+        super(403, "TICKET_FORBIDDEN", "اجازهٔ این عملیات روی تیکت را ندارید", undefined, "BUSINESS_RULE", "INFO")
+    }
+}
+
+/** 409 — گذارِ وضعیتِ درخواستی مجاز نیست (مثلاً CLOSED → OPEN). */
+export class TicketInvalidTransitionError extends ServiceError {
+    constructor() {
+        super(409, "TICKET_INVALID_TRANSITION", "این تغییر وضعیتِ تیکت مجاز نیست", undefined, "CONFLICT", "WARNING")
+    }
+}
+
+/** 409 — تیکت بسته شده و عملیاتِ نوشتن روی آن ممکن نیست. */
+export class TicketClosedError extends ServiceError {
+    constructor() {
+        super(409, "TICKET_CLOSED", "این تیکت بسته شده است", undefined, "CONFLICT", "INFO")
+    }
+}
+
+/**
+ * 409 — شرطِ compare-and-set در `updateMany` صفر ردیف برگرداند؛ یعنی بین خواندنِ
+ * تیکت و نوشتن، وضعیت آن توسط درخواستِ دیگری عوض شده (race). هیچ نوشتنیِ ناقصی
+ * انجام نمی‌شود و route باید درخواست را تکرار کند.
+ */
+export class TicketConflictError extends ServiceError {
+    constructor() {
+        super(409, "TICKET_CONFLICT", "وضعیت تیکت هم‌زمان تغییر کرده است؛ دوباره تلاش کن", undefined, "CONFLICT", "WARNING")
+    }
+}
+
+/** 400 — patch خالی (هیچ فیلد مجازی ارسال نشده). پیام از لایهٔ schema (T2) بازاستفاده می‌شود. */
+export class TicketNoChangesError extends ServiceError {
+    constructor(message: string) {
+        super(400, "VALIDATION_ERROR", message, undefined, "VALIDATION", "INFO")
+    }
+}

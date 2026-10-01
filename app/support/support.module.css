@@ -1,0 +1,289 @@
+/* T5 — استایل‌های ماژولار صفحات پشتیبانی (کاربر)
+   فقط از CSS variableهای موجود globals.css استفاده می‌شود؛ هیچ token/theme
+   جدیدی ساخته نمی‌شود. کلاس‌های سراسری dp-* (globals.css) باقی می‌مانند و این
+   ماژول فقط چیدمان اختصاصی تیکت را می‌چیند — همان رویکرد admin.module.css. */
+
+.page {
+    display: grid;
+    gap: 18px;
+}
+
+.pageHead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+}
+
+.pageTitle {
+    margin: 0;
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: var(--ink);
+}
+
+.pageSub {
+    margin: 2px 0 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+.headSpacer {
+    flex: 1;
+}
+
+.backLink {
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.backLink:hover {
+    color: var(--primary-dark);
+}
+
+/* ---------- کارت‌ها و لیست ---------- */
+
+.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 16px;
+    box-shadow: 0 8px 24px rgba(var(--ink-rgb), 0.05);
+}
+
+.cardList {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 10px;
+}
+
+.ticketLink {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--surface-solid);
+    padding: 14px 16px;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.ticketLink:hover {
+    border-color: var(--primary);
+    transform: translateY(-1px);
+}
+
+.ticketLink:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+.ticketTop {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    justify-content: space-between;
+}
+
+.ticketSubject {
+    font-weight: 700;
+    color: var(--ink);
+    font-size: 0.98rem;
+}
+
+.ticketMeta {
+    color: var(--muted);
+    font-size: 0.76rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+/* ---------- chip ها ---------- */
+
+.chipRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    border: 1px solid var(--border);
+    background: var(--chip-bg);
+    color: var(--ink-2);
+    white-space: nowrap;
+}
+
+.chipOpen {
+    background: var(--primary-soft);
+    border-color: var(--primary);
+    color: var(--primary-dark);
+}
+
+.chipPending {
+    background: var(--warning-bg);
+    border-color: var(--amber);
+    color: var(--warning);
+}
+
+.chipClosed {
+    background: var(--chip-bg);
+    border-color: var(--border);
+    color: var(--muted);
+}
+
+.chipUrgent {
+    background: var(--danger-bg-strong);
+    border-color: var(--danger-strong);
+    color: var(--danger-strong);
+}
+
+/* ---------- گفتگو ---------- */
+
+.thread {
+    display: grid;
+    gap: 10px;
+}
+
+.bubble {
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 12px 14px;
+    background: var(--surface-solid);
+    max-width: 78%;
+}
+
+.bubbleStaff {
+    background: var(--primary-soft);
+    border-color: var(--primary);
+    margin-inline-start: auto;
+}
+
+.bubbleUser {
+    background: var(--surface-solid);
+    margin-inline-end: auto;
+}
+
+.bubbleHead {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.72rem;
+    color: var(--muted);
+    margin-bottom: 4px;
+}
+
+.bubbleBody {
+    margin: 0;
+    color: var(--ink);
+    font-size: 0.92rem;
+    line-height: 1.8;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.composer {
+    display: grid;
+    gap: 8px;
+}
+
+.composer textarea {
+    min-height: 96px;
+    resize: vertical;
+    font-family: inherit;
+}
+
+.closedNotice {
+    border: 1px dashed var(--border);
+    border-radius: 14px;
+    padding: 14px;
+    color: var(--muted);
+    font-size: 0.84rem;
+    text-align: center;
+}
+
+/* ---------- فرم ---------- */
+
+.formGrid {
+    display: grid;
+    gap: 14px;
+}
+
+.counter {
+    color: var(--muted);
+    font-size: 0.74rem;
+    align-self: flex-start;
+}
+
+.hint {
+    color: var(--muted);
+    font-size: 0.78rem;
+    margin: 0;
+}
+
+/* ---------- حالت‌ها: loading / empty / error ---------- */
+
+.stateBox {
+    border: 1.5px dashed var(--border);
+    border-radius: 16px;
+    padding: 26px 18px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+    display: grid;
+    gap: 10px;
+    justify-items: center;
+}
+
+.stateBoxError {
+    border-color: var(--danger);
+    color: var(--danger-strong);
+    background: var(--danger-bg);
+}
+
+.stateTitle {
+    font-weight: 700;
+    color: inherit;
+}
+
+.alert {
+    border-radius: 14px;
+    padding: 12px 14px;
+    font-size: 0.84rem;
+    border: 1px solid var(--danger);
+    background: var(--danger-bg);
+    color: var(--danger-strong);
+}
+
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.pageInfo {
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+
+@media (max-width: 640px) {
+    .bubble {
+        max-width: 100%;
+    }
+}

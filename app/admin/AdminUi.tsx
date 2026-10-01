@@ -16,6 +16,7 @@ import type { AdminAccessStatus } from "@/app/lib/admin/adminViewModels"
 const NAV_TABS = [
     { href: "/admin", label: "نمای کلی" },
     { href: "/admin/users", label: "کاربران" },
+    { href: "/admin/tickets", label: "تیکت‌ها" },
     { href: "/admin/quota", label: "سهمیه AI" },
     { href: "/admin/promo-codes", label: "کدهای هدیه" },
     { href: "/admin/audit", label: "گزارش فعالیت" },

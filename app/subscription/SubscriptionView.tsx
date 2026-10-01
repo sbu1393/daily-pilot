@@ -1,78 +1,65 @@
 "use client"
 
-// صفحه اشتراک — سه محصول اشتراکی، همه از کاتالوگ سروری.
+// صفحه اشتراک — یک کارت رایگان + سه محصول اشتراکی، همه از کاتالوگ سروری.
 //
-// نکته‌ی اصلی: هیچ عددی (قیمت پایه، تخفیف، قیمت نهایی، مدت) در این فایل hard-code نشده —
-// همه از `BILLING_PRODUCTS` در `app/lib/billing/products.ts` می‌آیند، همان ماژولی که سرور
-// مبلغ و مدت را از آن snapshot می‌کند. پس آنچه کاربر می‌بیند و آنچه درگاه می‌گیرد از یک منبع.
+// نکته‌ی اصلی: هیچ عددِ **قیمت/مدت/تخفیف** در این فایل hard-code نشده — همه از
+// `BILLING_PRODUCTS` در `app/lib/billing/products.ts` می‌آیند، همان ماژولی که سرور مبلغ
+// و مدت را از آن snapshot می‌کند. تنها اعداد نمایشیِ دیگر (سهمیه‌ی هوشمند و هزینه‌ی هر
+// روز) از `planCopy.ts` می‌آید که خودشان از سیاست سهمیه مشتق می‌شوند.
 //
-// واحد: کاتالوگ ریال (IRR) است؛ فقط برای نمایش به تومان تبدیل می‌شود (`tomanFromRial`) که
-// یک تبدیل نمایشی است و هیچ نقشی در مبلغ پرداختی ندارد.
+// واحد: کاتالوگ ریال (IRR) است؛ فقط برای نمایش به تومان تبدیل می‌شود (`tomanFromRial`)
+// که یک تبدیل نمایشی است و هیچ نقشی در مبلغ پرداختی ندارد.
 //
-// خرید: `POST /api/billing/checkout` با بدنه‌ی `{ productCode }` و یک هدر `Idempotency-Key`
-// تازه برای هر تلاش (کلید شامل کد محصول است تا replay با محصول دیگر اشتباه نشود). بعد از
-// موفقیت، کاربر به `redirectUrl` درگاه هدایت می‌شود.
+// سلسله‌مراتب بصری هر کارت (برای مقایسه‌ی سریع): نام پلن → قیمت → تخفیف و صرفه‌جویی
+// → مدت → مزایا → سهمیه‌ی هوشمند → دکمهٔ خرید.
 //
-// بخش کد هدیه (PromoRedeemBox) دست‌نخورده باقی مانده است.
+// خرید: `POST /api/billing/checkout` با بدنه‌ی `{ productCode }` و یک هدر
+// `Idempotency-Key` تازه برای هر تلاش. بعد از موفقیت، کاربر به `redirectUrl` درگاه
+// هدایت می‌شود.
+//
+// بخش کد هدیه (PromoRedeemBox) دست‌-نخورده باقی مانده است.
 
 import { useState } from "react"
 import Link from "next/link"
-import { ArrowRight, Check, Crown, Loader2, Sparkles } from "lucide-react"
+import {
+    ArrowRight,
+    BrainCircuit,
+    CalendarCheck,
+    Check,
+    Crown,
+    Headphones,
+    Infinity as InfinityIcon,
+    ListTodo,
+    Loader2,
+    Sparkles,
+    Star,
+} from "lucide-react"
 
 import { api, ApiClientError } from "@/app/lib/api/client"
 import { BILLING_PRODUCTS, tomanFromRial, type ProductCode } from "@/app/lib/billing/products"
 import { faDigits } from "@/app/lib/time"
 import PromoRedeemBox from "./PromoRedeemBox"
+import {
+    FREE_PLAN,
+    PLAN_COPY,
+    faGrouped,
+    perDayToman,
+    smartQuotaFor,
+    type FeatureIcon,
+} from "./planCopy"
 import styles from "./subscription.module.css"
 
-interface ProductCopy {
-    title: string
-    features: string[]
+/** آیکون مینیمال هر بولت — فقط برای اسکن سریع‌تر کارت، نه تزئین. */
+const FEATURE_ICONS: Record<FeatureIcon, typeof Check> = {
+    unlimited: InfinityIcon,
+    analyze: BrainCircuit,
+    plan: CalendarCheck,
+    support: Headphones,
+    tasks: ListTodo,
+    basic: Check,
 }
 
-/**
- * متن و ویژگی‌های نمایشی هر محصول. عمداً فقط «متن» است: هر عددی (قیمت/تخفیف/مدت) از
- * کاتالوگ می‌آید تا UI و بیلینگ هرگز دو نسخه‌ی متفاوت از حقیقت نداشته باشند.
- *
- * عمداً هیچ محصولی «پیشنهادی/برنده» برجسته نمی‌شود (نه badge و نه استایل ویژه): تصمیم
- * تجاریِ برجسته‌کردن یک گزینه باید آگاهانه و جدا از منطق قیمت باشد.
- */
-const COPY: Record<ProductCode, ProductCopy> = {
-    PRO_1M: {
-        title: "اشتراک ماهانه",
-        features: [
-            "کارهای نامحدود روزانه",
-            "برنامه‌ریزی هوشمند پیشرفته",
-            "تحلیل و اولویت‌بندی AI",
-            "پشتیبانی اولویت‌دار",
-        ],
-    },
-    PRO_2M: {
-        title: "اشتراک دوماهه",
-        features: [
-            "تمام امکانات اشتراک ماهانه",
-            "پشتیبانی اولویت‌دار",
-            "بهره‌ی کامل از دوره‌ی دوم",
-        ],
-    },
-    PRO_3M: {
-        title: "اشتراک سه‌ماهه",
-        features: [
-            "تمام امکانات اشتراک ماهانه",
-            "بیشترین مدت با همان تخفیف",
-            "پشتیبانی اولویت‌دار",
-        ],
-    },
-}
-
-const FREE_PLAN = {
-    title: "رایگان",
-    price: "۰",
-    period: "همیشه",
-    features: ["تا ۱۰ کار روزانه", "برنامه‌ریزی هوشمند پایه", "تقویم شمسی"],
-}
-
-/** پاسخ checkout — فقط همان چیزهایی که route مجاز به برگرداندن است. */
+/** پاسخ checkout — فقط همان چیزهایی را که route مجاز به برگرداندن است. */
 interface CheckoutResult {
     orderId: string
     status: string
@@ -94,7 +81,7 @@ export default function SubscriptionView({ user }: { user: { id: number } | null
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    // کلید تازه در هر تلاش؛ کد محصول داخل کلید هست تا اگر کاربر محصول عوض
+                    // کلید تازه در هر تلاش؛ کد محصول داخل کلید است تا اگر کاربر محصول عوض
                     // کرد، هرگز به سفارش محصول قبلی برنخورد.
                     "Idempotency-Key": `checkout-${productCode}-${crypto.randomUUID()}`,
                 },
@@ -122,12 +109,10 @@ export default function SubscriptionView({ user }: { user: { id: number } | null
     return (
         <div className={styles.page}>
             <header className={styles.head}>
-                {/* مسیر برگشت — این صفحه `layout.tsx` ندارد، پس نه `Header` و نه
+                {/* مسیر برگشت — این صفحه `layout.tsx` ندارد، پس نه `Header` نه
                     `AppShell` روی آن رندر نمی‌شود و بدون این دکمه تنها راه خروج،
-                    لینکِ «پلن فعلی» داخل کارت پلن است که برچسبش ناوبری را توصیف
-                    نمی‌کند. مقصد عمداً ثابت است (`/dashboard`): کاربر از داشبورد،
-                    نوار سهمیه یا مودال سهمیه می‌آید، و صفحه ممکن است مستقیم در PWA
-                    هم باز شود — پس به حدس‌زدن از `history` نیازی نیست. */}
+                    لینکِ پلن فعلی داخل کارت رایگان است که برچسبش ناوبری را توصیف
+                    نمی‌کند. مقصد عمداً ثابت است (`/dashboard`). */}
                 <div className={styles.backLink}>
                     <Link href="/dashboard" className="dp-btn dp-btn-ghost">
                         <ArrowRight size={16} aria-hidden="true" />
@@ -149,79 +134,144 @@ export default function SubscriptionView({ user }: { user: { id: number } | null
             <PromoRedeemBox user={user} />
 
             <div className={styles.grid}>
-                {/* پلن رایگان — محصول قابل خرید نیست و از کاتالوگ نمی‌آید (قیمت همیشه صفر). */}
-                <section className={styles.card}>
-                    <h2 className={styles.cardTitle}>{FREE_PLAN.title}</h2>
+                {/* پلن رایگان — محصول قابل خرید نیست و از کاتالوگ نمی‌آید. عمداً
+                    آرام‌تر از کارت‌های اشتراکی است تا تفاوت «رایگان / پولی» فوری دیده شود. */}
+                <section className={styles.cardFree}>
+                    <div className={styles.cardHead}>
+                        <h2 className={styles.cardTitle}>{FREE_PLAN.title}</h2>
+                        <p className={styles.cardSubtitle}>{FREE_PLAN.subtitle}</p>
+                    </div>
 
                     <div className={styles.priceRow}>
-                        <span className={styles.priceValue}>{FREE_PLAN.price}</span>
+                        <span className={styles.priceValue}>
+                            {FREE_PLAN.price}
+                            <span className={styles.priceUnit}> تومان</span>
+                        </span>
                         <span className={styles.pricePeriod}>{FREE_PLAN.period}</span>
                     </div>
 
                     <ul className={styles.features}>
-                        {FREE_PLAN.features.map((feature) => (
-                            <li key={feature} className={styles.feature}>
-                                <Check size={16} className={styles.check} aria-hidden="true" />
-                                <span>{feature}</span>
-                            </li>
-                        ))}
+                        {FREE_PLAN.features.map((feature) => {
+                            const Icon = FEATURE_ICONS[feature.icon]
+                            return (
+                                <li key={feature.label} className={styles.feature}>
+                                    <Icon
+                                        size={16}
+                                        className={styles.featureIcon}
+                                        aria-hidden="true"
+                                    />
+                                    <span>{feature.label}</span>
+                                </li>
+                            )
+                        })}
                     </ul>
 
                     <div className={styles.cta}>
                         <Link href="/dashboard" className="dp-btn dp-btn-ghost dp-btn-block">
-                            پلن فعلی
+                            {FREE_PLAN.cta}
                         </Link>
                     </div>
                 </section>
 
                 {/* سه محصول اشتراکی — همه‌ی اعداد از کاتالوگ، بدون hard-code */}
                 {BILLING_PRODUCTS.map((product) => {
-                    const copy = COPY[product.code]
+                    const copy = PLAN_COPY[product.code]
+                    const quota = smartQuotaFor(product.entitlementDays)
+                    const amountToman = tomanFromRial(product.amount)
+                    const saving = product.baseAmount - product.amount
+                    const perDay = perDayToman(amountToman, product.entitlementDays)
                     const busy = pending === product.code
                     const blocked = pending !== null && !busy
-                    const saving = product.baseAmount - product.amount
+                    const periodLabel =
+                        quota.months > 1 ? `${faDigits(quota.months)} ماه` : "ماهانه"
 
                     return (
-                        <section key={product.code} className={styles.card}>
-                            <h2 className={styles.cardTitle}>{copy.title}</h2>
-
-                            <div className={styles.priceRow}>
-                                <span className={styles.priceValue}>
-                                    {faDigits(tomanFromRial(product.amount))}
-                                    <span className={styles.priceUnit}> تومان</span>
+                        <section
+                            key={product.code}
+                            className={
+                                copy.featured === true
+                                    ? styles.cardFeatured
+                                    : styles.card
+                            }
+                        >
+                            {copy.featured === true && (
+                                <span className={styles.badge}>
+                                    <Star size={13} aria-hidden="true" />
+                                    پیشنهاد ویژه
                                 </span>
+                            )}
+
+                            <div className={styles.cardHead}>
+                                <h2 className={styles.cardTitle}>{copy.title}</h2>
+                                {copy.featured === true && (
+                                    <p className={styles.cardSubtitle}>
+                                        کمترین هزینه به ازای هر روز
+                                    </p>
+                                )}
                             </div>
 
-                            {/* قیمت پایه (خط‌خورده) + درصد تخفیف — فقط نمایشی؛
-                                مبلغ قابل پرداخت همان `product.amount` است. */}
+                            {/* قیمت فعلی — بزرگ‌ترین عنصر قیمتی کارت */}
+                            <div className={styles.priceRow}>
+                                <span className={styles.priceValue}>
+                                    {faGrouped(amountToman)}
+                                    <span className={styles.priceUnit}> تومان</span>
+                                </span>
+                                <span className={styles.pricePeriod}>{periodLabel}</span>
+                            </div>
+
+                            {/* تخفیف و صرفه‌جویی — کنار قیمت اصلیِ خط‌خورده */}
                             <p className={styles.priceMeta}>
                                 <span className={styles.priceBase}>
-                                    {faDigits(tomanFromRial(product.baseAmount))} تومان
+                                    {faGrouped(tomanFromRial(product.baseAmount))} تومان
                                 </span>
                                 <span className={styles.discountBadge}>
                                     {faDigits(product.discountPercent)}٪ تخفیف
                                 </span>
-                                <span className={styles.priceSaving}>
-                                    سود شما {faDigits(tomanFromRial(saving))} تومان
-                                </span>
+                            </p>
+                            <p className={styles.priceSaving}>
+                                {faGrouped(tomanFromRial(saving))} تومان سود شما
                             </p>
 
-                            <p className={styles.pricePeriod}>
+                            <p className={styles.durationRow}>
+                                <CalendarCheck
+                                    size={15}
+                                    className={styles.durationIcon}
+                                    aria-hidden="true"
+                                />
                                 مدت اشتراک: {faDigits(product.entitlementDays)} روز
+                                {perDay > 0 && ` · روزی ${faGrouped(perDay)} تومان`}
                             </p>
 
                             <ul className={styles.features}>
-                                {copy.features.map((feature) => (
-                                    <li key={feature} className={styles.feature}>
-                                        <Check
-                                            size={16}
-                                            className={styles.check}
-                                            aria-hidden="true"
-                                        />
-                                        <span>{feature}</span>
-                                    </li>
-                                ))}
+                                {copy.features.map((feature) => {
+                                    const Icon = FEATURE_ICONS[feature.icon]
+                                    return (
+                                        <li key={feature.label} className={styles.feature}>
+                                            <Icon
+                                                size={16}
+                                                className={styles.featureIcon}
+                                                aria-hidden="true"
+                                            />
+                                            <span>{feature.label}</span>
+                                        </li>
+                                    )
+                                })}
                             </ul>
+
+                            {/* سهمیه‌ی هوشمند — مهم‌ترین تفاوت عددی بین پلن‌ها */}
+                            <div className={styles.quotaBox}>
+                                <p className={styles.quotaValue}>
+                                    {faGrouped(quota.analyze)} تحلیل هوشمند
+                                    <span className={styles.quotaPlus}> + </span>
+                                    {faGrouped(quota.plan)} برنامه‌ریزی هوشمند
+                                </p>
+                                <p className={styles.quotaScope}>
+                                    در {faDigits(quota.months)} ماه
+                                </p>
+                                {copy.note !== undefined && (
+                                    <p className={styles.quotaNote}>{copy.note}</p>
+                                )}
+                            </div>
 
                             <div className={styles.cta}>
                                 {/* مهمان: `/subscription` عمومی می‌ماند، پس به‌جای دکمه‌ی
@@ -253,7 +303,7 @@ export default function SubscriptionView({ user }: { user: { id: number } | null
                                         ) : (
                                             <>
                                                 <Sparkles size={16} aria-hidden="true" />
-                                                خرید
+                                                {copy.cta}
                                             </>
                                         )}
                                     </button>

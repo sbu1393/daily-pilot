@@ -2,10 +2,14 @@
    صفحهٔ اشتراک — چیدمان و ظاهر کارت‌های پلن
    فقط از توکن‌های دیزاین سیستم استفاده می‌کند تا تم روشن/تیره
    خودکار سازگار بماند (رنگ طلایی در globals.css تعریف شده است).
+
+   سلسله‌مراتب کارت: نام پلن → قیمت → تخفیف و صرفه‌جویی → مدت → مزایا →
+   سهمیهٔ هوشمند → دکمهٔ خرید. کارت رایگان عمداً آرام‌تر است تا تفاوت
+   «رایگان / پولی» در یک نگاه دیده شود و کارت سه‌ماهه تنها کارت برجستهٔ صفحه است.
    ============================================================ */
 
 .page {
-    width: min(1080px, 92%);
+    width: min(1120px, 92%);
     margin: auto;
     padding: 32px 0 44px;
 }
@@ -13,7 +17,7 @@
 /* ---------- سربرگ ---------- */
 .head {
     text-align: center;
-    margin-bottom: 38px;
+    margin-bottom: 34px;
 }
 
 /* مسیر برگشت — بالای عنوان، هم‌راستا با لبهٔ شروع (راست در RTL) تا با
@@ -116,27 +120,33 @@
     font-weight: 600;
 }
 
-/* ---------- شبکهٔ پلن‌ها ---------- */
+/* ---------- شبکهٔ پلن‌ها ----------
+   چهار کارت در یک ردیف روی دسکتاپ؛ روی موبایل تک‌ستونی و مقایسه‌پذیر. */
 .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(258px, 1fr));
-    gap: 22px;
+    grid-template-columns: repeat(auto-fit, minmax(252px, 1fr));
+    gap: 20px;
     align-items: stretch;
 }
 
-/* ---------- کارت پلن ---------- */
-.card {
+/* ---------- پایهٔ مشترک کارت‌ها ---------- */
+.card,
+.cardFree,
+.cardFeatured {
     position: relative;
     display: flex;
     flex-direction: column;
-    gap: 18px;
-    padding: 28px 22px 22px;
+    gap: 16px;
+    padding: 26px 20px 20px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
     backdrop-filter: blur(16px);
-    transition: var(--transition);
+    transition:
+        transform var(--transition),
+        box-shadow var(--transition),
+        border-color var(--transition);
 }
 
 .card:hover {
@@ -144,7 +154,15 @@
     box-shadow: var(--shadow-md);
 }
 
-/* پلن ویژه: بوردر طلایی + هالهٔ ملایم طلایی (ring معادل) */
+/* پلن رایگان — عمداً بدون hover-بالا رفتن و با پس‌زمینهٔ ملایم‌تر، تا
+   «پلن پولی» در چشم اول برجسته باشد. */
+.cardFree {
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+}
+
+/* پلن ویژه (سه‌ماهه) — تنها کارت برجستهٔ صفحه: بوردر و رینگ طلایی + بالا آمدن ملایم. */
 .cardFeatured {
     border: 2px solid var(--gold-from);
     box-shadow: 0 0 0 4px var(--gold-soft), var(--shadow-md), var(--shadow-gold);
@@ -155,7 +173,6 @@
 }
 
 @media (min-width: 768px) {
-    /* برجسته‌سازی ملایم کارت ویژه نسبت به دو پلن دیگر */
     .cardFeatured {
         transform: translateY(-6px);
     }
@@ -165,11 +182,11 @@
     }
 }
 
-/* ---------- برچسب ویژه ---------- */
+/* ---------- برچسب «پیشنهاد ویژه» ---------- */
 .badge {
     position: absolute;
     top: -12px;
-    right: 18px;
+    inset-inline-start: 18px;
     display: inline-flex;
     align-items: center;
     gap: 5px;
@@ -179,18 +196,31 @@
     color: var(--gold-ink);
     font-size: .72rem;
     font-weight: 800;
-    letter-spacing: .2px;
     box-shadow: var(--shadow-sm), var(--shadow-gold);
 }
 
-/* ---------- عنوان و قیمت ---------- */
+/* ---------- نام پلن ---------- */
+.cardHead {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
 .cardTitle {
     margin: 0;
-    font-size: 1.05rem;
+    font-size: 1.08rem;
     font-weight: 800;
     color: var(--ink);
 }
 
+.cardSubtitle {
+    margin: 0;
+    color: var(--muted);
+    font-size: .78rem;
+    font-weight: 600;
+}
+
+/* ---------- قیمت ---------- */
 .priceRow {
     display: flex;
     align-items: baseline;
@@ -198,8 +228,9 @@
     gap: 8px;
 }
 
+/* قیمت فعلی — بزرگ‌ترین عنصر قیمتی کارت. */
 .priceValue {
-    font-size: 1.9rem;
+    font-size: 1.95rem;
     font-weight: 900;
     line-height: 1.25;
     letter-spacing: -.4px;
@@ -219,7 +250,7 @@
     color: var(--muted);
 }
 
-/* ردیف قیمت پایه (خط‌خورده) + بج تخفیف + سود */
+/* ردیف قیمت پایه (خط‌خورده) + بج تخفیف */
 .priceMeta {
     display: flex;
     align-items: center;
@@ -246,13 +277,107 @@
     font-weight: 800;
 }
 
+/* سود شما — یک خط مستقل تا کنار بج تخفیف جا نشود و شلوغ نشود. */
 .priceSaving {
-    font-size: .72rem;
-    font-weight: 600;
-    color: var(--muted);
+    margin: -8px 0 0;
+    font-size: .74rem;
+    font-weight: 700;
+    color: var(--success);
 }
 
-/* پیام خطای خرید — بیرون از شبکه، تا کارت‌ها را جابه‌جا نکند */
+/* ردیف مدت اشتراک + هزینهٔ هر روز */
+.durationRow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 7px 10px;
+    border-radius: var(--radius-md);
+    background: var(--gold-soft);
+    color: var(--ink-2);
+    font-size: .76rem;
+    font-weight: 700;
+}
+
+.durationIcon {
+    flex: 0 0 auto;
+    color: var(--gold-from);
+}
+
+/* ---------- لیست ویژگی‌ها ---------- */
+.features {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 10px;
+}
+
+.feature {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    font-size: .86rem;
+    line-height: 1.75;
+    color: var(--ink-2);
+}
+
+/* آیکون بولت‌ها — یک رنگ برای همه تا کارت شلوغ نشود. */
+.featureIcon {
+    flex: 0 0 auto;
+    margin-top: 3px;
+    color: var(--success);
+}
+
+.cardFeatured .featureIcon {
+    color: var(--gold-from);
+}
+
+/* ---------- سهمیهٔ هوشمند ---------- */
+.quotaBox {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 12px 14px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-md);
+    background: var(--chip-bg);
+}
+
+.cardFeatured .quotaBox {
+    border-style: solid;
+    border-color: var(--gold-soft);
+    background: var(--gold-soft);
+}
+
+.quotaValue {
+    margin: 0;
+    color: var(--ink);
+    font-size: .84rem;
+    font-weight: 800;
+    line-height: 1.8;
+}
+
+.quotaPlus {
+    color: var(--muted);
+    font-weight: 700;
+}
+
+.quotaScope {
+    margin: 0;
+    color: var(--muted);
+    font-size: .74rem;
+    font-weight: 700;
+}
+
+.quotaNote {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: .72rem;
+    line-height: 1.8;
+}
+
+/* ---------- پیام خطای خرید — بیرون از شبکه، تا کارت‌ها را جابه‌جا نکند ---------- */
 .errorText {
     margin: 20px 0 0;
     padding: 12px 16px;
@@ -276,41 +401,65 @@
     }
 }
 
-/* ---------- لیست ویژگی‌ها ---------- */
-.features {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    gap: 11px;
-}
-
-.feature {
-    display: flex;
-    align-items: flex-start;
-    gap: 9px;
-    font-size: .86rem;
-    line-height: 1.75;
-    color: var(--ink-2);
-}
-
-.check,
-.checkGold {
-    flex: 0 0 auto;
-    margin-top: 3px;
-}
-
-/* تیک پلن‌های معمولی سبز، تیک پلن ویژه طلایی */
-.check {
-    color: var(--success);
-}
-
-.checkGold {
-    color: var(--gold-from);
-}
-
-/* ---------- دکمهٔ اقدام ---------- */
+/* ---------- دکمهٔ اقدام ----------
+   `margin-top: auto` همه‌ی دکمه‌ها را در یک خط افقی هم‌تراز می‌کند، حتی وقتی
+   تعداد بولت‌های کارت‌ها فرق می‌کند. */
 .cta {
     margin-top: auto;
     padding-top: 4px;
+}
+
+/* ---------- موبایل ---------- */
+@media (max-width: 560px) {
+    .page {
+        padding-top: 24px;
+    }
+
+    /* روی موبایل لغزش افقی و بریدن متن ممنوع است؛ همه‌ی ردیف‌های قیمت می‌شکنند. */
+    .card,
+    .cardFree,
+    .cardFeatured {
+        padding: 22px 16px 18px;
+        gap: 14px;
+    }
+
+    .priceValue {
+        font-size: 1.75rem;
+    }
+
+    /* برجسته‌سازی کارت ویژه در موبایل باید «کنار بقیه» بماند، نه بالای آن؛
+       چون شبکه تک‌ستونی است، همان بوردر و بج کافی است. */
+    .cardFeatured {
+        transform: none;
+    }
+
+    .cardFeatured:hover {
+        transform: none;
+    }
+
+    .badge {
+        inset-inline-start: 14px;
+    }
+
+    .cta .dp-btn {
+        /* متن دکمهٔ بلند («دریافت پیشنهاد ویژه») روی عرض کم نباید بشکند. */
+        white-space: nowrap;
+    }
+}
+
+/* احترام به تنظیم کاهش حرکت */
+@media (prefers-reduced-motion: reduce) {
+    .card,
+    .cardFeatured {
+        transition: none;
+    }
+
+    .card:hover,
+    .cardFeatured:hover {
+        transform: none;
+    }
+
+    .spinner {
+        animation: none;
+    }
 }

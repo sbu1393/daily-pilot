@@ -29,7 +29,7 @@ export function faGrouped(value: number): string {
 }
 
 /** آیکون‌های مینیمال بولت‌ها — نگاشت به lucide در `SubscriptionView`. */
-export type FeatureIcon = "unlimited" | "analyze" | "plan" | "support" | "tasks" | "basic"
+export type FeatureIcon = "analyze" | "plan" | "support" | "tasks" | "basic"
 
 export interface PlanFeature {
     label: string
@@ -51,15 +51,22 @@ export interface PlanCopy {
     featured?: boolean
 }
 
-/** پلن رایگان — قابل خرید نیست و از کاتالوگ نمی‌آید (قیمتش همیشه صفر است). */
+/**
+ * پلن رایگان — قابل خرید نیست و از کاتالوگ نمی‌آید (قیمتش همیشه صفر است).
+ *
+ * عمداً هیچ ادعای **تعداد** کاری در بولت‌ها نیست: نه «تا ۱۰ کار در روز» و نه «نامحدود».
+ * محصول در هیچ لایه‌ای (سرویس، route یا دیتابیس) سقف روزانه‌ای برای تسک‌ها ندارد، پس هر
+ * عددی اینجا وعده‌ای می‌بود که بک‌اند پشتیبانی نمی‌کند. آنچه واقعاً متفاوت است در باکس
+ * «سهمیهٔ هوشمند» کارت‌های پولی نمایش داده می‌شود.
+ */
 export const FREE_PLAN: PlanCopy & { price: string; period: string } = {
     title: "رایگان",
     subtitle: "همیشه رایگان",
     price: "۰",
     period: "همیشه",
     features: [
-        { label: "تا ۱۰ کار در روز", icon: "tasks" },
-        { label: "مدیریت و پیگیری ساده‌ی کارها", icon: "basic" },
+        { label: "مدیریت و پیگیری کامل کارها", icon: "tasks" },
+        { label: "اولویت‌بندی سادهٔ کارها", icon: "basic" },
         { label: "برنامه‌ریزی هوشمند پایه", icon: "plan" },
     ],
     cta: "شروع کنید",
@@ -70,9 +77,9 @@ export const PLAN_COPY: Record<ProductCode, PlanCopy> = {
     PRO_1M: {
         title: "اشتراک ماهانه",
         features: [
-            { label: "کارهای نامحدود روزانه", icon: "unlimited" },
-            { label: "برنامه‌ریزی هوشمند پیشرفته", icon: "plan" },
+            { label: "برنامه‌ریزی هوشمند برای تمام کارهای روز", icon: "plan" },
             { label: "تحلیل و اولویت‌بندی هوشمند کارها با AI", icon: "analyze" },
+            { label: "مدیریت و پیگیری کامل کارها در یک جا", icon: "tasks" },
             { label: "پشتیبانی اولویت‌دار", icon: "support" },
         ],
         note: "سهمیه‌های هوشمند شما در ابتدای هر ماه دوباره شارژ می‌شوند.",
@@ -82,8 +89,8 @@ export const PLAN_COPY: Record<ProductCode, PlanCopy> = {
         title: "اشتراک دوماهه",
         features: [
             { label: "تمام امکانات اشتراک ماهانه", icon: "basic" },
-            { label: "کارهای نامحدود روزانه", icon: "unlimited" },
-            { label: "استفاده از امکانات هوشمند در هر دو ماه", icon: "plan" },
+            { label: "برنامه‌ریزی هوشمند برای تمام کارهای روز", icon: "plan" },
+            { label: "استفاده از امکانات هوشمند در تمام {months} ماه", icon: "analyze" },
             { label: "پشتیبانی اولویت‌دار", icon: "support" },
         ],
         cta: "خرید اشتراک",
@@ -92,13 +99,24 @@ export const PLAN_COPY: Record<ProductCode, PlanCopy> = {
         title: "اشتراک سه‌ماهه",
         features: [
             { label: "تمام امکانات اشتراک ماهانه", icon: "basic" },
-            { label: "کارهای نامحدود روزانه", icon: "unlimited" },
-            { label: "۳ ماه استفاده از امکانات هوشمند", icon: "plan" },
+            { label: "برنامه‌ریزی هوشمند برای تمام کارهای روز", icon: "plan" },
+            { label: "استفاده از امکانات هوشمند در تمام {months} ماه", icon: "analyze" },
             { label: "پشتیبانی اولویت‌دار", icon: "support" },
         ],
         cta: "دریافت پیشنهاد ویژه",
         featured: true,
     },
+}
+
+/**
+ * جایگزینی `{months}` در متن بولت با تعداد ماه‌های واقعی دوره.
+ *
+ * چرا لازم است: تعداد ماه از `entitlementDays` کاتالوگ می‌آید (۳۰/۶۰/۹۰ روز)، پس نباید
+ * در متن hard-code شود؛ وگرنه با تغییر مدت یک پلن، متنش دروغ می‌شد. `FREE_PLAN` و پلن
+ * ماهانه `{months}` ندارند و دست‌نخورده برمی‌گردند.
+ */
+export function renderFeatureLabel(label: string, months: number): string {
+    return label.replace(/\{months\}/g, faDigits(months))
 }
 
 // ────────────────────────────────────────────────────────────────────────────

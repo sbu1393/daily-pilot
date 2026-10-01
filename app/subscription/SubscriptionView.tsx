@@ -28,7 +28,6 @@ import {
     Check,
     Crown,
     Headphones,
-    Infinity as InfinityIcon,
     ListTodo,
     Loader2,
     Sparkles,
@@ -44,6 +43,7 @@ import {
     PLAN_COPY,
     faGrouped,
     perDayToman,
+    renderFeatureLabel,
     smartQuotaFor,
     type FeatureIcon,
 } from "./planCopy"
@@ -51,7 +51,6 @@ import styles from "./subscription.module.css"
 
 /** آیکون مینیمال هر بولت — فقط برای اسکن سریع‌تر کارت، نه تزئین. */
 const FEATURE_ICONS: Record<FeatureIcon, typeof Check> = {
-    unlimited: InfinityIcon,
     analyze: BrainCircuit,
     plan: CalendarCheck,
     support: Headphones,
@@ -252,7 +251,12 @@ export default function SubscriptionView({ user }: { user: { id: number } | null
                                                 className={styles.featureIcon}
                                                 aria-hidden="true"
                                             />
-                                            <span>{feature.label}</span>
+                                            <span>
+                                                {renderFeatureLabel(
+                                                    feature.label,
+                                                    quota.months,
+                                                )}
+                                            </span>
                                         </li>
                                     )
                                 })}

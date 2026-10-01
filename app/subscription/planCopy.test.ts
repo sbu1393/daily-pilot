@@ -15,6 +15,7 @@ import {
     PRO_MONTHLY_PLAN_UNITS,
     faGrouped,
     perDayToman,
+    renderFeatureLabel,
     smartQuotaFor,
 } from "./planCopy"
 
@@ -50,6 +51,36 @@ describe("subscription plan copy", () => {
             const labels = PLAN_COPY[product.code].features.map((feature) => feature.label)
             expect(new Set(labels).size).toBe(labels.length)
         }
+    })
+
+    it("never promises a daily task cap the product does not enforce", () => {
+        // هیچ لایه‌ای از محصول سقف روزانه‌ی تسک ندارد، پس متن نباید عددی مثل
+        // «تا ۱۰ کار در روز» بفروشد؛ نه به‌عنوان محدودیت و نه به‌عنوان مزیت.
+        const allLabels = [
+            ...FREE_PLAN.features.map((feature) => feature.label),
+            ...BILLING_PRODUCTS.flatMap((product) =>
+                PLAN_COPY[product.code].features.map((feature) => feature.label),
+            ),
+        ].join(" ")
+
+        expect(allLabels).not.toMatch(/کار در روز/)
+        expect(allLabels).not.toMatch(/نامحدود/)
+        expect(allLabels).not.toMatch(/تا \d+ کار/)
+    })
+
+    it("duration placeholders come from the catalog, never from hard-coded copy", () => {
+        for (const product of BILLING_PRODUCTS) {
+            const months = smartQuotaFor(product.entitlementDays).months
+            for (const feature of PLAN_COPY[product.code].features) {
+                expect(renderFeatureLabel(feature.label, months)).not.toContain("{months}")
+            }
+        }
+    })
+
+    it("renders the real month count into duration wording", () => {
+        expect(renderFeatureLabel("در تمام {months} ماه", 2)).toBe("در تمام ۲ ماه")
+        expect(renderFeatureLabel("در تمام {months} ماه", 3)).toBe("در تمام ۳ ماه")
+        expect(renderFeatureLabel("بدون جایگزین", 2)).toBe("بدون جایگزین")
     })
 })
 

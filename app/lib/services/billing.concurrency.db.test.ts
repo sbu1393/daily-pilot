@@ -38,6 +38,7 @@ import {
     prepareCheckout,
 } from "./billing.service"
 import { activate, lazyExpire, renew } from "./entitlement.service"
+import { assertTestDatabase } from "@/app/lib/testing/dbTestEnv"
 import {
     EntitlementConflictError,
     PaymentIdempotencyConflictError,
@@ -90,6 +91,12 @@ let cleanupFailed = false
 const createdUserIds: number[] = []
 
 beforeAll(async () => {
+    // 🔒 fail-closed: **پیش از هر write و حتی پیش از connect** (همان الگوی
+    // userActivity/promoCode/aiQuota concurrency tests). این فایل قبلاً تنها
+    // `*.db.test.ts` بود که گارد را نداشت و در نتیجه می‌توانست به هر DATABASE_URL
+    // — از جمله پروداکشن — وصل شود و ردیف واقعی بنویسد.
+    assertTestDatabase()
+
     for (const [key, value] of BILLING_TEST_ENV) {
         if (!process.env[key]) process.env[key] = value
     }

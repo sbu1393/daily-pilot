@@ -1,3 +1,4 @@
+import Link from "next/link"
 import Header from "@/app/components/Header"
 import Hero from "@/app/components/landing/Hero"
 import DashboardPreview from "@/app/components/landing/DashboardPreview"
@@ -26,6 +27,25 @@ export default async function Home() {
     return (
         <main className={styles.landingPage}>
             <Header user={user} />
+            {/*
+              لینک موقت تست Android — فقط دسترسی سریع از داخل APK به /poc-native.
+              موقتی است و پس از پایان تست PoC باید حذف شود.
+            */}
+            <div style={{ display: "flex", justifyContent: "center", padding: "0.5rem 1rem" }}>
+                <Link
+                    href="/poc-native"
+                    style={{
+                        fontSize: "0.85rem",
+                        padding: "0.45rem 1rem",
+                        borderRadius: 999,
+                        border: "1px dashed #b26a00",
+                        color: "#b26a00",
+                        textDecoration: "none",
+                    }}
+                >
+                    Android PoC
+                </Link>
+            </div>
             <Hero user={user} />
             <DashboardPreview />
             <Features />

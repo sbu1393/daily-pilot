@@ -114,7 +114,7 @@ const PROBE_SCRIPT = `
           t.closest("[data-probe]").getAttribute("data-probe")))) || (t && t.tagName) || "?";
       p.domClicks++;
       p.lastDomClick = name + " @ " + new Date().toLocaleTimeString("fa-IR");
-      render(state());
+      emit(state());
     },
     true
   );

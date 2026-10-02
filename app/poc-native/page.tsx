@@ -508,9 +508,13 @@ export default function NativePocPage() {
                 <div>
                     window.Capacitor ={" "}
                     <strong>
-                        {typeof (window as unknown as { Capacitor?: unknown }).Capacitor}
+                        {typeof window === "undefined"
+                            ? "—"
+                            : typeof (window as unknown as { Capacitor?: unknown })
+                                  .Capacitor}
                     </strong>{" "}
-                    · onLine = {String(navigator.onLine)}
+                    · onLine ={" "}
+                    {typeof navigator === "undefined" ? "—" : String(navigator.onLine)}
                 </div>
                 <div style={{ marginTop: "0.4rem", color: "#444" }}>
                     بنر سیاه بالای صفحه را نگاه کنید — <code>domClicks</code> با{" "}

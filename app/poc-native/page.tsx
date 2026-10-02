@@ -1,29 +1,145 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import type { PermissionState } from "@capacitor/core"
-import type { PendingLocalNotificationSchema, ScheduleResult } from "@capacitor/local-notifications"
+import type { PendingLocalNotificationSchema } from "@capacitor/local-notifications"
 
 /**
- * PoC صفحه — مخصوص تست Capacitor (بخش ۶ و reminder آفلاین PoC).
+ * PoC صفحه — دیباگ «چرا handlerها هیچ اثری ندارند».
  * -----------------------------------------------------------------
- * این صفحه **فقط برای اثبات مفهومی** است و هیچ business logic ای را تغییر نمی‌دهد:
- *   • تشخیص «Web Browser» در برابر «Capacitor Native» با API رسمی Capacitor.
- *   • Reminder PoC: Native Local Notification واقعی که کاملاً مستقل از
- *     Next.js API / Prisma / Neon / Web Push / VAPID / اینترنت است.
+ * این نسخه عمداً یک هارنس تشخیصی است. هدف: ثابت کردن اینکه کلیک روی دکمه
+ * دقیقاً کجا متوقف می‌شود. هیچ چیزی حدس زده نمی‌شود.
  *
- * قواعد رعایت‌شده:
- *   - هیچ ارجاعی به payment/auth/business logic اضافه نشده.
- *   - هیچ اتصالی به DB یا Backend ساخته نشده.
- *   - reminder فعلی پروژه (cron سروری + web-push) دست‌نخورده است.
- *   - imports نوعی (type-only) در سطح فایل و imports سنگین به‌صورت dynamic
- *     و فقط داخل هندلرها انجام می‌شود تا SSR/Next build نشکند.
+ * نکتهٔ کلیدی که این نسخه می‌سنجد:
+ *   `#dp-splash` در `app/components/Splash.css` با `position:fixed; inset:0;
+ *   z-index:9999` کل صفحه را می‌پوشاند و فقط با یک **انیمیشن CSS** محو می‌شود.
+ *   یعنی محو شدن اسپلش **هیچ چیزی دربارهٔ hydrate شدن React ثابت نمی‌کند**.
+ *   اگر React hydrate نشده باشد، کاربر دقیقاً همین صفحه را می‌بیند ولی
+ *   هیچ onClickای کار نمی‌کند. این هارنس برای تشخیص همین تفکیک است.
  *
- * این نسخه «صادق» است: هیچ پیام موفقیتی بدون شاهد واقعی نشان داده نمی‌شود.
- * هر مقداری که در UI نمایش داده می‌شود مستقیماً از پاسخ نیتیو گرفته شده است.
+ * قواعد:
+ *   - هیچ exceptionای swallow نمی‌شود؛ message + stack در UI نمایش داده می‌شود.
+ *   - هیچ پیام موفقیتی بدون شاهد واقعی نشان داده نمی‌شود.
+ *   - هیچ وابستگی به DB/Backend/Auth/Payment/Web Push وجود ندارد.
  */
 
-/** کانال اختصاصی PoC با importance بالا (۵ = IMPORTANCE_HIGH). */
+/** وضعیت مشترک بین اسکریپت inline و کامپوننت React. */
+type PocProbe = {
+    /** آیا جاوااسکریپت اصلاً اجرا شده است؟ (اگر false → اسکریپت‌ها لود نشده‌اند) */
+    jsAlive: boolean
+    /** تعداد کلیک‌هایی که به DOM رسیده‌اند (مستقل از React) */
+    domClicks: number
+    lastDomClick: string
+    /** آیا React hydrate شده است؟ */
+    hydrated: boolean
+    /** تعداد onClickهایی که واقعاً در React اجرا شده‌اند */
+    reactClicks: number
+    lastReactClick: string
+    errors: string[]
+}
+
+declare global {
+    interface Window {
+        __pocProbe?: PocProbe
+    }
+}
+
+/**
+ * اسکریپت inline که **پیش از hydrate شدن React** اجرا می‌شود.
+ * اگر React هرگز hydrate نشود، این اسکریپت باز هم اجرا می‌شود و به ما می‌گوید
+ * (الف) جاوااسکریپت اجرا می‌شود یا نه، (ب) کلیک به DOM می‌رسد یا نه،
+ * (ج) خطای سراسری چیست. این سه با هم علت را قطعی می‌کنند.
+ *
+ * این اسکریپت عمداً بیرون از درخت React یک بنر می‌سازد تا با hydration
+ * تداخل نکند.
+ */
+const PROBE_SCRIPT = `
+(function () {
+  var p = {
+    jsAlive: true,
+    domClicks: 0,
+    lastDomClick: "(هیچ)",
+    hydrated: false,
+    reactClicks: 0,
+    lastReactClick: "(هیچ)",
+    errors: []
+  };
+  window.__pocProbe = p;
+
+  function el() {
+    var d = document.createElement("div");
+    d.id = "poc-probe-banner";
+    d.setAttribute("dir", "rtl");
+    d.style.cssText =
+      "position:fixed;top:0;left:0;right:0;z-index:99999;" +
+      "background:#111;color:#0f0;font:12px/1.6 monospace;" +
+      "padding:8px;white-space:pre-wrap;word-break:break-word;";
+    return d;
+  }
+  function render(msg) {
+    var b = document.getElementById("poc-probe-banner");
+    if (!b) { b = el(); document.body.appendChild(b); }
+    b.textContent = msg;
+  }
+  function state() {
+    return (
+      "[PROBE] jsAlive=" + p.jsAlive +
+      " hydrated=" + p.hydrated +
+      " domClicks=" + p.domClicks +
+      " reactClicks=" + p.reactClicks +
+      "\\nlastDOMClick=" + p.lastDomClick +
+      " | lastReactClick=" + p.lastReactClick +
+      "\\nonLine=" + navigator.onLine +
+      " | href=" + location.href +
+      "\\nwindow.Capacitor=" + (typeof window.Capacitor) +
+      " | bridge.LN=" +
+      (window.Capacitor && window.Capacitor.Plugins
+        ? typeof window.Capacitor.Plugins.LocalNotifications
+        : "no-Plugins") +
+      (p.errors.length ? "\\nERRORS:\\n" + p.errors.join("\\n") : "")
+    );
+  }
+  window.__pocProbeRender = render;
+  window.__pocProbeState = state;
+
+  render(state());
+
+  // کلیک خام روی DOM — کاملاً مستقل از React.
+  document.addEventListener(
+    "click",
+    function (e) {
+      var t = e.target;
+      var name =
+        (t && (t.getAttribute("data-probe") || (t.closest && t.closest("[data-probe]") &&
+          t.closest("[data-probe]").getAttribute("data-probe")))) || (t && t.tagName) || "?";
+      p.domClicks++;
+      p.lastDomClick = name + " @ " + new Date().toLocaleTimeString("fa-IR");
+      render(state());
+    },
+    true
+  );
+
+  // خطاهای سراسری — حتی اگر قبل از hydrate شدن رخ داده باشند.
+  window.addEventListener("error", function (e) {
+    p.errors.push(
+      "window.onerror: " + (e.message || "?") +
+      " | " + (e.filename || "?") + ":" + (e.lineno || "?") +
+      (e.error && e.error.stack ? "\\n" + e.error.stack : "")
+    );
+    render(state());
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var r = e.reason;
+    p.errors.push(
+      "unhandledrejection: " +
+      (r && r.message ? r.message : String(r)) +
+      (r && r.stack ? "\\n" + r.stack : "")
+    );
+    render(state());
+  });
+})();
+`
+
+/** کانال اختصاصی PoC با importance بالا. */
 const CHANNEL_ID = "poc_reminders"
 const CHANNEL = {
     id: CHANNEL_ID,
@@ -36,80 +152,56 @@ const CHANNEL = {
     visibility: 1 as const,
 }
 
-type PlatformInfo = {
-    isNative: boolean
-    platform: string
-    ready: boolean
+type LogLevel = "info" | "ok" | "warn" | "error"
+
+type LogEntry = {
+    key: number
+    level: LogLevel
+    text: string
 }
 
-/** وضعیت واقعی مجوزها که از خود نیتیو خوانده می‌شود (نه حدس ما). */
+type Step =
+    | { kind: "idle" }
+    | { kind: "working"; label: string; step: string }
+    | { kind: "done"; label: string; ids: number[] }
+    | { kind: "error"; label: string; message: string; stack: string }
+
 type PermissionSnapshot = {
     checked: boolean
-    /** POST_NOTIFICATIONS روی Android 13+ */
-    display: PermissionState | "unknown"
-    /** SCHEDULE_EXACT_ALARM — فقط Android 12+ معنی دارد */
-    exactAlarm: PermissionState | "unknown"
-    /** آیا کاربر اجازه نمایش اعلان داده است (areEnabled) */
-    areEnabled: boolean | "unknown"
+    display: string
+    exactAlarm: string
+    areEnabled: string
 }
 
 type PendingRow = {
     id: number
     title: string
-    body: string
     at: string
-    isExactNotification: boolean
 }
 
-type LogLevel = "info" | "ok" | "warn" | "error"
-
-type LogEntry = {
-    key: number
-    time: string
-    level: LogLevel
-    text: string
-}
-
-/** نتیجه‌ی واقعی آخرین schedule؛ فقط بر اساس پاسخ نیتیو پر می‌شود. */
-type ScheduleState =
-    | { kind: "idle" }
-    | { kind: "working"; label: string }
-    | {
-          kind: "result"
-          /** زمانی که در UI خواسته شد */
-          requestedAt: string
-          /** شناسه‌هایی که نیتیو واقعاً برگرداند (نه شناسه‌ی محاسبه‌شده در JS) */
-          returnedIds: number[]
-          /** هشدار نیتیو، مثلاً OS-PLUG-LNOT-0017 برای exact alarm */
-          warning?: { code: string; message: string }
-      }
-    | { kind: "error"; message: string }
-
-function describeError(err: unknown): string {
+function describeError(err: unknown): { message: string; stack: string } {
+    if (err instanceof Error) {
+        return {
+            message: `${err.name}: ${err.message}`,
+            stack: err.stack ?? "(بدون stack)",
+        }
+    }
     if (err && typeof err === "object") {
-        const e = err as { code?: unknown; message?: unknown }
-        const code = typeof e.code === "string" ? e.code : null
-        const message = typeof e.message === "string" ? e.message : String(err)
-        return code ? `${code} — ${message}` : message
+        const e = err as { code?: unknown; message?: unknown; stack?: unknown }
+        const code = typeof e.code === "string" ? ` [${e.code}]` : ""
+        return {
+            message: `${typeof e.message === "string" ? e.message : JSON.stringify(err)}${code}`,
+            stack: typeof e.stack === "string" ? e.stack : "(بدون stack)",
+        }
     }
-    return String(err)
+    return { message: String(err), stack: "(بدون stack)" }
 }
 
-function fmtTime(value: unknown): string {
-    if (value instanceof Date) return value.toLocaleTimeString("fa-IR")
-    if (typeof value === "string" || typeof value === "number") {
-        const d = new Date(value)
-        if (!Number.isNaN(d.getTime())) return d.toLocaleTimeString("fa-IR")
-        return String(value)
-    }
-    return "—"
-}
-
-const LOG_LEVEL_STYLE: Record<LogLevel, { color: string; prefix: string }> = {
-    info: { color: "#555", prefix: "•" },
-    ok: { color: "#0a7", prefix: "✓" },
-    warn: { color: "#b26a00", prefix: "!" },
-    error: { color: "#c00", prefix: "✕" },
+const LOG_COLOR: Record<LogLevel, string> = {
+    info: "#555",
+    ok: "#0a7",
+    warn: "#b26a00",
+    error: "#c00",
 }
 
 const btnBase: React.CSSProperties = {
@@ -130,313 +222,254 @@ const btnPrimary: React.CSSProperties = {
 }
 
 export default function NativePocPage() {
-    const [platform, setPlatform] = useState<PlatformInfo>({
-        isNative: false,
-        platform: "web",
-        ready: false,
-    })
+    const [log, setLog] = useState<LogEntry[]>([])
+    const [step, setStep] = useState<Step>({ kind: "idle" })
     const [perms, setPerms] = useState<PermissionSnapshot>({
         checked: false,
-        display: "unknown",
-        exactAlarm: "unknown",
-        areEnabled: "unknown",
+        display: "—",
+        exactAlarm: "—",
+        areEnabled: "—",
     })
-    const [schedule, setSchedule] = useState<ScheduleState>({ kind: "idle" })
     const [pending, setPending] = useState<PendingRow[] | null>(null)
-    const [log, setLog] = useState<LogEntry[]>([])
+    const [hydrated, setHydrated] = useState(false)
+    const [reactClicks, setReactClicks] = useState(0)
     const logKey = useRef(0)
 
-    /** لاگ واقعی: هم در UI و هم در console (قابل بررسی با chrome://inspect). */
-    const push = useCallback((level: LogLevel, text: string) => {
+    /** هر handler با این شروع می‌شود: قبل از هر await، وضعیت و لاگ را ثبت می‌کند. */
+    const begin = useCallback((name: string) => {
+        if (typeof window !== "undefined" && window.__pocProbe) {
+            window.__pocProbe.reactClicks++
+            window.__pocProbe.lastReactClick = name
+        }
+        setReactClicks((n) => n + 1)
+        setStep({ kind: "working", label: name, step: "Handler started" })
         logKey.current += 1
         const entry: LogEntry = {
             key: logKey.current,
-            time: new Date().toLocaleTimeString("fa-IR"),
-            level,
-            text,
+            level: "info",
+            text: `▶ Handler started: ${name}`,
         }
-        setLog((prev) => [entry, ...prev].slice(0, 60))
+        setLog((prev) => [entry, ...prev].slice(0, 80))
+        // eslint-disable-next-line no-console
+        console.log(`[PoC] Handler started: ${name}`)
+    }, [])
+
+    /** هر مرحله بین handler و نیتیو. */
+    const mark = useCallback((text: string, level: LogLevel = "info") => {
+        logKey.current += 1
+        const entry: LogEntry = { key: logKey.current, level, text }
+        setLog((prev) => [entry, ...prev].slice(0, 80))
+        setStep((s) => (s.kind === "working" ? { ...s, step: text } : s))
         // eslint-disable-next-line no-console
         console.log(`[PoC:${level}] ${text}`)
     }, [])
 
-    /** import داینامیک تا SSR/Next build نشکند. */
+    /** پایان موفق یا خطا — خطا هرگز swallow نمی‌شود. */
+    const finish = useCallback((err: unknown | null, okText?: string, ids?: number[]) => {
+        if (err) {
+            const { message, stack } = describeError(err)
+            mark(`Native call failed: ${message}`, "error")
+            logKey.current += 1
+            setLog((prev) =>
+                [
+                    { key: logKey.current, level: "info" as LogLevel, text: `STACK:\n${stack}` },
+                    ...prev,
+                ].slice(0, 80),
+            )
+            setStep({ kind: "error", label: "—", message, stack })
+            return
+        }
+        mark(okText ?? "Native call returned", "ok")
+        setStep({ kind: "done", label: "—", ids: ids ?? [] })
+    }, [mark])
+
+    /** import داینامیک پلاگین — جدا شده تا محل توقف دقیقاً مشخص باشد. */
     const loadPlugin = useCallback(async () => {
-        const { LocalNotifications } = await import("@capacitor/local-notifications")
-        return LocalNotifications
-    }, [])
+        mark("Loading @capacitor/local-notifications …")
+        const mod = await import("@capacitor/local-notifications")
+        mark("Plugin imported OK", "ok")
+        return mod.LocalNotifications
+    }, [mark])
 
-    // تشخیص پلتفرم با API رسمی Capacitor. در مرورگر معمولی مقدار web برمی‌گردد.
     useEffect(() => {
-        let cancelled = false
-        ;(async () => {
-            try {
-                const { Capacitor } = await import("@capacitor/core")
-                if (cancelled) return
-                setPlatform({
-                    isNative: Capacitor.isNativePlatform(),
-                    platform: Capacitor.getPlatform(),
-                    ready: true,
-                })
-            } catch {
-                if (cancelled) return
-                setPlatform({ isNative: false, platform: "web", ready: true })
-            }
-        })()
-        return () => {
-            cancelled = true
+        setHydrated(true)
+        if (window.__pocProbe) {
+            window.__pocProbe.hydrated = true
         }
+        logKey.current += 1
+        setLog((prev) =>
+            [
+                {
+                    key: logKey.current,
+                    level: "ok" as LogLevel,
+                    text: "✓ React hydrated — onClick ها فعال‌اند",
+                },
+                ...prev,
+            ].slice(0, 80),
+        )
     }, [])
 
-    /**
-     * خواندن وضعیت واقعی مجوزها.
-     * نکتهٔ کلیدی: `requestPermissions()` فقط POST_NOTIFICATIONS را مدیریت می‌کند؛
-     * SCHEDULE_EXACT_ALARM یک «مجوز تنظیمات» جداگانه است و باید خودمان بخوانیم.
-     */
-    const refreshPermissions = useCallback(async (): Promise<PermissionSnapshot> => {
+    const refreshPermissions = useCallback(async () => {
+        begin("refreshPermissions")
         try {
             const LN = await loadPlugin()
-
+            mark("Native call started: checkPermissions()")
             const display = (await LN.checkPermissions()).display
-
-            // فقط روی Android معنا دارد؛ در وب/غیراندروید خطا می‌دهد.
-            let exactAlarm: PermissionState | "unknown" = "unknown"
-            try {
-                exactAlarm = (await LN.checkExactNotificationSetting()).exact_alarm
-            } catch {
-                exactAlarm = "unknown"
-            }
-
-            let areEnabled: boolean | "unknown" = "unknown"
-            try {
-                areEnabled = (await LN.areEnabled()).value
-            } catch {
-                areEnabled = "unknown"
-            }
-
-            const snapshot: PermissionSnapshot = { checked: true, display, exactAlarm, areEnabled }
-            setPerms(snapshot)
-            push(
-                "info",
-                `مجوزها — نمایش: ${display} · exact alarm: ${exactAlarm} · اعلان‌ها فعال: ${String(areEnabled)}`,
-            )
-            return snapshot
+            mark(`Native call returned: checkPermissions() → ${display}`, "ok")
+            setPerms((p) => ({ ...p, checked: true, display }))
+            finish(null, "مجوز نمایش خوانده شد")
         } catch (err) {
-            const snapshot: PermissionSnapshot = {
-                checked: false,
-                display: "unknown",
-                exactAlarm: "unknown",
-                areEnabled: "unknown",
-            }
-            setPerms(snapshot)
-            push("error", `خواندن مجوزها ناموفق بود: ${describeError(err)}`)
-            return snapshot
+            finish(err)
         }
-    }, [loadPlugin, push])
+    }, [begin, loadPlugin, mark, finish])
 
-    const ensureChannel = useCallback(async (): Promise<boolean> => {
+    const probeBridge = useCallback(async () => {
+        begin("probeBridge")
         try {
-            const LN = await loadPlugin()
-            await LN.createChannel(CHANNEL)
-            const channels = await LN.listChannels()
-            const ids = channels.channels.map((c) => c.id)
-            const found = ids.includes(CHANNEL_ID)
-            push(
-                found ? "ok" : "warn",
-                `کانال «${CHANNEL_ID}» ساخته/بررسی شد. کانال‌های موجود: ${ids.join(", ") || "—"}`,
+            const cap = window.__pocProbe
+            const globalCap = (window as unknown as { Capacitor?: Record<string, unknown> })
+                .Capacitor
+            mark(
+                `window.Capacitor = ${typeof globalCap} · onLine=${navigator.onLine} · domClicks=${cap?.domClicks ?? "?"} · href=${window.location.href}`,
             )
-            return found
-        } catch (err) {
-            push("error", `ساخت کانال ناموفق بود: ${describeError(err)}`)
-            return false
-        }
-    }, [loadPlugin, push])
-
-    /** درخواست مجوز نمایش (POST_NOTIFICATIONS روی Android 13+). */
-    const requestDisplayPermission = useCallback(async () => {
-        try {
-            const LN = await loadPlugin()
-            const before = await LN.checkPermissions()
-            push("info", `مجوز نمایش قبل از درخواست: ${before.display}`)
-            if (before.display !== "granted") {
-                const after = await LN.requestPermissions()
-                push(
-                    after.display === "granted" ? "ok" : "warn",
-                    `نتیجهٔ requestPermissions(): ${after.display}`,
+            if (globalCap) {
+                const plugins = globalCap.Plugins as Record<string, unknown> | undefined
+                mark(
+                    `bridge plugins: ${plugins ? Object.keys(plugins).join(", ") || "(خالی)" : "بدون Plugins"}`,
+                    plugins?.LocalNotifications ? "ok" : "warn",
                 )
             } else {
-                push("ok", "مجوز نمایش از قبل granted بود؛ نیازی به درخواست نبود.")
+                mark("window.Capacitor تعریف نشده → این WebView بومی نیست", "warn")
             }
-            await refreshPermissions()
+            finish(null, "بررسی پل نیتیو تمام شد")
         } catch (err) {
-            push("error", `درخواست مجوز ناموفق بود: ${describeError(err)}`)
+            finish(err)
         }
-    }, [loadPlugin, push, refreshPermissions])
-
-    /** باز کردن صفحهٔ «Alarms & reminders» برای اعطای SCHEDULE_EXACT_ALARM. */
-    const openExactAlarmSettings = useCallback(async () => {
-        try {
-            const LN = await loadPlugin()
-            const res = await LN.changeExactNotificationSetting()
-            push(
-                res.exact_alarm === "granted" ? "ok" : "warn",
-                `نتیجهٔ changeExactNotificationSetting(): exact_alarm = ${res.exact_alarm}`,
-            )
-            await refreshPermissions()
-        } catch (err) {
-            push("error", `باز کردن تنظیمات exact alarm ناموفق بود: ${describeError(err)}`)
-        }
-    }, [loadPlugin, push, refreshPermissions])
+    }, [begin, mark, finish])
 
     /**
-     * لیست اعلان‌های در انتظار.
-     * منبع حقیقت سمت نیتیو است (SharedPreferences داخل اپ) — نه حافظهٔ JS.
+     * کمترین ممکن: فقط import + یک schedule خام با زمان ۵ ثانیه.
+     * هیچ بررسی مجوز، هیچ ساخت کانال. اگر همین fail شود، محل توقف قطعی است.
      */
-    const listPending = useCallback(async () => {
+    const probeRawSchedule = useCallback(async () => {
+        begin("probeRawSchedule")
         try {
             const LN = await loadPlugin()
+            const id = Math.floor(Math.random() * 1_000_000_000)
+            const at = new Date(Date.now() + 5_000)
+            mark(`Native call started: schedule() id=${id} at=+5s`)
+            const res = await LN.schedule({
+                notifications: [
+                    { id, title: "PoC probe", body: "raw schedule test", schedule: { at } },
+                ],
+            })
+            mark(`Native call returned: schedule() → ${JSON.stringify(res)}`, "ok")
+            finish(null, "schedule() خام موفق بود", res.notifications.map((n) => n.id))
+        } catch (err) {
+            finish(err)
+        }
+    }, [begin, loadPlugin, mark, finish])
+
+    const ensureChannel = useCallback(async () => {
+        begin("ensureChannel")
+        try {
+            const LN = await loadPlugin()
+            mark("Native call started: createChannel()")
+            await LN.createChannel(CHANNEL)
+            mark("Native call returned: createChannel()", "ok")
+            const res = await LN.listChannels()
+            mark(`کانال‌های موجود: ${res.channels.map((c) => c.id).join(", ") || "—"}`, "ok")
+            finish(null, "کانال ساخته شد")
+        } catch (err) {
+            finish(err)
+        }
+    }, [begin, loadPlugin, mark, finish])
+
+    const listPending = useCallback(async () => {
+        begin("listPending")
+        try {
+            const LN = await loadPlugin()
+            mark("Native call started: getPending()")
             const res = await LN.getPending()
             const rows: PendingRow[] = res.notifications.map((n: PendingLocalNotificationSchema) => ({
                 id: n.id,
                 title: n.title,
-                body: n.body,
-                at: fmtTime(n.schedule?.at),
-                isExactNotification: n.schedule ? n.schedule.at != null : false,
+                at: n.schedule?.at instanceof Date ? n.schedule.at.toLocaleTimeString("fa-IR") : "—",
             }))
             setPending(rows)
-            push(
-                rows.length ? "ok" : "warn",
-                `${rows.length} اعلان در انتظار ثبت شده است.`,
-            )
+            mark(`Native call returned: getPending() → ${rows.length} مورد`, "ok")
+            finish(null, `${rows.length} اعلان در انتظار`)
         } catch (err) {
-            setPending([])
-            push("error", `خواندن لیست در انتظار ناموفق بود: ${describeError(err)}`)
+            finish(err)
         }
-    }, [loadPlugin, push])
+    }, [begin, loadPlugin, mark, finish])
 
-    const cancelAll = useCallback(async () => {
-        try {
-            const LN = await loadPlugin()
-            const res = await LN.getPending()
-            if (res.notifications.length > 0) {
-                await LN.cancel({ notifications: res.notifications })
-                push("ok", `${res.notifications.length} اعلان لغو شد.`)
-            } else {
-                await LN.cancelAll()
-                push("info", "اعلان در انتظاری وجود نداشت؛ cancelAll() صدا زد شد.")
-            }
-            setSchedule({ kind: "idle" })
-            await listPending()
-        } catch (err) {
-            push("error", `لغو ناموفق بود: ${describeError(err)}`)
-        }
-    }, [loadPlugin, push, listPending])
-
-    /**
-     * زمان‌بندی واقعی اعلان.
-     * هیچ چیزی حدس زده نمی‌شود: شناسه از `ScheduleResult.notifications` خوانده
-     * می‌شود و هشدار `warning` (مثلاً downgrade به inexact alarm) نمایش داده می‌شود.
-     *
-     * delayMs === null → بدون `schedule` → اعلان فوری (تست کنترل مسیر نمایش).
-     */
     const scheduleReminder = useCallback(
         async (delayMs: number | null, label: string) => {
-            setSchedule({ kind: "working", label })
+            begin(`scheduleReminder(${label})`)
             try {
                 const LN = await loadPlugin()
 
-                // ۱) مجوز نمایش
+                mark("Native call started: checkPermissions()")
                 const display = (await LN.checkPermissions()).display
+                mark(`Native call returned: ${display}`, display === "granted" ? "ok" : "warn")
+
                 if (display !== "granted") {
+                    mark("Native call started: requestPermissions()")
                     const req = await LN.requestPermissions()
-                    push(
-                        req.display === "granted" ? "ok" : "error",
-                        `مجوز نمایش: ${req.display}`,
-                    )
+                    mark(`Native call returned: ${req.display}`, req.display === "granted" ? "ok" : "error")
                     if (req.display !== "granted") {
-                        setSchedule({
+                        setStep({
                             kind: "error",
-                            message: `مجوز نمایش اعلان داده نشد (${req.display}).`,
+                            label,
+                            message: `مجوز داده نشد: ${req.display}`,
+                            stack: "(بدون stack — پاسخ نیتیو)",
                         })
                         return
                     }
-                } else {
-                    push("ok", "مجوز نمایش: granted")
                 }
 
-                // ۲) کانال (اگر نباشد اعلان روی کانالِ ناموجود اصلاً نمایش داده نمی‌شود)
                 await ensureChannel()
 
-                // ۳) وضعیت exact alarm — روی targetSdk 33+ به‌صورت پیش‌فرض «-denied» است
-                let exactAlarm: PermissionState | "unknown" = "unknown"
+                mark("Native call started: checkExactNotificationSetting()")
                 try {
-                    exactAlarm = (await LN.checkExactNotificationSetting()).exact_alarm
-                } catch {
-                    exactAlarm = "unknown"
+                    const exact = await LN.checkExactNotificationSetting()
+                    mark(`exact_alarm = ${exact.exact_alarm}`, exact.exact_alarm === "granted" ? "ok" : "warn")
+                } catch (e) {
+                    mark(`checkExactNotificationSetting() در دسترس نیست: ${describeError(e).message}`, "warn")
                 }
-                push(
-                    exactAlarm === "granted" ? "ok" : "warn",
-                    `SCHEDULE_EXACT_ALARM: ${exactAlarm}` +
-                        (exactAlarm === "denied"
-                            ? " ← اعلان به‌جای exact، به‌صورت inexact زمان‌بندی می‌شود و ممکن است دیرتر از ۱ دقیقه برسد."
-                            : ""),
-                )
 
                 const at = new Date(Date.now() + (delayMs ?? 0))
-                const localId = Math.floor(Date.now() % 2_000_000_000)
+                const id = Math.floor(Math.random() * 1_000_000_000)
 
-                const res: ScheduleResult = await LN.schedule({
+                mark(`Native call started: schedule() id=${id}`)
+                const res = await LN.schedule({
                     notifications: [
                         {
-                            id: localId,
+                            id,
                             title: "روزساز — تست یادآور",
-                            body:
-                                delayMs === null
-                                    ? "اعلان فوری: مسیر نمایش (کانال/مجوز/آیکن) تست می‌شود."
-                                    : "این اعلان کاملاً محلی است؛ بدون اینترنت و بدون سرور.",
+                            body: "اعلان کاملاً محلی؛ بدون اینترنت.",
                             channelId: CHANNEL_ID,
-                            // true یعنی دقیقاً سرِ وقت؛ اگر مجوزش نباشد نیتیو هشدار می‌دهد.
                             isExactNotification: true,
-                            ...(delayMs === null
-                                ? {}
-                                : { schedule: { at, allowWhileIdle: true } }),
+                            ...(delayMs === null ? {} : { schedule: { at, allowWhileIdle: true } }),
                         },
                     ],
                 })
-
-                const returnedIds = res.notifications.map((n) => n.id)
-                push(
-                    "ok",
-                    `schedule() resolve شد — شناسهٔ برگشتی نیتیو: [${returnedIds.join(", ")}] (شناسهٔ ارسالی: ${localId})` +
-                        (res.warning ? ` — هشدار ${res.warning.code}` : " — بدون هشدار"),
+                mark(
+                    `Native call returned: ids=[${res.notifications.map((n) => n.id).join(", ")}]` +
+                        (res.warning ? ` · WARNING ${res.warning.code}` : ""),
+                    res.warning ? "warn" : "ok",
                 )
                 if (res.warning) {
-                    push("warn", `${res.warning.code}: ${res.warning.message}`)
+                    mark(`${res.warning.code}: ${res.warning.message}`, "warn")
                 }
-
-                setSchedule({
-                    kind: "result",
-                    requestedAt: fmtTime(at),
-                    returnedIds,
-                    warning: res.warning,
-                })
-                await listPending()
+                finish(null, "schedule() موفق بود", res.notifications.map((n) => n.id))
             } catch (err) {
-                const message = describeError(err)
-                push("error", `schedule() رد شد: ${message}`)
-                setSchedule({ kind: "error", message })
+                finish(err)
             }
         },
-        [loadPlugin, push, ensureChannel, listPending],
+        [begin, loadPlugin, mark, finish, ensureChannel],
     )
-
-    const platformLabel = !platform.ready
-        ? "…"
-        : platform.isNative
-          ? "Capacitor Native"
-          : "Web Browser"
-
-    const busy = schedule.kind === "working"
 
     return (
         <main
@@ -444,268 +477,212 @@ export default function NativePocPage() {
             style={{
                 maxWidth: 640,
                 margin: "0 auto",
-                padding: "2rem 1rem",
+                padding: "1rem 1rem 3rem",
                 fontFamily: "system-ui, sans-serif",
             }}
         >
-            <h1 style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>PoC بومی‌سازی (Capacitor)</h1>
-            <p style={{ color: "#666", marginBottom: "1.5rem", lineHeight: 1.8 }}>
-                این صفحه صرفاً برای اثبات مفهوم است و هیچ بخشی از منطق برنامه را تغییر نمی‌دهد.
-                همهٔ مقادیر نمایش‌داده‌شده مستقیماً از پاسخ نیتیو خوانده می‌شوند.
-            </p>
+            {/* اجرا می‌شود حتی اگر React هرگز hydrate نشود. */}
+            <script dangerouslySetInnerHTML={{ __html: PROBE_SCRIPT }} />
 
+            <h1 style={{ fontSize: "1.3rem", marginBottom: "0.5rem" }}>
+                دیباگ: کجا متوقف می‌شویم؟
+            </h1>
+
+            {/* ── نوار تشخیص (باید همیشه بالای صفحه دیده شود) ── */}
             <section
                 style={{
-                    border: "1px solid #ddd",
-                    borderRadius: 12,
-                    padding: "1rem",
-                    marginBottom: "1rem",
+                    border: "2px solid #111",
+                    borderRadius: 8,
+                    padding: "0.75rem",
+                    marginBottom: "0.75rem",
+                    background: "#f7f7f7",
+                    fontFamily: "monospace",
+                    fontSize: "0.8rem",
+                    lineHeight: 1.8,
                 }}
             >
-                <h2 style={{ fontSize: "1.1rem", marginBottom: "0.75rem" }}>۱) محیط اجرا</h2>
-                <p style={{ margin: 0, lineHeight: 2 }}>
-                    <strong>نتیجه:</strong>{" "}
-                    <span
-                        style={{
-                            fontWeight: 700,
-                            color: platform.isNative ? "#0a7" : "#a60",
-                        }}
-                    >
-                        {platformLabel}
-                    </span>
-                    <br />
-                    <span style={{ color: "#666", fontSize: "0.875rem" }}>
-                        platform = {platform.platform} · isNativePlatform ={" "}
-                        {String(platform.isNative)}
-                    </span>
-                </p>
-            </section>
-
-            <section
-                style={{
-                    border: "1px solid #ddd",
-                    borderRadius: 12,
-                    padding: "1rem",
-                    marginBottom: "1rem",
-                }}
-            >
-                <h2 style={{ fontSize: "1.1rem", marginBottom: "0.75rem" }}>
-                    ۲) وضعیت واقعی مجوزها
-                </h2>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
-                    <tbody>
-                        <tr>
-                            <td style={{ padding: "0.35rem 0" }}>
-                                POST_NOTIFICATIONS (نمایش)
-                            </td>
-                            <td
-                                style={{
-                                    padding: "0.35rem 0",
-                                    textAlign: "left",
-                                    fontWeight: 700,
-                                    color:
-                                        perms.display === "granted"
-                                            ? "#0a7"
-                                            : perms.display === "unknown"
-                                              ? "#999"
-                                              : "#c00",
-                                }}
-                            >
-                                {perms.checked ? perms.display : "—"}
-                            </td>
-                        </tr>
-                        <tr>
-                            <td style={{ padding: "0.35rem 0" }}>
-                                SCHEDULE_EXACT_ALARM (زمان‌بندی دقیق)
-                            </td>
-                            <td
-                                style={{
-                                    padding: "0.35rem 0",
-                                    textAlign: "left",
-                                    fontWeight: 700,
-                                    color:
-                                        perms.exactAlarm === "granted"
-                                            ? "#0a7"
-                                            : perms.exactAlarm === "unknown"
-                                              ? "#999"
-                                              : "#c00",
-                                }}
-                            >
-                                {perms.checked ? perms.exactAlarm : "—"}
-                            </td>
-                        </tr>
-                        <tr>
-                            <td style={{ padding: "0.35rem 0" }}>areEnabled()</td>
-                            <td style={{ padding: "0.35rem 0", textAlign: "left", fontWeight: 700 }}>
-                                {perms.checked ? String(perms.areEnabled) : "—"}
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <div
-                    style={{
-                        display: "flex",
-                        gap: "0.5rem",
-                        flexWrap: "wrap",
-                        marginTop: "0.75rem",
-                    }}
-                >
-                    <button style={btnBase} onClick={() => void refreshPermissions()}>
-                        خواندن مجوزها
-                    </button>
-                    <button style={btnBase} onClick={() => void requestDisplayPermission()}>
-                        درخواست مجوز نمایش
-                    </button>
-                    <button style={btnBase} onClick={() => void openExactAlarmSettings()}>
-                        باز کردن Alarms &amp; reminders
-                    </button>
-                    <button style={btnBase} onClick={() => void ensureChannel()}>
-                        ساخت کانال
-                    </button>
+                <div>
+                    hydrated = <strong>{String(hydrated)}</strong> · reactClicks ={" "}
+                    <strong>{reactClicks}</strong>
                 </div>
-
-                {perms.checked && perms.exactAlarm === "denied" ? (
-                    <p style={{ color: "#b26a00", fontSize: "0.875rem", lineHeight: 1.9 }}>
-                        ⚠️ SCHEDULE_EXACT_ALARM داده نشده است. روی Android 13+ و targetSdk بالای ۳۲
-                        این مجوز به‌صورت پیش‌فرض denied نصب می‌شود. در این حالت نیتیو اعلان را با
-                        AlarmManager غیردقیق (inexact) زمان‌بندی می‌کند و سیستم‌عامل می‌تواند اجرای آن
-                        را به‌تعویق بیندازد یا تا باز شدن اپ نگه دارد. برای زمان‌بندی دقیق، دکمهٔ
-                        «باز کردن Alarms &amp; reminders» را بزنید و دسترسی را فعال کنید.
-                    </p>
-                ) : null}
+                <div>
+                    window.Capacitor ={" "}
+                    <strong>
+                        {typeof (window as unknown as { Capacitor?: unknown }).Capacitor}
+                    </strong>{" "}
+                    · onLine = {String(navigator.onLine)}
+                </div>
+                <div style={{ marginTop: "0.4rem", color: "#444" }}>
+                    بنر سیاه بالای صفحه را نگاه کنید — <code>domClicks</code> با{" "}
+                    <code>reactClicks</code> مقایسه می‌شود.
+                    <br />
+                    اگر <code>jsAlive=false</code> → جاوااسکریپت اجرا نشده (SW/لود chunk).
+                    <br />
+                    اگر <code>domClicks</code> بالا رفت ولی <code>reactClicks</code> صفر ماند →
+                    React hydrate نشده.
+                </div>
             </section>
 
+            {/* ── وضعیت لحظه‌ای ── */}
             <section
                 style={{
                     border: "1px solid #ddd",
-                    borderRadius: 12,
-                    padding: "1rem",
-                    marginBottom: "1rem",
+                    borderRadius: 8,
+                    padding: "0.75rem",
+                    marginBottom: "0.75rem",
+                    fontSize: "0.85rem",
+                    lineHeight: 2,
                 }}
             >
-                <h2 style={{ fontSize: "1.1rem", marginBottom: "0.75rem" }}>۳) یادآور محلی</h2>
-                <p style={{ color: "#666", fontSize: "0.875rem", lineHeight: 1.9, marginTop: 0 }}>
-                    تست کامل: اعلان را بساز، اپ را کامل ببند، اینترنت را قطع کن و منتظر بمان.
-                    اگر «تست فوری» کار کرد ولی زمان‌بندی‌دار کار نکرد، مشکل از مسیر AlarmManager
-                    است نه از نمایش اعلان.
-                </p>
+                <strong>مرحلهٔ فعلی:</strong>{" "}
+                {step.kind === "idle" && "—"}
+                {step.kind === "working" && (
+                    <span style={{ color: "#b26a00" }}>
+                        {step.label} → {step.step}
+                    </span>
+                )}
+                {step.kind === "done" && (
+                    <span style={{ color: "#0a7" }}>
+                        ✓ تمام · ids=[{step.ids.join(", ") || "—"}]
+                    </span>
+                )}
+                {step.kind === "error" && (
+                    <span style={{ color: "#c00", wordBreak: "break-word" }}>
+                        ✕ {step.message}
+                        <pre
+                            style={{
+                                whiteSpace: "pre-wrap",
+                                fontSize: "0.7rem",
+                                background: "#fff",
+                                border: "1px solid #eee",
+                                padding: "0.5rem",
+                                margin: "0.5rem 0 0",
+                                direction: "ltr",
+                                textAlign: "left",
+                            }}
+                        >
+                            {step.stack}
+                        </pre>
+                    </span>
+                )}
+            </section>
 
-                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            {/* ── دکمه‌ها ── */}
+            <section
+                style={{
+                    border: "1px solid #ddd",
+                    borderRadius: 8,
+                    padding: "0.75rem",
+                    marginBottom: "0.75rem",
+                }}
+            >
+                <h2 style={{ fontSize: "1rem", margin: "0 0 0.5rem" }}>تست‌ها (به ترتیب تشخیص)</h2>
+                <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
                     <button
+                        type="button"
+                        data-probe="refreshPermissions"
                         style={btnPrimary}
-                        disabled={busy}
-                        onClick={() => void scheduleReminder(60_000, "۱ دقیقه")}
+                        onClick={() => void refreshPermissions()}
                     >
-                        Reminder in 1 minute
+                        ۱) خواندن مجوزها
                     </button>
                     <button
+                        type="button"
+                        data-probe="probeBridge"
                         style={btnPrimary}
-                        disabled={busy}
-                        onClick={() => void scheduleReminder(10_000, "۱۰ ثانیه")}
+                        onClick={() => void probeBridge()}
                     >
-                        تست ۱۰ ثانیه
+                        ۲) بررسی پل نیتیو
                     </button>
                     <button
-                        style={{ ...btnPrimary, background: "#0a7" }}
-                        disabled={busy}
+                        type="button"
+                        data-probe="probeRawSchedule"
+                        style={{ ...btnPrimary, background: "#c00" }}
+                        onClick={() => void probeRawSchedule()}
+                    >
+                        ۳) schedule خام (+۵ ثانیه)
+                    </button>
+                    <button
+                        type="button"
+                        data-probe="ensureChannel"
+                        style={btnBase}
+                        onClick={() => void ensureChannel()}
+                    >
+                        ۴) ساخت کانال
+                    </button>
+                    <button
+                        type="button"
+                        data-probe="listPending"
+                        style={btnBase}
+                        onClick={() => void listPending()}
+                    >
+                        ۵) List Pending
+                    </button>
+                    <button
+                        type="button"
+                        data-probe="immediate"
+                        style={btnBase}
                         onClick={() => void scheduleReminder(null, "فوری")}
                     >
-                        تست فوری (بدون زمان‌بندی)
+                        ۶) تست فوری
                     </button>
-                    <button style={btnBase} onClick={() => void listPending()}>
-                        List Pending Notifications
+                    <button
+                        type="button"
+                        data-probe="tenSeconds"
+                        style={btnBase}
+                        onClick={() => void scheduleReminder(10_000, "۱۰ ثانیه")}
+                    >
+                        ۷) تست ۱۰ ثانیه
                     </button>
-                    <button style={btnBase} onClick={() => void cancelAll()}>
-                        لغو اعلان‌های در انتظار
+                    <button
+                        type="button"
+                        data-probe="oneMinute"
+                        style={btnPrimary}
+                        onClick={() => void scheduleReminder(60_000, "۱ دقیقه")}
+                    >
+                        ۸) Reminder in 1 minute
                     </button>
                 </div>
 
-                <p
-                    style={{
-                        marginTop: "0.75rem",
-                        lineHeight: 2,
-                        fontSize: "0.9rem",
-                        wordBreak: "break-word",
-                    }}
-                >
-                    {schedule.kind === "idle" && (
-                        <span style={{ color: "#666" }}>هنوز اعلانی زمان‌بندی نشده است.</span>
-                    )}
-                    {schedule.kind === "working" && (
-                        <span style={{ color: "#666" }}>
-                            در حال تماس با API بومی… ({schedule.label})
-                        </span>
-                    )}
-                    {schedule.kind === "result" && (
-                        <span style={{ color: schedule.warning ? "#b26a00" : "#0a7" }}>
-                            {schedule.warning
-                                ? `⚠️ ثبت شد اما دقیق نیست — ${schedule.warning.code}: ${schedule.warning.message}`
-                                : "✓ ثبت شد (دقیق)"}
-                            <br />
-                            زمان درخواستی: {schedule.requestedAt} · شناسهٔ برگشتی نیتیو: [
-                            {schedule.returnedIds.join(", ") || "—"}]
-                        </span>
-                    )}
-                    {schedule.kind === "error" && (
-                        <span style={{ color: "#c00" }}>✕ {schedule.message}</span>
-                    )}
+                <p style={{ fontSize: "0.8rem", color: "#666", marginBottom: 0 }}>
+                    مجوز نمایش: <strong>{perms.display}</strong> · exact alarm:{" "}
+                    <strong>{perms.exactAlarm}</strong> · فعال: <strong>{perms.areEnabled}</strong>
                 </p>
-
-                <div style={{ marginTop: "0.75rem" }}>
-                    <strong style={{ fontSize: "0.9rem" }}>اعلان‌های در انتظار (از نیتیو):</strong>
-                    {pending === null ? (
-                        <p style={{ color: "#999", fontSize: "0.875rem", margin: "0.25rem 0 0" }}>
-                            هنوز خوانده نشده — دکمهٔ «List Pending Notifications» را بزنید.
-                        </p>
-                    ) : pending.length === 0 ? (
-                        <p style={{ color: "#666", fontSize: "0.875rem", margin: "0.25rem 0 0" }}>
-                            هیچ اعلانی در انتظار نیست.
-                        </p>
-                    ) : (
-                        <ul style={{ margin: "0.25rem 0 0", paddingRight: "1.25rem", fontSize: "0.875rem" }}>
-                            {pending.map((row) => (
-                                <li key={row.id} style={{ marginBottom: "0.25rem" }}>
-                                    <code>#{row.id}</code> — {row.title} · ساعت {row.at}
-                                    {row.isExactNotification ? "" : " (بدون زمان‌بندی)"}
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                </div>
-
-                <p style={{ color: "#999", fontSize: "0.8rem", marginBottom: 0 }}>
-                    توجه: این اعلان هیچ‌جا ذخیره یا sync نمی‌شود؛ صرفاً روی خود دستگاه زمان‌بندی می‌شود.
+                <p style={{ fontSize: "0.8rem", color: "#666", marginBottom: 0 }}>
+                    در انتظار:{" "}
+                    {pending === null ? "—" : pending.length === 0 ? "هیچ" : pending.map((r) => `#${r.id} (${r.at})`).join(" · ")}
                 </p>
             </section>
 
-            <section style={{ border: "1px solid #ddd", borderRadius: 12, padding: "1rem" }}>
-                <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>۴) گزارش زنده</h2>
-                <p style={{ color: "#666", fontSize: "0.8rem", marginTop: 0 }}>
-                    همین داده‌ها در console مرورگر هم چاپ می‌شوند (قابل مشاهده با chrome://inspect).
-                </p>
+            {/* ── لاگ مرحله‌ای، بالای صفحه ── */}
+            <section
+                style={{
+                    border: "1px solid #ddd",
+                    borderRadius: 8,
+                    padding: "0.75rem",
+                    marginBottom: "0.75rem",
+                }}
+            >
+                <h2 style={{ fontSize: "1rem", margin: "0 0 0.5rem" }}>لاگ (جدیدترین اول)</h2>
                 {log.length === 0 ? (
-                    <p style={{ color: "#999", fontSize: "0.875rem", margin: 0 }}>
-                        رویدادی ثبت نشده است.
+                    <p style={{ fontSize: "0.85rem", color: "#999", margin: 0 }}>
+                        روی یکی از دکمه‌ها بزنید.
                     </p>
                 ) : (
-                    <ul style={{ listStyle: "none", margin: 0, padding: 0, fontSize: "0.8rem" }}>
-                        {log.map((entry) => {
-                            const style = LOG_LEVEL_STYLE[entry.level]
-                            return (
-                                <li
-                                    key={entry.key}
-                                    style={{
-                                        color: style.color,
-                                        lineHeight: 1.8,
-                                        wordBreak: "break-word",
-                                    }}
-                                >
-                                    <span style={{ color: "#aaa" }}>{entry.time}</span>{" "}
-                                    <span>{style.prefix}</span> {entry.text}
-                                </li>
-                            )
-                        })}
+                    <ul style={{ listStyle: "none", margin: 0, padding: 0, fontSize: "0.78rem" }}>
+                        {log.map((e) => (
+                            <li
+                                key={e.key}
+                                style={{
+                                    color: LOG_COLOR[e.level],
+                                    lineHeight: 1.7,
+                                    whiteSpace: "pre-wrap",
+                                    wordBreak: "break-word",
+                                }}
+                            >
+                                {e.text}
+                            </li>
+                        ))}
                     </ul>
                 )}
             </section>

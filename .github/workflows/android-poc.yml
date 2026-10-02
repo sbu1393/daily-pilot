@@ -1,0 +1,87 @@
+# Android PoC — ساخت Debug APK برای تست Capacitor روی گوشی واقعی
+# -----------------------------------------------------------------
+# این workflow کاملاً جدا از reminder-cron.yml است و هیچ ارتباطی با آن ندارد.
+#
+# پیش‌نیاز (یک‌بار در GitHub → Settings → Secrets and variables → Actions → Variables):
+#   - CAPACITOR_SERVER_URL : آدرس واقعی production سایت (مثلاً https://your-domain)
+#     عمداً از `vars` خوانده می‌شود نه `secrets`، چون یک آدرس عمومی است نه راز.
+#     هیچ URL ای داخل این فایل hardcode نشده است.
+#
+# اجرا فقط دستی است (workflow_dispatch) — هیچ trigger خودکار/push/schedule ندارد.
+# خروجی فقط Debug APK است: بدون release signing و بدون keystore.
+#
+# محدودیت‌های عمدی:
+#   - هیچ تغییری در Prisma/DB/Neon/migration/payment/auth/ticketing ایجاد نمی‌کند.
+#   - هیچ production deployment ای انجام نمی‌دهد.
+
+name: android-poc
+
+on:
+  workflow_dispatch: {}
+
+# فقط خواندن محتوا لازم است؛ artifact آپلود با permission پیش‌فرض actions کار می‌کند.
+permissions:
+  contents: read
+
+jobs:
+  build-debug-apk:
+    name: Build Capacitor debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Java (Temurin 21)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate CAPACITOR_SERVER_URL
+        env:
+          CAPACITOR_SERVER_URL: ${{ vars.CAPACITOR_SERVER_URL }}
+        run: |
+          set -euo pipefail
+          value="${CAPACITOR_SERVER_URL:-}"
+          if [ -z "$value" ]; then
+            echo "::error::CAPACITOR_SERVER_URL is not set. Add it under Settings → Secrets and variables → Actions → Variables."
+            exit 1
+          fi
+          if [ "$value" = "https://example.invalid" ]; then
+            echo "::error::CAPACITOR_SERVER_URL is still the placeholder 'https://example.invalid'. Set it to the real production URL."
+            exit 1
+          fi
+          if ! printf '%s' "$value" | grep -Eq '^https://[^[:space:]]+$'; then
+            echo "::error::CAPACITOR_SERVER_URL must be a valid https:// URL with no whitespace."
+            exit 1
+          fi
+          echo "CAPACITOR_SERVER_URL is valid."
+
+      - name: Capacitor sync (android)
+        env:
+          CAPACITOR_SERVER_URL: ${{ vars.CAPACITOR_SERVER_URL }}
+        run: npm run cap:sync
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-poc-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

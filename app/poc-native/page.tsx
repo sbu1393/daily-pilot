@@ -35,6 +35,8 @@ type PocProbe = {
     reactClicks: number
     lastReactClick: string
     errors: string[]
+    /** آخرین متن وضعیت — React آن را render می‌کند، نه این اسکریپت. */
+    msg: string
 }
 
 declare global {
@@ -61,24 +63,23 @@ const PROBE_SCRIPT = `
     hydrated: false,
     reactClicks: 0,
     lastReactClick: "(هیچ)",
-    errors: []
+    errors: [],
+    msg: ""
   };
   window.__pocProbe = p;
 
-  function el() {
-    var d = document.createElement("div");
-    d.id = "poc-probe-banner";
-    d.setAttribute("dir", "rtl");
-    d.style.cssText =
-      "position:fixed;top:0;left:0;right:0;z-index:99999;" +
-      "background:#111;color:#0f0;font:12px/1.6 monospace;" +
-      "padding:8px;white-space:pre-wrap;word-break:break-word;";
-    return d;
-  }
-  function render(msg) {
-    var b = document.getElementById("poc-probe-banner");
-    if (!b) { b = el(); document.body.appendChild(b); }
-    b.textContent = msg;
+  // هیچ DOMای پیش از hydration ساخته یا تغییر داده نمی‌شود.
+  // Next.js App Router کل <body> را hydrate می‌کند؛ افزودن گره به آن
+  // پیش از hydration باعث mismatch (خطاهای #418/#423/#425) می‌شود.
+  // این اسکریپت فقط state را نگه می‌دارد و رویداد پخش می‌کند؛
+  // بنر را خودِ React به‌عنوان خروجی خودش render می‌کند.
+  function emit(msg) {
+    p.msg = msg;
+    try {
+      window.dispatchEvent(new CustomEvent("poc-probe:update"));
+    } catch (e) {
+      /* CustomEvent در دسترس نیست — بی‌اثر */
+    }
   }
   function state() {
     return (
@@ -98,10 +99,10 @@ const PROBE_SCRIPT = `
       (p.errors.length ? "\\nERRORS:\\n" + p.errors.join("\\n") : "")
     );
   }
-  window.__pocProbeRender = render;
+  window.__pocProbeRender = emit;
   window.__pocProbeState = state;
 
-  render(state());
+  emit(state());
 
   // کلیک خام روی DOM — کاملاً مستقل از React.
   document.addEventListener(
@@ -125,7 +126,7 @@ const PROBE_SCRIPT = `
       " | " + (e.filename || "?") + ":" + (e.lineno || "?") +
       (e.error && e.error.stack ? "\\n" + e.error.stack : "")
     );
-    render(state());
+  emit(state());
   });
   window.addEventListener("unhandledrejection", function (e) {
     var r = e.reason;
@@ -134,7 +135,7 @@ const PROBE_SCRIPT = `
       (r && r.message ? r.message : String(r)) +
       (r && r.stack ? "\\n" + r.stack : "")
     );
-    render(state());
+  emit(state());
   });
 })();
 `
@@ -233,6 +234,13 @@ export default function NativePocPage() {
     const [pending, setPending] = useState<PendingRow[] | null>(null)
     const [hydrated, setHydrated] = useState(false)
     const [reactClicks, setReactClicks] = useState(0)
+    /** بنر تشخیص — از state می‌آید تا با SSR هم‌خوان بماند. */
+    const [probeMsg, setProbeMsg] = useState("")
+    /**
+     * مقادیر وابسته به مرورگر. عمداً فقط بعد از mount پر می‌شوند تا متن
+     * رندر سمت سرور و کلاینت یکسان بماند؛ در غیر این صورت hydration می‌شکند.
+     */
+    const [env, setEnv] = useState({ capacitor: "—", onLine: "—" })
     const logKey = useRef(0)
 
     /** هر handler با این شروع می‌شود: قبل از هر await، وضعیت و لاگ را ثبت می‌کند. */
@@ -293,6 +301,10 @@ export default function NativePocPage() {
 
     useEffect(() => {
         setHydrated(true)
+        setEnv({
+            capacitor: typeof (window as unknown as { Capacitor?: unknown }).Capacitor,
+            onLine: String(navigator.onLine),
+        })
         if (window.__pocProbe) {
             window.__pocProbe.hydrated = true
         }
@@ -307,6 +319,17 @@ export default function NativePocPage() {
                 ...prev,
             ].slice(0, 80),
         )
+    }, [])
+
+    /** بنر را از state می‌خوانیم؛ اسکریپت inline فقط event پخش می‌کند. */
+    useEffect(() => {
+        const onProbe = () => {
+            const probe = window.__pocProbe
+            if (probe) setProbeMsg(probe.msg)
+        }
+        onProbe()
+        window.addEventListener("poc-probe:update", onProbe)
+        return () => window.removeEventListener("poc-probe:update", onProbe)
     }, [])
 
     const refreshPermissions = useCallback(async () => {
@@ -484,6 +507,28 @@ export default function NativePocPage() {
             {/* اجرا می‌شود حتی اگر React هرگز hydrate نشود. */}
             <script dangerouslySetInnerHTML={{ __html: PROBE_SCRIPT }} />
 
+            {/* بنر تشخیص — خروجی خودِ React، نه DOM دستکاری‌شده. */}
+            <pre
+                style={{
+                    position: "fixed",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    zIndex: 99999,
+                    background: "#111",
+                    color: "#0f0",
+                    font: "12px/1.6 monospace",
+                    padding: "8px",
+                    margin: 0,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    textAlign: "left",
+                    direction: "ltr",
+                }}
+            >
+                {probeMsg || "[PROBE] waiting…"}
+            </pre>
+
             <h1 style={{ fontSize: "1.3rem", marginBottom: "0.5rem" }}>
                 دیباگ: کجا متوقف می‌شویم؟
             </h1>
@@ -506,15 +551,8 @@ export default function NativePocPage() {
                     <strong>{reactClicks}</strong>
                 </div>
                 <div>
-                    window.Capacitor ={" "}
-                    <strong>
-                        {typeof window === "undefined"
-                            ? "—"
-                            : typeof (window as unknown as { Capacitor?: unknown })
-                                  .Capacitor}
-                    </strong>{" "}
-                    · onLine ={" "}
-                    {typeof navigator === "undefined" ? "—" : String(navigator.onLine)}
+                    window.Capacitor = <strong>{env.capacitor}</strong> · onLine ={" "}
+                    <strong>{env.onLine}</strong>
                 </div>
                 <div style={{ marginTop: "0.4rem", color: "#444" }}>
                     بنر سیاه بالای صفحه را نگاه کنید — <code>domClicks</code> با{" "}

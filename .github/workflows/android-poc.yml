@@ -10,9 +10,15 @@
 # اجرا فقط دستی است (workflow_dispatch) — هیچ trigger خودکار/push/schedule ندارد.
 # خروجی فقط Debug APK است: بدون release signing و بدون keystore.
 #
-# محدودیت‌های عمدی:
-#   - هیچ تغییری در Prisma/DB/Neon/migration/payment/auth/ticketing ایجاد نمی‌کند.
-#   - هیچ production deployment ای انجام نمی‌دهد.
+# درباره‌ی «non-interactive» بودن (رفع خطای «SDK package licenses not accepted»):
+#   action رسمی `android-actions/setup-android` برای پذیرش مجوز فقط ۱۰ بار «y» به
+#   stdin می‌نویسد؛ اگر تعداد promptها بیشتر باشد ورودی تمام می‌شود و sdkmanager
+#   روی «Accept? (y/N)» منتظر می‌ماند (همان چیزی که build را در CI هنگ می‌کند).
+#   بنابراین در این workflow:
+#     ۱) پذیرش مجوز خودِ action خاموش است (accept-android-sdk-licenses: false)
+#     ۲) پذیرش مجوز با `yes | sdkmanager --licenses` (بی‌نهایت y) انجام می‌شود
+#     ۳) فقط همان SDKهای لازم برای همین پروژه صریحاً نصب می‌شوند
+#   هیچ Google TV / Android XR / emulator / system-image نصب نمی‌شود.
 
 name: android-poc
 
@@ -27,6 +33,13 @@ jobs:
   build-debug-apk:
     name: Build Capacitor debug APK
     runs-on: ubuntu-latest
+
+    env:
+      # از خود پروژه استخراج شده: android/variables.gradle و android/build.gradle
+      #   compileSdk = 36 · targetSdk = 36 · minSdk = 24 · AGP = 8.13.0
+      # build-tools متناظر AGP 8.13 برای compileSdk 36 همان 36.0.0 است.
+      ANDROID_PLATFORM: "platforms;android-36"
+      ANDROID_BUILD_TOOLS: "build-tools;36.0.0"
 
     steps:
       - name: Checkout
@@ -44,8 +57,25 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Setup Android SDK
+      # cmdline-tools را نصب می‌کند، ولی هیچ package اضافه‌ای نصب نمی‌کند و
+      # پذیرش مجوزش هم عمداً خاموش است (مرحله‌ی بعد جایش را می‌گیرد).
+      - name: Setup Android SDK (command-line tools only)
         uses: android-actions/setup-android@v3
+        with:
+          packages: ""
+          accept-android-sdk-licenses: false
+          log-accepted-android-sdk-licenses: false
+
+      # بی‌نهایت «y» → هیچ‌وقت روی prompt متوقف نمی‌شود.
+      - name: Accept Android SDK licenses (non-interactive)
+        run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
+
+      - name: Install required Android SDK packages
+        run: |
+          set -euo pipefail
+          sdkmanager --install "$ANDROID_PLATFORM" "$ANDROID_BUILD_TOOLS" "platform-tools"
+          # تأیید صریح نصب — اگر چیزی نصب نشده باشد، build با پیام واضح‌تر اینجا رد می‌شود.
+          sdkmanager --list_installed
 
       - name: Install dependencies
         run: npm ci
@@ -77,7 +107,7 @@ jobs:
 
       - name: Build debug APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

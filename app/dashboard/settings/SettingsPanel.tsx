@@ -724,7 +724,7 @@ function FeedbackForm() {
         }
         const subject = encodeURIComponent("بازخورد کاربر روزساز")
         const body = encodeURIComponent(`${message.trim()}\\n\\n— از طرف: ${email.trim() || "کاربر ناشناس"}`)
-        window.location.href = `mailto:Roozsaz@gmail.com?subject=${subject}&body=${body}`
+        window.location.href = `mailto:info@rouzsaz.ir?subject=${subject}&body=${body}`
         toast.success("برنامه‌ی ایمیل شما باز می‌شود؛ فقط کافی است ارسال را بزنید")
     }
 

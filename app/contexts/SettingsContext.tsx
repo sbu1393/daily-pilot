@@ -10,6 +10,8 @@ import {
     useState,
 } from "react"
 import { getOfflineUserId, OFFLINE_SCOPE_EVENT } from "@/app/lib/offline"
+import { isNativeLocalNotificationPlatform } from "@/app/lib/native/local-notifications"
+import { cancelDailyReminder, scheduleDailyReminder } from "@/app/lib/native/daily-reminder"
 import {
     DEFAULT_SETTINGS,
     REMINDER_CHECK_INTERVAL_MS,
@@ -127,6 +129,15 @@ export function SettingsProvider({
     const [scopeUserId, setScopeUserId] = useState<number | null>(null)
 
     /*
+     * آیا داخل پوسته‌ی نیتیو (APK) هستیم؟
+     *
+     * `null` یعنی هنوز تشخیص داده نشده — و عمداً همین‌قدر مبهم باقی می‌ماند تا
+     * تصمیم‌های مربوط به notification هیچ‌وقت روی SSR یا رندر اول گرفته نشوند.
+     * تشخیص فقط بعد از mount (سمت کلاینت) انجام می‌شود.
+     */
+    const [nativePlatform, setNativePlatform] = useState<boolean | null>(null)
+
+    /*
      * scopeای که `settings` فعلی برای آن خوانده شده است. تا وقتی با scope
      * جاری یکی نشود، نه تم اعمال می‌شود و نه چیزی ذخیره — تا تنظیماتِ یک
      * حساب هرگز زیر کلید حساب دیگر نوشته نشود.
@@ -166,6 +177,11 @@ export function SettingsProvider({
         setHydratedScope(scopeToken(scopeUserId))
     }, [scopeUserId])
 
+    // تشخیص پلتفرم — فقط بعد از mount، پس SSR هیچ‌وقت به window/Capacitor نمی‌رسد.
+    useEffect(() => {
+        setNativePlatform(isNativeLocalNotificationPlatform())
+    }, [])
+
     // اعمال تم + ذخیره — فقط وقتی تنظیمات به scope جاری تعلق دارند
     useEffect(() => {
         if (hydratedScope !== scope) {
@@ -197,9 +213,18 @@ export function SettingsProvider({
         }
     }, [settings.theme, scope, hydratedScope])
 
-    // یادآور روزانه
+    // یادآور روزانه (لایه‌ی اول: تایمر صفحه — فقط در مرورگر)
     useEffect(() => {
         if (hydratedScope !== scope) {
+            return
+        }
+        /*
+         * روی Android native این لایه کلاً اجرا نمی‌شود: اعلان همان لحظه با
+         * Capacitor زمان‌بندی شده است و اجرای اینجا یعنی دو اعلان برای یک یادآور.
+         * تا وقتی تشخیص پلتفرم قطعی نشده (`null`)، هم مسدود می‌مانیم تا هیچ
+         * پنجره‌ی هم‌پوشانی بین دو مسیر باز نشود.
+         */
+        if (nativePlatform !== false) {
             return
         }
         if (!settings.reminderEnabled) {
@@ -283,9 +308,45 @@ export function SettingsProvider({
         hydratedScope,
         scope,
         scopeUserId,
+        nativePlatform,
         settings.reminderEnabled,
         settings.reminderTime,
         settings.sound,
+    ])
+
+    /*
+     * یادآور روزانه روی Android native
+     * ---------------------------------
+     * همان تنظیمات روزانه، اما زمان‌بندی‌شده توسط سیستم‌عامل (Capacitor) — بدون
+     * سرور، بدون اینترنت، و مستقل از باز بودن اپ.
+     *
+     * ترتیب هر تغییر (غیر کردن ساعت / خاموش کردن / خروج و ورود):
+     *   cleanup یک effect همیشه **قبل** از اجرای effect بعدی است، پس «لغوِ قبلی»
+     *   زمان‌بندیِ جدید پیش‌روی می‌افتد. شناسه‌ی اعلان از scope مشتق می‌شود،
+     *   بنابراین لغو/زمان‌بندیِ مکرر روی همان شناسه اتفاق می‌افتد و اعلان تکراری
+     *   ساخته نمی‌شود.
+     */
+    useEffect(() => {
+        if (hydratedScope !== scope) return
+        if (!nativePlatform) return
+
+        if (!settings.reminderEnabled) {
+            void cancelDailyReminder(scopeUserId)
+            return
+        }
+
+        void scheduleDailyReminder({ userId: scopeUserId, reminderTime: settings.reminderTime })
+
+        return () => {
+            void cancelDailyReminder(scopeUserId)
+        }
+    }, [
+        hydratedScope,
+        scope,
+        scopeUserId,
+        nativePlatform,
+        settings.reminderEnabled,
+        settings.reminderTime,
     ])
 
     const update = useCallback((patch: Partial<Settings>) => {

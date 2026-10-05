@@ -22,6 +22,10 @@ import {
     syncReminderSchedule,
     type PushFailureReason,
 } from "@/app/lib/pushSubscription"
+import {
+    isNativeLocalNotificationPlatform,
+    requestLocalNotificationPermission,
+} from "@/app/lib/native/local-notifications"
 import moment from "moment-jalaali"
 import { faDigits } from "@/app/lib/time"
 import { SETTINGS_PRIVACY_PARAGRAPHS } from "@/app/lib/privacyContent"
@@ -204,11 +208,18 @@ export default function SettingsPanel({ user }: { user: UserData }) {
      * هم‌گام‌سازی خودکار اشتراک Push: اگر یادآور فعال و مجوز داده شده باشد،
      * با باز شدن صفحه‌ی تنظیمات اشتراک این دستگاه دوباره ثبت می‌شود (بدون prompt).
      * این کار endpointهای چرخیده/باطل‌شده را تازه می‌کند.
+     *
+     * روی Android native این کار انجام نمی‌شود: یادآور آنجا با اعلان محلی
+     * زمان‌بندی می‌شود و ساختن PushSubscription برای همان دستگاه یعنی cron هم
+     * Push بفرستد ⇒ دو اعلان برای یک یادآور.
      */
     useEffect(() => {
         if (pushSyncedRef.current) return
         if (!settings.reminderEnabled) return
-        if (!hasNotificationPermission()) return
+
+        const isNative = isNativeLocalNotificationPlatform()
+        if (!isNative && !hasNotificationPermission()) return
+        if (isNative) return
 
         pushSyncedRef.current = true
         void ensurePushSubscription({ requestPermission: false })
@@ -218,10 +229,13 @@ export default function SettingsPanel({ user }: { user: UserData }) {
      * آینه‌کردن برنامه‌ی یادآور روی سرور با یک تأخیر کوچک (debounce):
      * تریگر cron سرور از همین مقدار استفاده می‌کند. تغییر سریع دقیقه‌ها
      * (اسکرول select) بنابراین یک درخواست می‌فرستد، نه ده‌تا.
+     *
+     * این آینه روی Android native هم نگه داشته می‌شود: دستگاه‌های دیگرِ همان
+     * حساب (مرورگر) باید همچنان از مسیر Web Push یادآور بگیرند.
      */
     useEffect(() => {
         if (!settings.reminderEnabled) return
-        if (!hasNotificationPermission()) return
+        if (!isNativeLocalNotificationPlatform() && !hasNotificationPermission()) return
 
         const timer = setTimeout(() => {
             void syncReminderSchedule({ enabled: true, time: settings.reminderTime })
@@ -240,16 +254,36 @@ export default function SettingsPanel({ user }: { user: UserData }) {
     const onToggleReminder = async (enabled: boolean) => {
         update({ reminderEnabled: enabled })
 
+        const isNative = isNativeLocalNotificationPlatform()
+
         if (!enabled) {
             // خاموش شدن یادآور = لغو اشتراک Push این دستگاه + آینه‌ی سرور
+            // (لغو اعلان محلی را خود `SettingsContext` با شناسه‌ی پایدار انجام می‌دهد).
+            // `removePushSubscription` روی دستگاهی که Push ندارد خودش no-op است و
+            // اگر اشتراکی از قبل در DB مانده باشد پاکش می‌کند، پس فراخوانی‌اش
+            // در هر دو حالت بی‌خطر و مفید است.
             void removePushSubscription()
             void syncReminderSchedule({ enabled: false, time: settings.reminderTime })
             return
         }
 
-        const granted = await requestNotificationPermission()
+        /*
+         * روی Android، مجوز از پل نیتیو گرفته می‌شود نه از `Notification` مرورگر
+         * (که در WebView اصلاً وجود ندارد و همیشه false برمی‌گرداند).
+         */
+        const granted = isNative
+            ? (await requestLocalNotificationPermission()).ok
+            : await requestNotificationPermission()
+
         if (!granted) {
             toast.info(PUSH_REASON_LABEL.PERMISSION_DENIED)
+            return
+        }
+
+        // زمان‌بندی اعلان محلی را `SettingsContext` انجام می‌دهد؛ اینجا فقط
+        // مسیر Push (مرورگر) راه می‌افتد.
+        if (isNative) {
+            toast.info("یادآور فعال شد؛ حتی وقتی برنامه بسته است هم یادآوری می‌شوی")
             return
         }
 

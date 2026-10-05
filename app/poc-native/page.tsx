@@ -42,6 +42,10 @@ type PocProbe = {
 declare global {
     interface Window {
         __pocProbe?: PocProbe
+        /** تابع emit — وضعیت را ذخیره و event را پخش می‌کند. */
+        __pocProbeRender?: (msg: string) => void
+        /** ساخت متن وضعیت فعلی. */
+        __pocProbeState?: () => string
     }
 }
 
@@ -248,6 +252,10 @@ export default function NativePocPage() {
         if (typeof window !== "undefined" && window.__pocProbe) {
             window.__pocProbe.reactClicks++
             window.__pocProbe.lastReactClick = name
+            // بنر را بلافاصله به‌روز کن؛ وگرنه تا کلیک بعدی قدیمی می‌ماند.
+            const render = window.__pocProbeRender
+            const buildState = window.__pocProbeState
+            if (render && buildState) render(buildState())
         }
         setReactClicks((n) => n + 1)
         setStep({ kind: "working", label: name, step: "Handler started" })
@@ -321,15 +329,34 @@ export default function NativePocPage() {
         )
     }, [])
 
-    /** بنر را از state می‌خوانیم؛ اسکریپت inline فقط event پخش می‌کند. */
+    /**
+     * بنر از state خوانده می‌شود؛ اسکریپت پروبلا فقط event پخش می‌کند.
+     *
+     * نکتهٔ مهم: `<script dangerouslySetInnerHTML>` فقط وقتی اجرا می‌شود که
+     * صفحه از سرور لود شود. با ناوبری سمت کلاینت (next/link) مرورگر اسکریپتی
+     * را که React با createElement/appendChild در DOM می‌گذارد اجرا نمی‌کند؛
+     * در آن حالت window.__pocProbe اصلاً ساخته نمی‌شود و بنر روی «waiting»
+     * می‌ماند. برای همین اینجا در صورت نبودِ پروبلا، خودمان آن را اجرا می‌کنیم.
+     */
     useEffect(() => {
         const onProbe = () => {
             const probe = window.__pocProbe
             if (probe) setProbeMsg(probe.msg)
         }
+
+        let injected: HTMLScriptElement | null = null
+        if (!window.__pocProbe) {
+            injected = document.createElement("script")
+            injected.textContent = PROBE_SCRIPT
+            document.body.appendChild(injected)
+        }
+
         onProbe()
         window.addEventListener("poc-probe:update", onProbe)
-        return () => window.removeEventListener("poc-probe:update", onProbe)
+        return () => {
+            window.removeEventListener("poc-probe:update", onProbe)
+            if (injected?.parentNode) injected.parentNode.removeChild(injected)
+        }
     }, [])
 
     const refreshPermissions = useCallback(async () => {

@@ -96,6 +96,7 @@ const PROBE_SCRIPT = `
       "\\nonLine=" + navigator.onLine +
       " | href=" + location.href +
       "\\nwindow.Capacitor=" + (typeof window.Capacitor) +
+      " | androidBridge=" + (typeof window.androidBridge) +
       " | bridge.LN=" +
       (window.Capacitor && window.Capacitor.Plugins
         ? typeof window.Capacitor.Plugins.LocalNotifications
@@ -244,7 +245,12 @@ export default function NativePocPage() {
      * مقادیر وابسته به مرورگر. عمداً فقط بعد از mount پر می‌شوند تا متن
      * رندر سمت سرور و کلاینت یکسان بماند؛ در غیر این صورت hydration می‌شکند.
      */
-    const [env, setEnv] = useState({ capacitor: "—", onLine: "—" })
+    const [env, setEnv] = useState({
+        capacitor: "—",
+        androidBridge: "—",
+        localNotifications: "—",
+        onLine: "—",
+    })
     const logKey = useRef(0)
 
     /** هر handler با این شروع می‌شود: قبل از هر await، وضعیت و لاگ را ثبت می‌کند. */
@@ -299,18 +305,37 @@ export default function NativePocPage() {
         setStep({ kind: "done", label: "—", ids: ids ?? [] })
     }, [mark])
 
-    /** import داینامیک پلاگین — جدا شده تا محل توقف دقیقاً مشخص باشد. */
+    /**
+     * import داینامیک پلاگین — جدا شده تا محل توقف دقیقاً مشخص باشد.
+     *
+     * ⚠️ اصلاح کلیدی: خودِ آبجکت پلاگین هرگز مستقیماً از این تابع async
+     * برگردانده نمی‌شود. پروکسی Capacitor برای هر پراپرتی ناشناخته — از جمله
+     * `then` — یک تابع برمی‌گرداند؛ بنابراین اگر خروجی این تابع خودِ پلاگین
+     * باشد، موتور JS آن را thenable می‌بیند و
+     * `LocalNotifications.then(resolve, reject)` را صدا می‌زند. آن فراخوانی با
+     * `"LocalNotifications.then()" is not implemented on web` رد می‌شود
+     * (به‌صورت unhandledrejection) و promise این تابع هرگز settle نمی‌شود،
+     * پس handler برای همیشه معلق می‌ماند و هیچ خطایی هم به catch نمی‌رسد.
+     * پس پلاگین را داخل یک آبجکت ساده بسته‌بندی می‌کنیم (این آبجکت thenable نیست).
+     */
     const loadPlugin = useCallback(async () => {
         mark("Loading @capacitor/local-notifications …")
         const mod = await import("@capacitor/local-notifications")
         mark("Plugin imported OK", "ok")
-        return mod.LocalNotifications
+        return { LocalNotifications: mod.LocalNotifications }
     }, [mark])
 
     useEffect(() => {
         setHydrated(true)
+        // تشخیص پل native: آیا این WebView واقعاً androidBridge را می‌بیند؟
+        const capWindow = window as unknown as {
+            Capacitor?: { Plugins?: Record<string, unknown> }
+            androidBridge?: unknown
+        }
         setEnv({
-            capacitor: typeof (window as unknown as { Capacitor?: unknown }).Capacitor,
+            capacitor: typeof capWindow.Capacitor,
+            androidBridge: typeof capWindow.androidBridge,
+            localNotifications: typeof capWindow.Capacitor?.Plugins?.LocalNotifications,
             onLine: String(navigator.onLine),
         })
         if (window.__pocProbe) {
@@ -362,7 +387,7 @@ export default function NativePocPage() {
     const refreshPermissions = useCallback(async () => {
         begin("refreshPermissions")
         try {
-            const LN = await loadPlugin()
+            const { LocalNotifications: LN } = await loadPlugin()
             mark("Native call started: checkPermissions()")
             const display = (await LN.checkPermissions()).display
             mark(`Native call returned: checkPermissions() → ${display}`, "ok")
@@ -404,7 +429,7 @@ export default function NativePocPage() {
     const probeRawSchedule = useCallback(async () => {
         begin("probeRawSchedule")
         try {
-            const LN = await loadPlugin()
+            const { LocalNotifications: LN } = await loadPlugin()
             const id = Math.floor(Math.random() * 1_000_000_000)
             const at = new Date(Date.now() + 5_000)
             mark(`Native call started: schedule() id=${id} at=+5s`)
@@ -423,7 +448,7 @@ export default function NativePocPage() {
     const ensureChannel = useCallback(async () => {
         begin("ensureChannel")
         try {
-            const LN = await loadPlugin()
+            const { LocalNotifications: LN } = await loadPlugin()
             mark("Native call started: createChannel()")
             await LN.createChannel(CHANNEL)
             mark("Native call returned: createChannel()", "ok")
@@ -438,7 +463,7 @@ export default function NativePocPage() {
     const listPending = useCallback(async () => {
         begin("listPending")
         try {
-            const LN = await loadPlugin()
+            const { LocalNotifications: LN } = await loadPlugin()
             mark("Native call started: getPending()")
             const res = await LN.getPending()
             const rows: PendingRow[] = res.notifications.map((n: PendingLocalNotificationSchema) => ({
@@ -457,12 +482,41 @@ export default function NativePocPage() {
     const scheduleReminder = useCallback(
         async (delayMs: number | null, label: string) => {
             begin(`scheduleReminder(${label})`)
+            // پلتفرمی که Capacitor تشخیص داده است. اگر «web» باشد یعنی پلاگین به
+            // پیاده‌سازی وب افتاده و متدها به native نمی‌روند — همین تعیین می‌کند
+            // نتیجهٔ schedule از کدام مسیر آمده است.
+            const capPlatform = (window as unknown as { Capacitor?: { getPlatform?: () => string } })
+                .Capacitor
+            const platform =
+                typeof capPlatform?.getPlatform === "function"
+                    ? capPlatform.getPlatform()
+                    : "(نامشخص)"
             try {
-                const LN = await loadPlugin()
+                const { LocalNotifications: LN } = await loadPlugin()
+
+                // ── تشخیص پل native: آیا این WebView واقعاً androidBridge را می‌بیند؟ ──
+                const capWin = window as unknown as {
+                    Capacitor?: { Plugins?: Record<string, unknown> }
+                    androidBridge?: unknown
+                }
+                mark(
+                    `DIAG bridge: androidBridge=${typeof capWin.androidBridge}` +
+                        ` · window.Capacitor=${typeof capWin.Capacitor}` +
+                        ` · Plugins.LocalNotifications=${typeof capWin.Capacitor?.Plugins?.LocalNotifications}` +
+                        ` · platform=${platform}`,
+                )
+                try {
+                    const permDiag = await LN.checkPermissions()
+                    mark(`DIAG checkPermissions() → ${JSON.stringify(permDiag)}`, "ok")
+                } catch (e) {
+                    mark(`DIAG checkPermissions() خطا: ${describeError(e).message}`, "warn")
+                }
 
                 mark("Native call started: checkPermissions()")
                 const display = (await LN.checkPermissions()).display
                 mark(`Native call returned: ${display}`, display === "granted" ? "ok" : "warn")
+                // مجوز نمایش را در همان بخش «مجوز نمایش» بالای دکمه‌ها نشان بده.
+                setPerms((p) => ({ ...p, checked: true, display }))
 
                 if (display !== "granted") {
                     mark("Native call started: requestPermissions()")
@@ -482,12 +536,16 @@ export default function NativePocPage() {
                 await ensureChannel()
 
                 mark("Native call started: checkExactNotificationSetting()")
+                let exactAlarm = "(ناخوانا)"
                 try {
                     const exact = await LN.checkExactNotificationSetting()
+                    exactAlarm = exact.exact_alarm
                     mark(`exact_alarm = ${exact.exact_alarm}`, exact.exact_alarm === "granted" ? "ok" : "warn")
                 } catch (e) {
                     mark(`checkExactNotificationSetting() در دسترس نیست: ${describeError(e).message}`, "warn")
                 }
+                // exact alarm را هم در همان بخش «مجوز نمایش / exact alarm» نشان بده.
+                setPerms((p) => ({ ...p, exactAlarm }))
 
                 const at = new Date(Date.now() + (delayMs ?? 0))
                 const id = Math.floor(Math.random() * 1_000_000_000)
@@ -505,15 +563,26 @@ export default function NativePocPage() {
                         },
                     ],
                 })
+                const ids = res.notifications.map((n) => n.id)
+                const warning = res.warning
+                    ? ` · warning ${res.warning.code}: ${res.warning.message}`
+                    : ""
                 mark(
-                    `Native call returned: ids=[${res.notifications.map((n) => n.id).join(", ")}]` +
-                        (res.warning ? ` · WARNING ${res.warning.code}` : ""),
-                    res.warning ? "warn" : "ok",
+                    `Native call returned: ids=[${ids.join(", ")}] · platform=${platform} · display=${display} · exact=${exactAlarm}` +
+                        warning,
+                    warning ? "warn" : "ok",
                 )
                 if (res.warning) {
                     mark(`${res.warning.code}: ${res.warning.message}`, "warn")
                 }
-                finish(null, "schedule() موفق بود", res.notifications.map((n) => n.id))
+                // نتیجه را صریح در «مرحلهٔ فعلی» نگه دار: id، مجوز، exact alarm، پلتفرم و warning.
+                setStep({
+                    kind: "done",
+                    label:
+                        `schedule() موفق · id=[${ids.join(", ")}]` +
+                        ` · platform=${platform} · display=${display} · exact=${exactAlarm}${warning}`,
+                    ids,
+                })
             } catch (err) {
                 finish(err)
             }
@@ -578,7 +647,9 @@ export default function NativePocPage() {
                     <strong>{reactClicks}</strong>
                 </div>
                 <div>
-                    window.Capacitor = <strong>{env.capacitor}</strong> · onLine ={" "}
+                    window.Capacitor = <strong>{env.capacitor}</strong> · androidBridge ={" "}
+                    <strong>{env.androidBridge}</strong> · Plugins.LocalNotifications ={" "}
+                    <strong>{env.localNotifications}</strong> · onLine ={" "}
                     <strong>{env.onLine}</strong>
                 </div>
                 <div style={{ marginTop: "0.4rem", color: "#444" }}>
@@ -612,7 +683,9 @@ export default function NativePocPage() {
                 )}
                 {step.kind === "done" && (
                     <span style={{ color: "#0a7" }}>
-                        ✓ تمام · ids=[{step.ids.join(", ") || "—"}]
+                        {step.label && step.label !== "—"
+                            ? `✓ ${step.label}`
+                            : `✓ تمام · ids=[${step.ids.join(", ") || "—"}]`}
                     </span>
                 )}
                 {step.kind === "error" && (

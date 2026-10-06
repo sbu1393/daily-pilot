@@ -3,6 +3,7 @@
 import type { ScheduleWarning } from "@capacitor/local-notifications"
 
 import { reminderTarget, scopeToken } from "@/app/lib/reminder"
+import { enqueueNative, stableNotificationId } from "@/app/lib/native/primitives"
 import {
     cancelLocalReminder,
     scheduleLocalReminder,
@@ -37,25 +38,6 @@ export type DailyReminderCancelOutcome =
     | { ok: true }
     | { ok: false; reason: DailyReminderFailureReason; message: string }
 
-/** سقف شناسه — زیر `2^31-1` (بیشینه‌ی int32 علامت‌دار اندروید) می‌مانیم. */
-const MAX_NOTIFICATION_ID = 2_000_000_000
-
-/**
- * هش صحیحِ قطعی (djb2 روی ۳۲ بیت) — pure و بدون وابستگی.
- * برای ما فقط یک نگاشت یک‌به‌یکِ «کلید متنی ← عدد» لازم است، نه یک هش
- * رمزنگاری؛ پس استفاده از الگوریتم استاندارد کتابخانه‌ای لازم نیست.
- */
-function stableIntHash(value: string): number {
-    let hash = 5381
-
-    for (let index = 0; index < value.length; index += 1) {
-        // hash * 33 + code، در محدوده‌ی int32
-        hash = (((hash << 5) + hash + value.charCodeAt(index)) | 0)
-    }
-
-    return hash >>> 0
-}
-
 /**
  * شناسه‌ی پایدار اعلان یادآور روزانه برای این scope.
  *
@@ -70,9 +52,7 @@ function stableIntHash(value: string): number {
  * نتیجه در بازه‌ی `1 … 2_000_000_000` است (نه صفر، چون صفر رزرو نشده).
  */
 export function dailyReminderNotificationId(userId: number | null): number {
-    const key = `daily-reminder:${scopeToken(userId)}`
-
-    return 1 + (stableIntHash(key) % MAX_NOTIFICATION_ID)
+    return stableNotificationId(`daily-reminder:${scopeToken(userId)}`)
 }
 
 /**
@@ -93,31 +73,6 @@ export function nextDailyReminderAt(now: Date, reminderTime: string): Date | nul
     const startOfTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
 
     return reminderTarget(startOfTomorrow, reminderTime)
-}
-
-/*
- * ترتیب فراخوانی‌های نیتیو
- * ------------------------
- * `schedule` و `cancel` هر دو از پل نیتیو عبور می‌کنند و ترتیبِ رسیدنشان به
- * سیستم‌عامل تضمین‌شده نیست. در چرخه‌ی عمر React، cleanup یک effect **قبل** از
- * اجرای effect بعدی اجرا می‌شود؛ پس بدون صف، ممکن است `cancel` بعد از `schedule`
- * بنشیند و اعلان تازه‌ساخته را لغو کند.
- *
- * این صف فقط در کلاینت وجود دارد و هیچ state ای ندارد؛ کارش فقط سریال‌کردن
- * عملیات نیتیو است.
- */
-let nativeQueue: Promise<unknown> = Promise.resolve()
-
-function enqueueNative<T>(task: () => Promise<T>): Promise<T> {
-    // اگر کار قبلی رد شده بود، این یکی هم باید اجرا شود (`onRejected` همان task است).
-    const result = nativeQueue.then(task, task)
-
-    nativeQueue = result.then(
-        () => undefined,
-        () => undefined,
-    )
-
-    return result
 }
 
 function toFailure(

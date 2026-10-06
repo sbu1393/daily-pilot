@@ -1,4 +1,5 @@
 import { getCanonicalDayKey, shiftCanonicalKey } from "./canonicalDay"
+import { scopeToken } from "./reminder"
 import { faDigits, formatCanonicalToJalali } from "./time"
 
 /**
@@ -21,8 +22,23 @@ export type TaskReminder = {
     firedAt: number | null
 }
 
-/** کلید localStorage — هم‌خانواده‌ی «dp:settings» و «dp:reminder-fired» */
-export const REMINDER_STORAGE_KEY = "dp:task-reminders"
+/**
+ * کلید localStorageِ یادآور تسک‌ها.
+ *
+ * ⚠️ کلید از نسخه‌ی قبل **بدون scope** بود (`dp:task-reminders`) و روی دستگاهِ
+ * مشترک یعنی یادآورِ کاربرِ قبلی به کاربرِ بعدی نشان داده می‌شد — و روی Android
+ * یعنی اعلانِ نیتیوِ کاربرِ قبلی هم برای کاربرِ بعدی باقی می‌ماند. الان مثل
+ * تنظیمات یادآور روزانه، کلید user-scoped است (`scopeToken`) و کلید قدیمی فقط
+ * یک‌بار پاک می‌شود.
+ */
+const REMINDERS_PREFIX = "dp:task-reminders"
+
+/** کلید بدون scopeِ نسخه‌ی قبل — هرگز خوانده نمی‌شود، فقط پاک می‌شود. */
+export const LEGACY_REMINDERS_STORAGE_KEY = "dp:task-reminders"
+
+export function remindersStorageKey(userId: number | null): string {
+    return `${REMINDERS_PREFIX}:${scopeToken(userId)}`
+}
 
 /** فاصله‌ی بررسی رسیدن زمان یادآوری */
 export const REMINDER_TICK_MS = 5_000
@@ -53,6 +69,8 @@ export const REMINDER_MIN_LEAD_MS = 30 * 1000
 type StorageLike = {
     getItem: (key: string) => string | null
     setItem: (key: string, value: string) => void
+    /** اختیاری است تا fakeهای تست بدون آن هم معتبر بمانند. */
+    removeItem?: (key: string) => void
 }
 
 /* ------------------------------------------------------------------ */
@@ -92,11 +110,15 @@ export function pruneReminders(
 }
 
 /** خواندن امن از localStorage؛ داده‌ی خراب یا ناسازگار بی‌صدا نادیده گرفته می‌شود. */
-export function readReminders(storage: StorageLike | null, now: number = Date.now()): TaskReminder[] {
+export function readReminders(
+    storage: StorageLike | null,
+    now: number = Date.now(),
+    userId: number | null = null,
+): TaskReminder[] {
     if (!storage) return []
 
     try {
-        const raw = storage.getItem(REMINDER_STORAGE_KEY)
+        const raw = storage.getItem(remindersStorageKey(userId))
         if (!raw) return []
 
         const parsed: unknown = JSON.parse(raw)
@@ -109,13 +131,28 @@ export function readReminders(storage: StorageLike | null, now: number = Date.no
 }
 
 /** نوشتن امن؛ اگر localStorage در دسترس/پر باشد، بی‌صدا رد می‌شود. */
-export function writeReminders(storage: StorageLike | null, list: TaskReminder[]): void {
+export function writeReminders(
+    storage: StorageLike | null,
+    list: TaskReminder[],
+    userId: number | null = null,
+): void {
     if (!storage) return
 
     try {
-        storage.setItem(REMINDER_STORAGE_KEY, JSON.stringify(list))
+        storage.setItem(remindersStorageKey(userId), JSON.stringify(list))
     } catch {
         /* حالت خصوصی مرورگر یا سهمیه‌ی پر — یادآوری فقط برای همین نشست می‌ماند */
+    }
+}
+
+/** حذف کلیدِ بدون scopeِ نسخه‌ی قبل (هم‌خانواده‌ی `clearLegacySettingsKeys`). */
+export function clearLegacyRemindersKey(storage: StorageLike | null): void {
+    if (!storage) return
+
+    try {
+        storage.removeItem?.(LEGACY_REMINDERS_STORAGE_KEY)
+    } catch {
+        /* ignore */
     }
 }
 

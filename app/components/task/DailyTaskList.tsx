@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { useCalendar } from "@/app/contexts/CalenderContext"
+import { useTaskReminders } from "@/app/hooks/useTaskReminder"
 import { useDaySummary, type DaySummary } from "../../hooks/useDaySummary"
 import { getCanonicalToday, shiftCanonicalKey } from "../../lib/canonicalDay"
 import { faDigits } from "@/app/lib/time"
@@ -45,6 +46,7 @@ const priorityWeight: Record<TaskPriority, number> = { HIGH: 3, MEDIUM: 2, LOW: 
 export default function DailyTaskList() {
     const { selectedDate, timezone } = useCalendar()
     const { summary, refresh: refreshSummary } = useDaySummary()
+    const { removeTaskReminder } = useTaskReminders()
 
     // Phase 2 — روزِ کانونیکالِ امروز: کارت مشاور و «چیدمان هوشمند» فقط برای همین روز معنا دارند
     const isToday = selectedDate === getCanonicalToday(timezone)
@@ -251,6 +253,8 @@ export default function DailyTaskList() {
         setBusy(true)
         try {
             await api(`/api/tasks/${deleteTask.id}`, { method: "DELETE" })
+            // کار حذف شد ⇒ یادآورش هم باید برود (و اعلان نیتیو لغو شود).
+            void removeTaskReminder(deleteTask.id)
             setDeleteTask(null)
             await afterMutation("کار حذف شد؛ زمانش به استخر روز برگشت 🕊")
         } catch (e) {

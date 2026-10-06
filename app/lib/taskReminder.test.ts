@@ -20,8 +20,10 @@ import {
     toDateTimeLocalValue,
     upsertReminder,
     writeReminders,
+    remindersStorageKey,
+    clearLegacyRemindersKey,
+    LEGACY_REMINDERS_STORAGE_KEY,
     REMINDER_MAX_ITEMS,
-    REMINDER_STORAGE_KEY,
     type TaskReminder,
 } from "./taskReminder"
 import { getCanonicalDayKey } from "./canonicalDay"
@@ -176,7 +178,9 @@ describe("writeReminders — مقاوم در برابر خطای localStorage", 
 
         writeReminders(storage, [reminder({ taskId: 4 })])
 
-        expect(REMINDER_STORAGE_KEY).toBe("dp:task-reminders")
+        expect(remindersStorageKey(7)).toBe("dp:task-reminders:u7")
+        expect(remindersStorageKey(null)).toBe("dp:task-reminders:anon")
+        expect(LEGACY_REMINDERS_STORAGE_KEY).toBe("dp:task-reminders")
         expect(readReminders(storage, 0).map((r) => r.taskId)).toEqual([4])
     })
 
@@ -263,5 +267,76 @@ describe("formatReminderRelative", () => {
     it("کمتر از یک دقیقه و زمان گذشته", () => {
         expect(formatReminderRelative(now + 30_000, now)).toBe("کمتر از یک دقیقه دیگر")
         expect(formatReminderRelative(now - 1, now)).toBe("گذشت")
+    })
+})
+
+/*
+ * کلیدِ user-scoped
+ * -----------------
+ * کلید یادآورها قبلاً یک کلیدِ سراسری بود (`dp:task-reminders`). روی دستگاهِ
+ * مشترک یعنی یادآورِ کاربرِ قبلی به کاربرِ بعدی نشان داده می‌شد — و روی Android
+ * یعنی اعلانِ نیتیوِ کاربر قبلی هم برای کاربرِ بعدی باقی می‌ماند. این تست‌ها آن
+ * نشت را قفل می‌کنند.
+ */
+describe("remindersStorageKey — تفکیک نشست‌ها", () => {
+    /** localStorage واقعی‌نما و کلیددار (برخلاف makeStorageِ تک‌خانه‌ای بالا) */
+    function makeKeyedStorage(initial: Record<string, string> = {}) {
+        const map = new Map(Object.entries(initial))
+        const removed: string[] = []
+
+        return {
+            getItem: (key: string) => map.get(key) ?? null,
+            setItem: (key: string, value: string) => void map.set(key, value),
+            removeItem: (key: string) => {
+                removed.push(key)
+                map.delete(key)
+            },
+            removed,
+            map,
+        }
+    }
+
+    it("هر نشست کلید خودش را دارد", () => {
+        expect(remindersStorageKey(1)).toBe("dp:task-reminders:u1")
+        expect(remindersStorageKey(2)).toBe("dp:task-reminders:u2")
+        expect(remindersStorageKey(null)).toBe("dp:task-reminders:anon")
+    })
+
+    it("یادآورِ کاربر اول به کاربر دوم نشان داده نمی‌شود", () => {
+        const storage = makeKeyedStorage()
+
+        writeReminders(storage, [reminder({ taskId: 11, title: "مال کاربر اول" })], 1)
+
+        expect(readReminders(storage, 0, 1).map((r) => r.taskId)).toEqual([11])
+        expect(readReminders(storage, 0, 2)).toEqual([])
+        expect(readReminders(storage, 0, null)).toEqual([])
+    })
+
+    it("کلیدِ قدیمیِ بدون scope خوانده نمی‌شود", () => {
+        const legacy = JSON.stringify([reminder({ taskId: 99 })])
+        const storage = makeKeyedStorage({ [LEGACY_REMINDERS_STORAGE_KEY]: legacy })
+
+        expect(readReminders(storage, 0, 1)).toEqual([])
+    })
+
+    it("کلیدِ قدیمی پاک می‌شود و داده‌اش از دست نمی‌رود", () => {
+        const legacy = JSON.stringify([reminder({ taskId: 99 })])
+        const storage = makeKeyedStorage({ [LEGACY_REMINDERS_STORAGE_KEY]: legacy })
+
+        clearLegacyRemindersKey(storage)
+
+        expect(storage.removed).toEqual([LEGACY_REMINDERS_STORAGE_KEY])
+        expect(storage.map.has(LEGACY_REMINDERS_STORAGE_KEY)).toBe(false)
+        expect(storage.map.get(remindersStorageKey(1))).toBeUndefined()
+    })
+
+    it("پاک‌سازی روی storage نال یا بدون removeItem هم بی‌خطر است", () => {
+        expect(() => clearLegacyRemindersKey(null)).not.toThrow()
+        expect(() =>
+            clearLegacyRemindersKey({
+                getItem: () => null,
+                setItem: () => undefined,
+            }),
+        ).not.toThrow()
     })
 })

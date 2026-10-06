@@ -28,6 +28,23 @@ type Props = {
 const DEFAULT_LEAD_MS = 10 * 60 * 1000
 
 /**
+ * پیام شکست ثبت یادآور روی نیتیو.
+ *
+ * «مجوز نگرفته شد» با «زمان نامعتبر است» یکی نیست و UI نباید وانمود کند یادآور
+ * ساخته شده است؛ پس هر دلیل پیام خودش را دارد.
+ */
+const NATIVE_REASON_LABEL: Record<string, string> = {
+    PERMISSION_DENIED: "برای یادآوری، اجازه‌ی نمایش اعلان را ندادی",
+    PERMISSION_PROMPT: "برای یادآوری، اجازه‌ی نمایش اعلان لازم است",
+    PERMISSION_FAILED: "بررسی اجازه‌ی اعلان ناموفق بود",
+    IN_THE_PAST: "زمان یادآوری گذشته است",
+    INVALID_DUE_AT: "زمان یادآوری معتبر نیست",
+    INVALID_TASK_ID: "این کار معتبر نیست",
+    NOT_NATIVE: "یادآوری نیتیو فقط در اپ اندروید کار می‌کند",
+    PLUGIN_UNAVAILABLE: "سرویس اعلان در دسترس نیست",
+}
+
+/**
  * مودال «تنظیم یادآوری تسک».
  *
  * فقط با مودالِ استاندارد پروژه (AnimatedModal) و کلاس‌های موجود task.module.css
@@ -57,7 +74,7 @@ export default function ReminderModal({ task, open, onClose }: Props) {
         setValue(toDateTimeLocalValue(Date.now() + minutes * 60_000))
     }
 
-    const submit = () => {
+    const submit = async () => {
         if (dueAt == null) {
             toast.error("زمان یادآوری را انتخاب کن")
             return
@@ -67,13 +84,22 @@ export default function ReminderModal({ task, open, onClose }: Props) {
             return
         }
 
-        setReminder({ id: task.id, title: task.title }, dueAt)
+        /*
+         * روی Android، مجوز اعلان پیش از ثبت گرفته می‌شود؛ اگر داده نشده باشد اصلاً
+         * ثبت نمی‌شود و اینجا صادقانه خطا نشان داده می‌شود.
+         */
+        const result = await setReminder({ id: task.id, title: task.title }, dueAt)
+        if (!result.ok) {
+            toast.error(NATIVE_REASON_LABEL[result.reason] ?? "ثبت یادآوری ناموفق بود")
+            return
+        }
+
         toast.success(`یادآوری برای «${task.title}» ثبت شد ⏰`)
         onClose()
     }
 
     const remove = () => {
-        removeTaskReminder(task.id)
+        void removeTaskReminder(task.id)
         toast.info("یادآوری حذف شد")
         onClose()
     }

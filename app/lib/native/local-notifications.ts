@@ -209,6 +209,62 @@ export async function cancelLocalReminder(id: number): Promise<CancelLocalRemind
     }
 }
 
+/*
+ * ── تشخیص: اعلان‌های pending ──────────────────────────────────────────
+ * عمداً یک **خواندنِ صرف** است: نه `schedule` می‌کند، نه `cancel`، نه
+ * `createChannel` و نه مجوز می‌خواهد. فقط می‌پرسد «الان چه چیزی در صف
+ * سیستم‌عامل ثبت شده است» تا بتوان فهمید یک یادآور واقعاً زمان‌بندی شده یا
+ * فقط در state خودِ اپ وجود دارد.
+ */
+
+/** یک اعلانِ در انتظار، به شکل قابل نمایش. */
+export type PendingLocalReminder = {
+    id: number
+    title: string
+    /** لحظه‌ی trigger؛ `null` یعنی بدون زمان‌بندی (اعلان فوری/تکراری). */
+    at: Date | null
+}
+
+export type PendingLocalRemindersOutcome =
+    | { ok: true; notifications: PendingLocalReminder[]; now: Date }
+    | { ok: false; reason: "NOT_NATIVE" | "PLUGIN_UNAVAILABLE" | "PENDING_QUERY_FAILED"; message: string }
+
+/**
+ * خواندن فهرست اعلان‌های در انتظار از سیستم‌عامل.
+ *
+ * از API رسمی `LocalNotifications.getPending()` استفاده می‌کند که دقیقاً
+ * همان چیزی را برمی‌گرداند که `schedule()` در سیستم‌عامل ثبت کرده — پس
+ * پاسخِ «آیا واقعاً زمان‌بندی شد؟» را بدون هیچ حدسی می‌دهد.
+ *
+ * هیچ تغییری در وضعیت اعلان‌های موجود نمی‌دهد.
+ */
+export async function listPendingLocalReminders(): Promise<PendingLocalRemindersOutcome> {
+    const resolved = await resolvePlugin()
+    if (!resolved.ok) {
+        return {
+            ok: false,
+            reason: resolved.reason === "PLUGIN_UNAVAILABLE" ? "PLUGIN_UNAVAILABLE" : "NOT_NATIVE",
+            message: resolved.message,
+        }
+    }
+
+    try {
+        const result = await resolved.plugin.getPending()
+
+        return {
+            ok: true,
+            now: new Date(),
+            notifications: result.notifications.map((notification) => ({
+                id: notification.id,
+                title: notification.title,
+                at: notification.schedule?.at ?? null,
+            })),
+        }
+    } catch (err) {
+        return { ok: false, reason: "PENDING_QUERY_FAILED", message: describeError(err) }
+    }
+}
+
 /** شناسه‌ی امن برای اندروید (شناسه‌ها ۳۲ بیتی علامت‌دار هستند). */
 function randomNotificationId(): number {
     return Math.floor(Math.random() * 2_000_000_000)

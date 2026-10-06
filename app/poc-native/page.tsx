@@ -5,8 +5,10 @@ import {
     LOCAL_REMINDER_CHANNEL_ID,
     cancelLocalReminder,
     isNativeLocalNotificationPlatform,
+    listPendingLocalReminders,
     requestLocalNotificationPermission,
     scheduleLocalReminder,
+    type PendingLocalReminder,
 } from "@/app/lib/native/local-notifications"
 
 /**
@@ -34,6 +36,18 @@ type ScheduledItem = {
     id: number
     label: string
     at: string
+}
+
+/**
+ * تشخیص موقت: اعلان‌هایی که سیستم‌عامل واقعاً در صف نگه داشته.
+ *
+ * جدا از «در انتظار» بالا است، چون آن یک حافظه‌ی محلی از چیزی است که *فکر
+ * می‌کنیم* زمان‌بندی کرده‌ایم؛ این یکی از خودِ `getPending()` می‌خواند و
+ * تنها راه پاسخ‌دادن به این است که آیا یادآور واقعاً ثبت شده یا نه.
+ */
+type PendingReport = {
+    now: Date
+    items: PendingLocalReminder[]
 }
 
 const LOG_COLOR: Record<LogLevel, string> = {
@@ -69,6 +83,7 @@ export default function NativePocPage() {
     const [native, setNative] = useState<boolean | null>(null)
     const [permission, setPermission] = useState("—")
     const [scheduled, setScheduled] = useState<ScheduledItem[]>([])
+    const [pending, setPending] = useState<PendingReport | null>(null)
     const [busy, setBusy] = useState(false)
     const [log, setLog] = useState<LogEntry[]>([])
     const logKey = useRef(0)
@@ -151,6 +166,23 @@ export default function NativePocPage() {
         },
         [logLine],
     )
+
+    const readPending = useCallback(async () => {
+        setBusy(true)
+        const result = await listPendingLocalReminders()
+        setBusy(false)
+
+        if (!result.ok) {
+            logLine("error", `خواندن اعلان‌های در انتظار ناموفق بود (${result.reason}): ${result.message}`)
+            return
+        }
+
+        setPending({ now: result.now, items: result.notifications })
+        logLine(
+            result.notifications.length === 0 ? "warn" : "ok",
+            `اعلان‌های در انتظارِ سیستم‌عامل: ${result.notifications.length} مورد (${result.now.toLocaleString("fa-IR")})`,
+        )
+    }, [logLine])
 
     return (
         <main
@@ -237,7 +269,62 @@ export default function NativePocPage() {
                 >
                     یادآور ۱ دقیقه
                 </button>
+                <button
+                    type="button"
+                    style={btnPrimary}
+                    disabled={busy}
+                    onClick={() => void readPending()}
+                >
+                    بررسی اعلان‌های Pending
+                </button>
             </section>
+
+            {/* ── تشخیص: اعلان‌های ثبت‌شده در سیستم‌عامل ── */}
+            {pending !== null && (
+                <section
+                    style={{
+                        border: "1px solid #3b5bdb",
+                        borderRadius: 8,
+                        padding: "0.75rem",
+                        marginBottom: "0.75rem",
+                        fontSize: "0.85rem",
+                    }}
+                >
+                    <h2 style={{ fontSize: "0.95rem", margin: "0 0 0.4rem" }}>
+                        اعلان‌های Pending (از خودِ اندروید)
+                    </h2>
+                    <div style={{ lineHeight: 1.9 }}>
+                        <div>
+                            زمان فعلی دستگاه:{" "}
+                            <strong>{pending.now.toLocaleString("fa-IR")}</strong>
+                        </div>
+                        <div>
+                            تعداد: <strong>{pending.items.length}</strong>
+                        </div>
+                    </div>
+                    {pending.items.length === 0 ? (
+                        <p style={{ color: "#c00", margin: "0.4rem 0 0", lineHeight: 1.8 }}>
+                            هیچ اعلانی در صف سیستم‌عامل ثبت نشده است.
+                        </p>
+                    ) : (
+                        <ul style={{ listStyle: "none", margin: "0.4rem 0 0", padding: 0, lineHeight: 2 }}>
+                            {pending.items.map((item) => {
+                                const delta = item.at
+                                    ? Math.round((item.at.getTime() - pending.now.getTime()) / 60000)
+                                    : null
+
+                                return (
+                                    <li key={item.id}>
+                                        #{item.id} · {item.title} ·{" "}
+                                        {item.at ? item.at.toLocaleString("fa-IR") : "بدون زمان‌بندی"}
+                                        {delta !== null && ` (${delta} دقیقه دیگر)`}
+                                    </li>
+                                )
+                            })}
+                        </ul>
+                    )}
+                </section>
+            )}
 
             {/* ── زمان‌بندی‌شده‌ها ── */}
             <section

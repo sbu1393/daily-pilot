@@ -2,8 +2,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import {
     dailyReminderNotificationId,
+    enableNativeDailyReminder,
+    isDailyReminderLaterToday,
     nextDailyReminderAt,
 } from "@/app/lib/native/daily-reminder"
+import type { LocalNotificationPermissionOutcome } from "@/app/lib/native/local-notifications"
 import { parseReminderHHMM, reminderTarget } from "@/app/lib/reminder"
 
 /*
@@ -291,5 +294,136 @@ describe("nextDailyReminderAt — تغییر ساعت (DST)", () => {
         expect(at!.getHours()).toBe(7)
         expect(at!.getMinutes()).toBe(30)
         expect(at!.getTime()).toBeGreaterThan(now.getTime())
+    })
+})
+
+/*
+ * Regression — ریشه‌ی باگ «یادآور روشن بود ولی اعلانی هرگز زمان‌بندی نشد»
+ * ---------------------------------------------------------------------------
+ * اگر `reminderEnabled` قبل از آم��دن مجوز `true` شود، effect نیتیو اجرا
+ * می‌شود، `ensurePermission()` هنوز `prompt` می‌بیند و **پیش از رسیدن به
+ * `plugin.schedule()`** برمی‌گردد؛ نتیجه بی‌صدا دور ریخته می‌شد و هیچ آلارمی
+ * ساخته نمی‌شد. این تست‌ها قفل می‌کنند که فعال‌سازی تا resolve‌شدن مجوز
+ * انجام نشود — بدون نیاز به mock کردن Capacitor (فقط دو تابع ساده تزریق می‌شوند).
+ */
+describe("enableNativeDailyReminder — ترتیب مجوز و فعال‌سازی", () => {
+    it("تا وقتی مجوز granted نشده، یادآور را روشن نمی‌کند", async () => {
+        const order: string[] = []
+        let enabled = false
+
+        const outcome = await enableNativeDailyReminder({
+            requestPermission: async () => {
+                order.push("permission")
+
+                return {
+                    ok: false,
+                    reason: "PERMISSION_PROMPT",
+                    message: "کاربر هنوز پاسخ نداده است",
+                }
+            },
+            setEnabled: (on) => {
+                order.push(`setEnabled:${on}`)
+                enabled = on
+            },
+        })
+
+        expect(outcome.ok).toBe(false)
+        expect(enabled).toBe(false)
+        // نکته‌ی اصلی: `setEnabled` اصلاً نباید صدا زده شود، نه فقط بعد از مجوز.
+        expect(order).toEqual(["permission"])
+    })
+
+    it("setEnabled فقط پس از resolve‌شدن promise مجوز صدا زده می‌شود", async () => {
+        const order: string[] = []
+        let resolvePermission!: (value: LocalNotificationPermissionOutcome) => void
+
+        const pending = new Promise<LocalNotificationPermissionOutcome>((resolve) => {
+            resolvePermission = resolve
+        })
+
+        const promise = enableNativeDailyReminder({
+            requestPermission: () => {
+                order.push("permission:asked")
+
+                return pending
+            },
+            setEnabled: () => {
+                order.push("enabled")
+            },
+        })
+
+        // یک نوبت microtask صبر می‌کنیم: مجوز هنوز بی‌پاسخ است، پس نباید فعال شده باشیم.
+        await Promise.resolve()
+        expect(order).toEqual(["permission:asked"])
+
+        resolvePermission({ ok: true, display: "granted" })
+
+        const outcome = await promise
+
+        expect(outcome.ok).toBe(true)
+        expect(order).toEqual(["permission:asked", "enabled"])
+    })
+
+    it("مجوز ردشده را بدون فعال‌سازی و با همان دلیل برمی‌گرداند", async () => {
+        let enableCalls = 0
+
+        const outcome = await enableNativeDailyReminder({
+            requestPermission: async () => ({
+                ok: false,
+                reason: "PERMISSION_DENIED",
+                message: "کاربر مجوز را رد کرد",
+            }),
+            setEnabled: () => {
+                enableCalls += 1
+            },
+        })
+
+        expect(outcome.ok).toBe(false)
+        if (outcome.ok) throw new Error("انتظار می‌رفت شکست بخورد")
+        expect(outcome.reason).toBe("PERMISSION_DENIED")
+        expect(outcome.message).toBe("کاربر مجوز را رد کرد")
+        expect(enableCalls).toBe(0)
+    })
+
+    it("مجوز داده‌شده یعنی فعال‌سازی دقیقاً یک بار", async () => {
+        let enableCalls = 0
+
+        await enableNativeDailyReminder({
+            requestPermission: async () => ({ ok: true, display: "granted" }),
+            setEnabled: () => {
+                enableCalls += 1
+            },
+        })
+
+        expect(enableCalls).toBe(1)
+    })
+})
+
+/*
+ * تشخیص «ساعت امروز گذشته» — فقط *تشخیص*، بدون تغییر ریاضیات زمان.
+ * `nextDailyReminderAt` همچنان سخت‌گیرانه آینده برمی‌گرداند (و تست‌های بالا
+ * آن را قفل کرده‌اند)؛ این تابع فقط کمک می‌کند رابط کاربری به‌جای سکوت،
+ * توضیح بدهد که اولین اعلان فرداست.
+ */
+describe("isDailyReminderLaterToday", () => {
+    it("وقتی ساعت هنوز در همین روز جلوست، true است", () => {
+        expect(isDailyReminderLaterToday(new Date(2026, 8, 8, 14, 30, 0, 0), "14:35")).toBe(true)
+    })
+
+    it("وقتی ساعت امروز گذشته و اعلان برای فرداست، false است", () => {
+        // سناریوی گزارش‌شده: انتخاب ۱۴:۳۴ در ساعت ۱۴:۳۴:۱۰ ⇒ فردا.
+        expect(isDailyReminderLaterToday(new Date(2026, 8, 8, 14, 34, 10, 0), "14:34")).toBe(false)
+    })
+
+    it("ساعت نامعتبر را false می‌دهد", () => {
+        expect(isDailyReminderLaterToday(new Date(2026, 8, 8, 14, 30, 0, 0), "نامعتبر")).toBe(false)
+    })
+
+    it("هیچ‌وقت برای ساعتی که چند دقیقه جلوتر است false نمی‌شود", () => {
+        const now = new Date(2026, 8, 8, 23, 58, 0, 0)
+
+        expect(isDailyReminderLaterToday(now, "23:59")).toBe(true)
+        // اما فردای همان ساعت (چون ۲ دقیقه مانده) باید false باشد.
+        expect(isDailyReminderLaterToday(new Date(2026, 8, 8, 9, 0, 0, 0), "09:00")).toBe(false)
     })
 })

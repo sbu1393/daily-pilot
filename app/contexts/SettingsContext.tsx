@@ -11,7 +11,7 @@ import {
 } from "react"
 import { getOfflineUserId, OFFLINE_SCOPE_EVENT } from "@/app/lib/offline"
 import { isNativeLocalNotificationPlatform } from "@/app/lib/native/local-notifications"
-import { cancelDailyReminder, scheduleDailyReminder } from "@/app/lib/native/daily-reminder"
+import { cancelDailyReminder, isSameLocalDay, scheduleDailyReminder } from "@/app/lib/native/daily-reminder"
 import {
     DEFAULT_SETTINGS,
     REMINDER_CHECK_INTERVAL_MS,
@@ -53,6 +53,14 @@ type SettingsContextType = {
 }
 
 const SettingsContext = createContext<SettingsContextType | null>(null)
+
+/*
+ * بودجه‌ی تلاش مجدد برای زمان‌بندی نیتیو.
+ * عمداً کوچک و متناهی: تنها وقتی دوباره تلاش می‌شود که شکست تنها دلیلش
+ * `PERMISSION_PROMPT` باشد (مجوز در لحظه‌ی زمان‌بندی هنوز قطعی نبوده).
+ */
+const NATIVE_SCHEDULE_MAX_ATTEMPTS = 3
+const NATIVE_SCHEDULE_RETRY_DELAY_MS = 1_500
 
 function resolveTheme(pref: ThemePreference): "light" | "dark" {
     if (pref === "system") {
@@ -325,19 +333,82 @@ export function SettingsProvider({
      *   زمان‌بندیِ جدید پیش‌روی می‌افتد. شناسه‌ی اعلان از scope مشتق می‌شود،
      *   بنابراین لغو/زمان‌بندیِ مکرر روی همان شناسه اتفاق می‌افتد و اعلان تکراری
      *   ساخته نمی‌شود.
+     *
+     * نتیجه‌ی schedule دیگر دور ریخته نمی‌شود: موفقیت، هشدار و خطا همه ثبت
+     * می‌شوند. اگر تنها دلیل شکست `PERMISSION_PROMPT` باشد (مثلاً اپ با یادآور
+     * روشن باز شده ولی کاربر مجوز را تازه عوض کرده)، چند تلاش محدود و با فاصله
+     * انجام می‌شود — نه polling و نه حلقه‌ی بی‌نهایت. چون شناسه قطعی است،
+     * تلاش مجدد روی همان شناسه انجام می‌شود و **اعلان تکراری نمی‌سازد**.
      */
     useEffect(() => {
         if (hydratedScope !== scope) return
         if (!nativePlatform) return
+
+        /* پس از cleanup این effect دیگر نباید چیزی را زمان‌بندی یا تلاش کند. */
+        let disposed = false
 
         if (!settings.reminderEnabled) {
             void cancelDailyReminder(scopeUserId)
             return
         }
 
-        void scheduleDailyReminder({ userId: scopeUserId, reminderTime: settings.reminderTime })
+        const wait = (ms: number) =>
+            new Promise<void>((resolve) => window.setTimeout(resolve, ms))
+
+        const scheduleWithRetry = async () => {
+            for (let attempt = 1; attempt <= NATIVE_SCHEDULE_MAX_ATTEMPTS; attempt += 1) {
+                const result = await scheduleDailyReminder({
+                    userId: scopeUserId,
+                    reminderTime: settings.reminderTime,
+                })
+
+                /* اگر در همین فاصله cleanup اجرا شده، دیگر دنبالش نمی‌رویم. */
+                if (disposed) return
+
+                if (result.ok) {
+                    if (result.warning) {
+                        /*
+                         * هشدار exact-alarm: اعلان به‌جای آلارم دقیق، inexact
+                         * زمان‌بندی می‌شود یعنی ممکن است کمی دیرتر برسد — ولی
+                         * لغو نمی‌شود. برای تست چنددقیقه‌ای blocker نیست.
+                         */
+                        console.warn(
+                            `[daily-reminder] اعلان زمان‌بندی شد (id=${result.id}) ولی هشدار دارد:`,
+                            result.warning,
+                        )
+                    } else {
+                        console.info(
+                            `[daily-reminder] اعلان زمان‌بندی شد: id=${result.id} · ${result.at.toLocaleString()}`,
+                        )
+                    }
+
+                    if (!isSameLocalDay(result.at, new Date())) {
+                        console.info(
+                            "[daily-reminder] ساعت امروز گذشته بود؛ اولین اعلان برای فردا در همان ساعت زمان‌بندی شد.",
+                        )
+                    }
+
+                    return
+                }
+
+                console.error(
+                    `[daily-reminder] زمان‌بندی ناموفق بود (تلاش ${attempt}/${NATIVE_SCHEDULE_MAX_ATTEMPTS}):`,
+                    result.reason,
+                    result.message,
+                )
+
+                if (result.reason !== "PERMISSION_PROMPT") return
+                if (attempt === NATIVE_SCHEDULE_MAX_ATTEMPTS) return
+
+                await wait(NATIVE_SCHEDULE_RETRY_DELAY_MS)
+                if (disposed) return
+            }
+        }
+
+        void scheduleWithRetry()
 
         return () => {
+            disposed = true
             void cancelDailyReminder(scopeUserId)
         }
     }, [

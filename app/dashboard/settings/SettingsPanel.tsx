@@ -26,6 +26,10 @@ import {
     isNativeLocalNotificationPlatform,
     requestLocalNotificationPermission,
 } from "@/app/lib/native/local-notifications"
+import {
+    enableNativeDailyReminder,
+    isDailyReminderLaterToday,
+} from "@/app/lib/native/daily-reminder"
 import moment from "moment-jalaali"
 import { faDigits } from "@/app/lib/time"
 import { SETTINGS_PRIVACY_PARAGRAPHS } from "@/app/lib/privacyContent"
@@ -246,44 +250,61 @@ export default function SettingsPanel({ user }: { user: UserData }) {
 
     /*
      * یادآور دو لایه دارد:
-     *  ۱. تایمر صفحه (همیشه) — وقتی برنامه باز است.
-     *  ۲. Web Push (اشتراک این دستگاه) — وقتی برنامه بسته است/دستگاه در Doze است.
-     * روشن/خاموش کردن یادآور، اشتراک Push را هم می‌سازد/لغو می‌کند؛ اگر Push
-     * ممکن نباشد، لایه‌ی اول دست‌نخورده می‌ماند و کاربر دلیلش را می‌بیند.
+     *  ۱. تایمر صفحه (مرورگر) — وقتی برنامه باز است.
+     *  ۲. Web Push (مرورگر) یا اعلان محلی نیتیو (Android) — وقتی برنامه بسته است.
+     *
+     * ترتیب روی Android **عمداً برعکس مرورگر** است: اول مجوز نیتیو کامل
+     * می‌شود، تازه بعد `reminderEnabled=true` می‌شود. اگر برعکس بود، effect
+     * نیتیو با مجوزِ هنوز «prompt» اجرا می‌شد، `schedule()` صدا زده نمی‌شد و
+     * آن شکست بی‌صدا می‌ماند — یعنی یادآور روشن بود ولی هیچ آلارمی وجود نداشت.
+     * مسیر مرورگر و ترتیبش دست‌نخورده می‌ماند.
      */
     const onToggleReminder = async (enabled: boolean) => {
-        update({ reminderEnabled: enabled })
-
         const isNative = isNativeLocalNotificationPlatform()
 
         if (!enabled) {
-            // خاموش شدن یادآور = لغو اشتراک Push این دستگاه + آینه‌ی سرور
-            // (لغو اعلان محلی را خود `SettingsContext` با شناسه‌ی پایدار انجام می‌دهد).
+            // خاموش شدن یادآور = لغو اعلان محلی (خود `SettingsContext` با شناسه‌ی
+            // پایدار) + لغو اشتراک Push این دستگاه + آینه‌ی سرور.
             // `removePushSubscription` روی دستگاهی که Push ندارد خودش no-op است و
             // اگر اشتراکی از قبل در DB مانده باشد پاکش می‌کند، پس فراخوانی‌اش
             // در هر دو حالت بی‌خطر و مفید است.
+            update({ reminderEnabled: false })
             void removePushSubscription()
             void syncReminderSchedule({ enabled: false, time: settings.reminderTime })
             return
         }
 
         /*
-         * روی Android، مجوز از پل نیتیو گرفته می‌شود نه از `Notification` مرورگر
+         * Android: مجوز از پل نیتیو گرفته می‌شود نه از `Notification` مرورگر
          * (که در WebView اصلاً وجود ندارد و همیشه false برمی‌گرداند).
+         * `enableNativeDailyReminder` خودش ترتیب «مجوز ← فعال‌سازی» را تضمین
+         * می‌کند و زمان‌بندی واقعی را به `SettingsContext` می‌سپارد تا شناسه‌ی
+         * اعلان از یک جا (scope نشست) بیاید.
          */
-        const granted = isNative
-            ? (await requestLocalNotificationPermission()).ok
-            : await requestNotificationPermission()
+        if (isNative) {
+            const outcome = await enableNativeDailyReminder({
+                requestPermission: requestLocalNotificationPermission,
+                setEnabled: (on) => update({ reminderEnabled: on }),
+            })
 
-        if (!granted) {
-            toast.info(PUSH_REASON_LABEL.PERMISSION_DENIED)
+            if (!outcome.ok) {
+                toast.info(PUSH_REASON_LABEL.PERMISSION_DENIED)
+                return
+            }
+
+            toast.info(
+                isDailyReminderLaterToday(new Date(), settings.reminderTime)
+                    ? "یادآور فعال شد؛ حتی وقتی برنامه بسته است هم یادآوری می‌شوی"
+                    : "یادآور فعال شد؛ چون ساعت امروز گذشته بود، اولین یادآور فردا در همان ساعت است",
+            )
             return
         }
 
-        // زمان‌بندی اعلان محلی را `SettingsContext` انجام می‌دهد؛ اینجا فقط
-        // مسیر Push (مرورگر) راه می‌افتد.
-        if (isNative) {
-            toast.info("یادآور فعال شد؛ حتی وقتی برنامه بسته است هم یادآوری می‌شوی")
+        /* مرورگر — ترتیب و رفتار این مسیر عیناً قبلاً می‌ماند. */
+        update({ reminderEnabled: true })
+
+        if (!(await requestNotificationPermission())) {
+            toast.info(PUSH_REASON_LABEL.PERMISSION_DENIED)
             return
         }
 

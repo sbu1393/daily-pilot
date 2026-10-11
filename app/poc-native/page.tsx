@@ -4,12 +4,22 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
     LOCAL_REMINDER_CHANNEL_ID,
     cancelLocalReminder,
+    checkExactAlarmCapability,
     isNativeLocalNotificationPlatform,
     listPendingLocalReminders,
     requestLocalNotificationPermission,
     scheduleLocalReminder,
     type PendingLocalReminder,
 } from "@/app/lib/native/local-notifications"
+import {
+    clearNativeDiagnostics,
+    subscribeNativeDiagnostics,
+    type ExactAlarmDiagnostic,
+    type NativeDiagnosticEntry,
+    type NativeDiagnosticEvent,
+    type ReminderKind,
+} from "@/app/lib/native/diagnostics"
+
 
 /**
  * PoC یادآور محلی نیتیو (Capacitor Local Notifications)
@@ -57,6 +67,54 @@ const LOG_COLOR: Record<LogLevel, string> = {
     error: "#c00",
 }
 
+/** برچسب خوانای نوع یادآور در گزارش تشخیصی. */
+const KIND_LABEL: Record<ReminderKind, string> = {
+    TASK: "تسک",
+    DAILY: "روزانه",
+    UNKNOWN: "نامعلوم",
+}
+
+/** برچسب خوانای رویدادهای تشخیصی. */
+const DIAG_EVENT_LABEL: Record<NativeDiagnosticEvent, string> = {
+    SCHEDULE_REQUESTED: "درخواست زمان‌بندی",
+    SCHEDULE_RESOLVED: "زمان‌بندی موفق",
+    SCHEDULE_FAILED: "زمان‌بندی ناموفق",
+    SCHEDULE_UNRESOLVED: "بدون پاسخ (قفل صف)",
+    PENDING_SNAPSHOT: "عکس لحظه‌ای Pending",
+    QUEUE_RELEASED: "رهاسازی صف نیتیو",
+    CANCEL_REQUESTED: "درخواست لغو",
+    CANCEL_DONE: "لغو شد",
+    CANCEL_FAILED: "لغو ناموفق",
+}
+
+/** برچسب خوانای وضعیت مجوز آلارم دقیق — همان سه حالتی که تصمیم را می‌سازند. */
+const EXACT_SETTING_LABEL: Record<ExactAlarmDiagnostic["exactAlarmSetting"], string> = {
+    granted: "GRANTED",
+    denied: "NOT_GRANTED",
+    unknown: "UNKNOWN",
+}
+
+/** رنگ هر رویداد — قرمز = شکست/قفل، سبز = موفق. */
+const DIAG_EVENT_COLOR: Record<NativeDiagnosticEvent, string> = {
+    SCHEDULE_REQUESTED: "#555",
+    SCHEDULE_RESOLVED: "#0a7",
+    SCHEDULE_FAILED: "#c00",
+    SCHEDULE_UNRESOLVED: "#c00",
+    PENDING_SNAPSHOT: "#3b5bdb",
+    QUEUE_RELEASED: "#c00",
+    CANCEL_REQUESTED: "#b26a00",
+    CANCEL_DONE: "#b26a00",
+    CANCEL_FAILED: "#c00",
+}
+
+const monoStyle: React.CSSProperties = {
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    fontSize: "0.72rem",
+    direction: "ltr",
+    textAlign: "left",
+    wordBreak: "break-word",
+}
+
 const btnBase: React.CSSProperties = {
     padding: "0.6rem 1rem",
     borderRadius: 8,
@@ -88,9 +146,33 @@ export default function NativePocPage() {
     const [log, setLog] = useState<LogEntry[]>([])
     const logKey = useRef(0)
 
+    /* گزارش تشخیصی — از localStorage خوانده می‌شود و زنده به‌روز می‌شود. */
+    const [diag, setDiag] = useState<NativeDiagnosticEntry[]>([])
+    const [diagClock, setDiagClock] = useState<Date | null>(null)
+    const [exactAlarmDiag, setExactAlarmDiag] = useState<ExactAlarmDiagnostic | null>(null)
+    /** نسخه‌ی اندروید از UA وب‌ویو — تنها راه بدون افزودن پلاگین Device. */
+    const [osLabel, setOsLabel] = useState("—")
+
     const logLine = useCallback((level: LogLevel, text: string) => {
         logKey.current += 1
         setLog((prev) => [{ key: logKey.current, level, text }, ...prev].slice(0, 30))
+    }, [])
+
+    /*
+     * اشتراک روی حلقه‌ی گزارش تشخیصی.
+     *
+     * چرا اینجا هم مهم است: گزارش در `localStorage` می‌ماند، پس بعد از اینکه
+     * اپ کاملاً بسته/کشته شد و دوباره باز شد، همین بخش نشان می‌دهد *قبل از مرگ*
+     * چه چیزی به اندروید داده شده بود و آیا لغو شده بود یا نه. این تفاوت
+     * میان «زمان‌بندی نشد» و «زمان‌بندی شد ولی لغو شد» را قطعی می‌کند.
+     */
+    useEffect(() => subscribeNativeDiagnostics(setDiag), [])
+
+    /* ساعت زنده‌ی دستگاه — برای مقایسه با `requestedAt` گزارش. */
+    useEffect(() => {
+        setDiagClock(new Date())
+        const id = window.setInterval(() => setDiagClock(new Date()), 1000)
+        return () => window.clearInterval(id)
     }, [])
 
     const askPermission = useCallback(async () => {
@@ -105,10 +187,14 @@ export default function NativePocPage() {
         logLine("ok", `مجوز اعلان: ${result.display}`)
     }, [logLine])
 
-    // تشخیص محیط نیتیو + گرفتن مجوز در صورت نیاز (فقط سمت کلاینت).
+    // تشخیص محیط نیتیو + گذاشتن exact alarm diagnostic در آنجا
     useEffect(() => {
         const isNative = isNativeLocalNotificationPlatform()
         setNative(isNative)
+
+        /* در effect ست می‌شود تا HTML اولیه و کلاینت یکسان بمانند (بدون hydration mismatch). */
+        const android = /Android\s+([\d.]+)/.exec(navigator.userAgent)
+        setOsLabel(android ? `Android ${android[1]}` : "نامعلوم")
 
         if (!isNative) {
             logLine("warn", "این صفحه داخل اپ نیتیو اجرا نشده؛ اعلان محلی غیرفعال است.")
@@ -118,6 +204,33 @@ export default function NativePocPage() {
         logLine("info", `محیط نیتیو تأیید شد · کانال: ${LOCAL_REMINDER_CHANNEL_ID}`)
         void askPermission()
     }, [askPermission, logLine])
+
+    /*
+     * Exact Alarm Diagnostic — فقط read-only.
+     *
+     * از خودِ لایه‌ی نیتیو می‌پرسیم (نه از `window.Capacitor` مستقیم): آن global
+     * پلاگین‌ها را روی `Capacitor.Plugins` ثبت می‌کند، نه روی `Capacitor` اش؛
+     * پس خواندن مستقیم `window.Capacitor.LocalNotifications` روی دستگاه `undefined`
+     * است و بخش تشخیص همیشه «خوانده نشد» نشان می‌داد.
+     */
+    useEffect(() => {
+        if (!native) return
+
+        let disposed = false
+
+        void checkExactAlarmCapability().then((diag) => {
+            if (disposed) return
+            setExactAlarmDiag(diag)
+            logLine(
+                diag.exactAlarmSetting === "granted" ? "ok" : "warn",
+                `وضعیت مجوز آلارم دقیق: ${diag.exactAlarmSetting} (خوانده‌شده: ${diag.canReadExactSetting})`,
+            )
+        })
+
+        return () => {
+            disposed = true
+        }
+    }, [native, logLine])
 
     const schedule = useCallback(
         async (seconds: number) => {
@@ -279,6 +392,72 @@ export default function NativePocPage() {
                 </button>
             </section>
 
+            {/* ── Exact Alarm Diagnostic ── Only readout; no behavioral change. ── */}
+            {native === true && (
+                <section
+                    style={{
+                        border: "1px solid #b26a00",
+                        borderRadius: 8,
+                        padding: "0.75rem",
+                        marginBottom: "0.75rem",
+                        fontSize: "0.85rem",
+                    }}
+                >
+                    <h2 style={{ fontSize: "0.95rem", margin: "0 0 0.4rem" }}>
+                        Exact Alarm Diagnostic
+                    </h2>
+                    <div style={{ lineHeight: 1.9 }}>
+                        <div>
+                            OS: <strong>{osLabel}</strong>
+                        </div>
+                        <div>
+                            channel: <strong>{LOCAL_REMINDER_CHANNEL_ID}</strong>
+                        </div>
+                        <div>
+                            isExactNotification (خواسته‌شده): <strong>true</strong>
+                        </div>
+                        <div>
+                            isExactNotification (واقعاً اعمال‌شده):{" "}
+                            <strong>
+                                {exactAlarmDiag
+                                    ? String(exactAlarmDiag.exactAlarmSetting === "granted")
+                                    : "نامعلوم"}
+                            </strong>
+                        </div>
+                        <div>
+                            allowWhileIdle: <strong>true</strong>
+                        </div>
+                        <div>
+                            SCHEDULE_EXACT_ALARM در manifest (از خود پلاگین):{" "}
+                            <strong>true</strong>
+                        </div>
+                        <div>
+                            canScheduleExactAlarms():{" "}
+                            <strong>
+                                {exactAlarmDiag
+                                    ? exactAlarmDiag.canReadExactSetting
+                                        ? String(exactAlarmDiag.exactAlarmSetting === "granted")
+                                        : "نامعلوم (خواندن ممکن نشد)"
+                                    : "—"}
+                            </strong>
+                        </div>
+                        <div>
+                            وضعیت مجوز:{" "}
+                            <strong style={{ color: "#c00" }}>
+                                {exactAlarmDiag
+                                    ? EXACT_SETTING_LABEL[exactAlarmDiag.exactAlarmSetting]
+                                    : "UNKNOWN"}
+                            </strong>
+                        </div>
+                    </div>
+                    <p style={{ color: "#555", margin: "0.5rem 0 0", lineHeight: 1.8, fontSize: "0.78rem" }}>
+                        این بخش فقط می‌خواند. GRANTED ⇒ آلارم دقیق؛ در غیر این صورت اعلان با
+                        آلارم غیردقیقِ Doze-safe ثبت می‌شود. معیار نهایی، دیده‌شدن عبارت در
+                        «اعلان‌های Pending» است — نه صرفاً موفق بودن زمان‌بندی.
+                    </p>
+                </section>
+            )}
+
             {/* ── تشخیص: اعلان‌های ثبت‌شده در سیستم‌عامل ── */}
             {pending !== null && (
                 <section
@@ -362,6 +541,110 @@ export default function NativePocPage() {
                                 >
                                     لغو
                                 </button>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </section>
+
+            {/* ── گزارش تشخیصی زمان‌بندی نیتیو ── */}
+            <section
+                style={{
+                    border: "1px solid #3b5bdb",
+                    borderRadius: 8,
+                    padding: "0.75rem",
+                    marginBottom: "0.75rem",
+                    fontSize: "0.85rem",
+                }}
+            >
+                <div
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "0.5rem",
+                        marginBottom: "0.4rem",
+                    }}
+                >
+                    <h2 style={{ fontSize: "0.95rem", margin: 0 }}>
+                        گزارش زمان‌بندی نیتیو ({diag.length})
+                    </h2>
+                    <button
+                        type="button"
+                        style={{ ...btnBase, padding: "0.25rem 0.6rem", fontSize: "0.75rem" }}
+                        onClick={() => clearNativeDiagnostics()}
+                    >
+                        پاک‌کردن گزارش
+                    </button>
+                </div>
+
+                <div style={{ lineHeight: 1.9 }}>
+                    <div>
+                        زمان فعلی دستگاه:{" "}
+                        <strong>{diagClock ? diagClock.toLocaleString("fa-IR") : "—"}</strong>
+                    </div>
+                    <div style={{ fontSize: "0.78rem", color: "#555" }}>
+                        این گزارش در حافظه‌ی دستگاه می‌ماند؛ بعد از بسته‌شدن کامل اپ هم قابل
+                        خواندن است.
+                    </div>
+                </div>
+
+                {diag.length === 0 ? (
+                    <p style={{ color: "#999", margin: "0.4rem 0 0" }}>هنوز چیزی ثبت نشده است.</p>
+                ) : (
+                    <ul
+                        style={{
+                            listStyle: "none",
+                            margin: "0.4rem 0 0",
+                            padding: 0,
+                            lineHeight: 1.8,
+                        }}
+                    >
+                        {[...diag].reverse().map((entry) => (
+                            <li
+                                key={entry.seq}
+                                style={{
+                                    borderTop: "1px dashed #ddd",
+                                    paddingTop: "0.35rem",
+                                    marginTop: "0.35rem",
+                                }}
+                            >
+                                <div style={{ color: DIAG_EVENT_COLOR[entry.event], fontWeight: 600 }}>
+                                    {DIAG_EVENT_LABEL[entry.event]} · {KIND_LABEL[entry.kind]} ·{" "}
+                                    {new Date(entry.at).toLocaleTimeString("fa-IR")}
+                                </div>
+                                <div style={monoStyle}>
+                                    {entry.id !== undefined && <div>id={entry.id}</div>}
+                                    {entry.title && <div>title={entry.title}</div>}
+                                    {entry.requestedAtIso && (
+                                        <div>
+                                            at={entry.requestedAtIso}
+                                            {entry.delayMs !== undefined &&
+                                                ` (${Math.round(entry.delayMs / 1000)}s)`}
+                                        </div>
+                                    )}
+                                    {(entry.isExact !== undefined ||
+                                        entry.allowWhileIdle !== undefined) && (
+                                        <div>
+                                            exact={String(entry.isExact)} whileIdle={
+                                                String(entry.allowWhileIdle)
+                                            }{" "}
+                                            channel={entry.channelId}
+                                        </div>
+                                    )}
+                                    {entry.focusFound !== undefined && (
+                                        <div>
+                                            focusInPending={String(entry.focusFound)} · pending={
+                                                entry.pending?.length ?? 0
+                                            }
+                                        </div>
+                                    )}
+                                    {entry.warning && (
+                                        <div>warning={entry.warning.code}</div>
+                                    )}
+                                    {entry.message && <div>message={entry.message}</div>}
+                                    {entry.stack && <div>stack={entry.stack}</div>}
+                                </div>
                             </li>
                         ))}
                     </ul>

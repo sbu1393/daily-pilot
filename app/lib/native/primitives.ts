@@ -12,10 +12,17 @@
  *     یکتا بودن و محدوده‌ی مجاز اندروید اینجا یک‌بار تعریف و یک‌بار تست
  *     می‌شود، نه در هر wrapper.
  *
- * این ماژول هیچ state، هیچ UI و هیچ دسترسی مستقیمی به `window`/Capacitor ندارد
- * (صف در scope ماژول است و هرگز در SSR اجرا نمی‌شود چون فقط از چرخه‌ی عمر
- * کلاینت صدا زده می‌شود).
+ *  ۳. نگهبان صف — تا یک عملیات نیتیو که هرگز settle نمی‌شود (در حالت آلارم
+ *     دقیق بدون مجوز، خودِ پلاگین Capacitor عمداً `schedule()` را معلق
+ *     می‌گذارد) کل صف را برای همیشه قفل نکند. تنها وابستگی این ماژول به بیرون، ثبت همان رویداد در
+ *     `diagnostics` است (فقط شواهد، بدون تغییر رفتار).
+ *
+ * این ماژول هیچ state ای جز صف، هیچ UI و هیچ دسترسی مستقیمی به
+ * `window`/Capacitor ندارد (صف در scope ماژول است و هرگز در SSR اجرا نمی‌شود
+ * چون فقط از چرخه‌ی عمر کلاینت صدا زده می‌شود).
  */
+
+import { recordNativeDiagnostic } from "@/app/lib/native/diagnostics"
 
 /** سقف شناسه — زیر `2^31-1` (بیشینه‌ی int32 علامت‌دار اندروید) می‌مانیم. */
 export const MAX_NOTIFICATION_ID = 2_000_000_000
@@ -66,14 +73,68 @@ export function stableNotificationId(key: string): number {
  */
 let nativeQueue: Promise<unknown> = Promise.resolve()
 
+/**
+ * سقف انتظار صف برای settle شدن یک عملیات نیتیو.
+ *
+ * چرا لازم است؟ چون صف سریال را نمی‌توان به "همیشه settle می‌شود" سپرد:
+ * پلاگین Capacitor در حالت «آلارم دقیق بدون مجوز» عمداً `schedule()` را
+ * resolve نمی‌کند تا کاربر از صفحه‌ی تنظیمات برگردد. اگر آن promise هرگز
+ * settle نشود، زنجیره‌ی صف تا ابد معلق می‌ماند و **هر** زمان‌بندی/لغو بعدی
+ * (تسک و روزانه) هم اجرا نمی‌شود. این نگهبان فقط همین حالت را می‌شکند.
+ *
+ * عدد ۱۵ ثانیه عمداً بزرگ است: یک زمان‌بندی معمولی روی دستگاه در حد
+ * میلی‌ثانیه است، پس این مقدار در حالت سالم هیچ‌وقت نمی‌رسد و فقط زمانی
+ * فعال می‌شود که چیزی واقعاً معلق مانده باشد.
+ */
+export const NATIVE_QUEUE_STALL_RELEASE_MS = 15_000
+
+/**
+ * نگهبان صف: یا عملیات خودش settle می‌شود، یا بعد از سقف مشخص، صف رها می‌شود.
+ *
+ * دقیقاً می‌دانیم چه چیزی را قربانی می‌کنیم: «ترتیب مطلق» در مقابل
+ * «قفل‌شدن دائمی». اگر عملیاتی معلق بماند، صف جلو می‌رود و ریسک اینکه آن
+ * عملیاتِ معلقِ قدیمی دیرتر برسد و روی همان شناسه اثر بگذارد پذیرفته است —
+ * چون حالت دیگر یعنی هیچ یادآوری هیچ‌وقت کار نمی‌کند.
+ */
+function releaseQueueAfterStall(stalled: Promise<unknown>): Promise<void> {
+    return new Promise<void>((resolve) => {
+        let settled = false
+
+        const finish = () => {
+            if (settled) return
+            settled = true
+            clearTimeout(timer)
+            resolve()
+        }
+
+        const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
+            if (settled) return
+            settled = true
+
+            /*
+             * ثبت به‌عنوان رویداد تشخیصی تا روی دستگاه معلوم باشد که «پل پاسخ
+             * نداد و صف رها شد» — بدون این، تنها نشانه یک سکوت کامل است.
+             */
+            recordNativeDiagnostic({
+                event: "QUEUE_RELEASED",
+                kind: "UNKNOWN",
+                message: `عملیات نیتیو بعد از ${NATIVE_QUEUE_STALL_RELEASE_MS}ms settle نشد؛ صف آزاد شد تا یادآورهای بعدی قفل نمانند.`,
+            })
+
+            resolve()
+        }, NATIVE_QUEUE_STALL_RELEASE_MS)
+
+        stalled.then(finish, finish)
+    })
+}
+
 export function enqueueNative<T>(task: () => Promise<T>): Promise<T> {
     // اگر کار قبلی رد شده بود، این یکی هم باید اجرا شود (`onRejected` همان task است).
     const result = nativeQueue.then(task, task)
 
-    nativeQueue = result.then(
-        () => undefined,
-        () => undefined,
-    )
+    // سر زنجیره با نگهبان بسته می‌شود، نه با خودِ result — وگرنه یک promise
+    // هرگز settle نشده، تمام صف‌های بعدی را هم به گروگان می‌گیرد.
+    nativeQueue = releaseQueueAfterStall(result)
 
     return result
 }

@@ -8,6 +8,16 @@ import type {
     ScheduleWarning,
 } from "@capacitor/local-notifications"
 
+import {
+    captureDiagnosticStack,
+    classifyReminderKind,
+    formatNativeDiagnostic,
+    readExactAlarmDiagnostic,
+    recordNativeDiagnostic,
+    type ExactAlarmDiagnostic,
+    type NativeDiagnosticInput,
+} from "@/app/lib/native/diagnostics"
+
 /*
  * یادآور محلی نیتیو — لایه‌ی کلاینت (Capacitor Local Notifications)
  * -----------------------------------------------------------------
@@ -80,6 +90,72 @@ export function isNativeLocalNotificationPlatform(): boolean {
     return typeof capacitor?.isNativePlatform === "function" && capacitor.isNativePlatform()
 }
 
+/*
+ * ── تشخیص (فقط شواهد، بدون تغییر رفتار) ──────────────────────────────
+ * این بخش هیچ تصمیمی نمی‌گیرد و هیچ مقداری را عوض نمی‌کند؛ فقط هر تماس با
+ * پل Capacitor را با پارامترهای مؤثرش ثبت می‌کند. دلیل وجودش روشن است: وقتی
+ * اعلان با اپ بسته نمی‌رسد، باید بتوان بدون حدس گفت «آیا واقعاً زمان‌بندی شد،
+ * برای چه لحظه‌ای، با چه شناسه‌ای، و بعدش لغو شد یا نه؟
+ */
+
+/**
+ * اگر پل Capacitor بیشتر از این مدت پاسخ ندهد، یک رویداد `SCHEDULE_UNRESOLVED`
+ * ثبت می‌شود. مقدار فعلیِ `schedule()` روی اندروید می‌تواند بی‌پاسخ بماند
+ * (باز شدن تنظیمات exact-alarm)، و چون همه‌ی عملیات از یک صف سریال رد
+ * می‌شوند، این حالت کل صف را قفل می‌کند. این نگهبان فقط همین را **ثبت**
+ * می‌کند؛ هیچ resolve/reject جایگزینی انجام نمی‌دهد.
+ */
+export const SCHEDULE_UNRESOLVED_WARN_MS = 4_000
+
+/** ثبت + چاپ یک رویداد تشخیصی؛ هرگز throw نمی‌کند و روی نتیجه اثری ندارد. */
+function logNativeDiagnostic(input: NativeDiagnosticInput): void {
+    const entry = recordNativeDiagnostic(input)
+    if (entry) console.info(formatNativeDiagnostic(entry))
+}
+
+/*
+ * خواندن pending بلافاصله بعد از یک زمان‌بندی موفق.
+ *
+ * عمداً `await` نمی‌شود (شلیک و فراموش): اگر روی مسیر پاسخ‌دادن به
+ * فراخوانی‌کننده منتظر می‌ماند، هم زمان‌بندی کندتر می‌شد و هم ترتیب صف سریال
+ * تغییر می‌کرد. اینجا فقط می‌خواهیم ببینیم آیا همان شناسه در صف سیستم‌عامل
+ * هست یا نه.
+ */
+async function snapshotPendingAfterSchedule(
+    plugin: LocalNotificationsPlugin,
+    focusId: number,
+    kind: NativeDiagnosticInput["kind"],
+    title: string,
+): Promise<void> {
+    try {
+        const pending = await plugin.getPending()
+        const items = pending.notifications.map((notification) => ({
+            id: notification.id,
+            title: notification.title,
+            atIso: notification.schedule?.at
+                ? new Date(notification.schedule.at).toISOString()
+                : null,
+        }))
+
+        logNativeDiagnostic({
+            event: "PENDING_SNAPSHOT",
+            kind,
+            id: focusId,
+            title,
+            focusFound: items.some((item) => item.id === focusId),
+            pending: items,
+        })
+    } catch (err) {
+        logNativeDiagnostic({
+            event: "PENDING_SNAPSHOT",
+            kind,
+            id: focusId,
+            title,
+            message: describeError(err),
+        })
+    }
+}
+
 /**
  * لود تنبل پلاگین. نتیجه داخل یک آبجکت ساده بسته‌بندی می‌شود تا thenable نشود
  * (توضیح کامل در ابتدای فایل).
@@ -143,6 +219,45 @@ async function ensurePermission(
     }
 }
 
+/*
+ * ── دروازه‌ی آلارم دقیق ──────────────────────────────────────────────
+ *
+ * ⚠️ مهم‌ترین یافته‌ی این مرحله:
+ *
+ * پلاگین Capacitor وقتی `isExactNotification: true` می‌بیند و اپ **مجوز
+ * «آلارم و یادآور» (SCHEDULE_EXACT_ALARM)** را ندارد، زمان‌بندی نمی‌کند؛
+ * به‌جایش صفحه‌ی تنظیمات اندروید را باز می‌کند و `call` را **resolve
+ * نمی‌کند** (شاهد در سورس پلاگین نصب‌شده:
+ * `node_modules/@capacitor/local-notifications/.../LocalNotificationsPlugin.kt`
+ * → `doSchedule()` شاخه‌ی `ACTION_REQUEST_SCHEDULE_EXACT_ALARM`، و
+ * `performScheduleNow()` که فقط بعد از برگشت از آن صفحه اجرا می‌شود).
+ *
+ * نتیجه‌ی واقعی روی دستگاه (Android 12+، و با `targetSdkVersion 36` مجوز
+ * مذکور روی Android 14+ به‌طور پیش‌فرض **داده نشده** است):
+ *   ۱. هیچ آلارمی در AlarmManager ثبت نمی‌شود ⇒ با خاموش‌شدن صفحه/بسته‌شدن
+ *      اپ هیچ اعلانی نمی‌آید (چون هیچ‌وقت ثبت نشده بود).
+ *   ۲. Promise ای که صف سریال نیتیو روی آن منتظر است هرگز settle نمی‌شود ⇒
+ *      قفل‌شدن *همه‌ی* زمان‌بندی/لغوهای بعدی (هم تسک و هم روزانه).
+ *
+ * پس قاعده این است: **هیچ‌وقت** بدون خواندن capability، `isExactNotification`
+ * را `true` نفرست؛ چون آن شاخه‌ی مسدودکننده فقط با همین پرچم فعال می‌شود.
+ * اگر واقعاً مجوز داده شده باشد، همان آلارم دقیق (و در حالت Doze نیز بیدارکننده)
+ * استفاده می‌شود؛ وگرنه `allowWhileIdle: true` با `setAndAllowWhileIdle`
+ * (RTC_WAKEUP) ثبت می‌شود — غیردقیق، ولی **ثبت‌شده** و مستقل از باز بودن اپ،
+ * اینترنت و صفحه‌ی روشن.
+ *
+ * این خواندن فقط read-only است: هیچ مجوزی نمی‌خواهد و هیچ صفحه‌ای باز نمی‌کند.
+ */
+async function canScheduleExactAlarms(plugin: LocalNotificationsPlugin): Promise<boolean> {
+    try {
+        const setting = await plugin.checkExactNotificationSetting()
+        return setting.exact_alarm === "granted"
+    } catch {
+        /* اگر خواندن ممکن نبود، فرض می‌کنیم مجوز نداریم (مسیر امن و غیرمسدودکننده). */
+        return false
+    }
+}
+
 export type ScheduleLocalReminderInput = {
     title: string
     body: string
@@ -153,8 +268,13 @@ export type ScheduleLocalReminderInput = {
     /** شناسه‌ی ثابت (اختیاری)؛ پیش‌فرض یک شناسه‌ی تصادفی ۳۲ بیتی است. */
     id?: number
     /**
-     * پیش‌فرض `true`. اگر مجوز exact alarm داده نشده باشد، اندروید اعلان را
-     * inexact زمان‌بندی می‌کند و نتیجه با `warning` برمی‌گردد (نه خطا).
+     * «آیا آلارم دقیق خواسته می‌شود؟» — پیش‌فرض `true`.
+     *
+     * `true` یعنی *درخواست*، نه تضمین: اگر `canScheduleExactAlarms()` مجوز را
+     * نداشته باشد، همین‌جا به `false` تبدیل می‌شود تا اعلان با آلارم غیردقیق
+     * (`allowWhileIdle`) ثبت شود. دلیلش در بلوک بالای `canScheduleExactAlarms`
+     * نوشته شده: با پرچم `true` و مجوزِ نداشته، پلاگین وقت‌بندی نمی‌کند، صفحه‌ی
+     * تنظیمات را باز می‌کند و promise را معلق می‌گذارد.
      */
     exact?: boolean
 }
@@ -176,23 +296,120 @@ export async function scheduleLocalReminder(
 
     const id = input.id ?? randomNotificationId()
     const at = input.at ?? new Date(Date.now() + (input.delayMs ?? 0))
+
+    /*
+     * دروازه‌ی capability پیش از ساختن اعلان.
+     *
+     * این تنها جایی است که مقدار `isExactNotification` تعیین می‌شود و هیچ‌وقت
+     * `true` نمی‌ماند مگر اندروید خودش تأیید کند. اگر این خواندن را حذف کنی،
+     * مسیر `doSchedule() → ACTION_REQUEST_SCHEDULE_EXACT_ALARM` برمی‌گردد و
+     * همان قفل صف و «هیچ اعلانی نمی‌آید» تکرار می‌شود.
+     */
+    const exactRequested = input.exact ?? true
+    const exactGranted = exactRequested ? await canScheduleExactAlarms(plugin) : false
+    const useExactAlarm = exactRequested && exactGranted
+
     const notification: LocalNotificationSchema = {
         id,
         title: input.title,
         body: input.body,
         channelId: LOCAL_REMINDER_CHANNEL_ID,
-        isExactNotification: input.exact ?? true,
+        isExactNotification: useExactAlarm,
         schedule: { at, allowWhileIdle: true },
     }
+
+    const kind = classifyReminderKind(input.title)
+    const requestedAtMs = Date.now()
+
+    /* همه‌ی پارامترهایی که واقعاً به اندروید می‌روند — قبل از هر تماس با پل. */
+    logNativeDiagnostic({
+        event: "SCHEDULE_REQUESTED",
+        kind,
+        id,
+        title: input.title,
+        requestedAt: at.getTime(),
+        requestedAtIso: at.toISOString(),
+        delayMs: at.getTime() - requestedAtMs,
+        isExact: notification.isExactNotification,
+        allowWhileIdle: notification.schedule?.allowWhileIdle,
+        channelId: notification.channelId,
+        /*
+         * فقط وقتی پیام می‌گذاریم که «دقیق خواسته شد ولی مجوز نبود» — چون این
+         * همان حالتِ تعیین‌کننده است: اعلان می‌رسد (غیردقیق و Doze-safe)، ولی
+         * ممکن است چند دقیقه دیرتر از لحظه‌ی دقیق. اگر مجوز بود، چیزی اضافه نمی‌شود.
+         */
+        message:
+            exactRequested && !exactGranted
+                ? "مجوز «آلارم و یادآور» داده نشده؛ اعلان با آلارم غیردقیق (allowWhileIdle) ثبت شد."
+                : undefined,
+    })
+
+    let settled = false
+    const hangTimer = setTimeout(() => {
+        if (settled) return
+
+        logNativeDiagnostic({
+            event: "SCHEDULE_UNRESOLVED",
+            kind,
+            id,
+            title: input.title,
+            requestedAt: at.getTime(),
+            requestedAtIso: at.toISOString(),
+            delayMs: at.getTime() - Date.now(),
+            message: `پل بعد از ${SCHEDULE_UNRESOLVED_WARN_MS}ms پاسخ نداد؛ صف سریال همچنان مسدود است.`,
+        })
+    }, SCHEDULE_UNRESOLVED_WARN_MS)
 
     try {
         // ساخت/به‌روزرسانی کانال idempotent است؛ قبل از زمان‌بندی تضمینش می‌کنیم.
         await plugin.createChannel(REMINDER_CHANNEL)
         const result = await plugin.schedule({ notifications: [notification] })
 
-        return { ok: true, id: result.notifications[0]?.id ?? id, warning: result.warning }
+        settled = true
+        clearTimeout(hangTimer)
+
+        const resolvedId = result.notifications[0]?.id ?? id
+
+        logNativeDiagnostic({
+            event: "SCHEDULE_RESOLVED",
+            kind,
+            id: resolvedId,
+            title: input.title,
+            requestedAt: at.getTime(),
+            requestedAtIso: at.toISOString(),
+            delayMs: at.getTime() - Date.now(),
+            isExact: notification.isExactNotification,
+            allowWhileIdle: notification.schedule?.allowWhileIdle,
+            channelId: notification.channelId,
+            warning: result.warning
+                ? { code: result.warning.code, message: result.warning.message }
+                : undefined,
+        })
+
+        void snapshotPendingAfterSchedule(plugin, resolvedId, kind, input.title)
+
+        return { ok: true, id: resolvedId, warning: result.warning }
     } catch (err) {
-        return { ok: false, reason: "SCHEDULE_FAILED", message: describeError(err) }
+        settled = true
+        clearTimeout(hangTimer)
+
+        const message = describeError(err)
+
+        logNativeDiagnostic({
+            event: "SCHEDULE_FAILED",
+            kind,
+            id,
+            title: input.title,
+            requestedAt: at.getTime(),
+            requestedAtIso: at.toISOString(),
+            delayMs: at.getTime() - Date.now(),
+            isExact: notification.isExactNotification,
+            allowWhileIdle: notification.schedule?.allowWhileIdle,
+            channelId: notification.channelId,
+            message,
+        })
+
+        return { ok: false, reason: "SCHEDULE_FAILED", message }
     }
 }
 
@@ -201,11 +418,30 @@ export async function cancelLocalReminder(id: number): Promise<CancelLocalRemind
     const resolved = await resolvePlugin()
     if (!resolved.ok) return resolved
 
+    /*
+     * پشته‌ی تماس اینجاست چون مهم‌ترین سؤالِ «چرا اعلان نیامد» معمولاً این است
+     * که «چه چیزی بعد از زمان‌بندی آن را لغو کرد». این پشته عمداً فقط چند فریم
+     * اول است و هیچ اثری روی رفتار لغو ندارد.
+     */
+    logNativeDiagnostic({
+        event: "CANCEL_REQUESTED",
+        kind: "UNKNOWN",
+        id,
+        stack: captureDiagnosticStack(),
+    })
+
     try {
         await resolved.plugin.cancel({ notifications: [{ id }] })
+
+        logNativeDiagnostic({ event: "CANCEL_DONE", kind: "UNKNOWN", id })
+
         return { ok: true }
     } catch (err) {
-        return { ok: false, reason: "CANCEL_FAILED", message: describeError(err) }
+        const message = describeError(err)
+
+        logNativeDiagnostic({ event: "CANCEL_FAILED", kind: "UNKNOWN", id, message })
+
+        return { ok: false, reason: "CANCEL_FAILED", message }
     }
 }
 
@@ -277,4 +513,28 @@ function describeError(err: unknown): string {
         return String((err as { message: unknown }).message)
     }
     return String(err)
+}
+
+/*
+ * تشخیص read-only وضعیت exact-alarm برای UI.
+ *
+ * این تابع هیچ مجوزی نمی‌خواهد، هیچ تنظیماتی را عوض نمی‌کند و هیچ
+ * زمان‌بندی/لغو جدیدی انجام نمی‌دهد. خودش پلاگین را resolve می‌کند و خواندن
+ * خالص را به `readExactAlarmDiagnostic` می‌سپارد تا منطق وضعیت یک‌جا بماند.
+ *
+ * روی مرورگر (غیر نیتیو) هم درست جواب می‌دهد (`native: false`)، چون
+ * `resolvePlugin()` همان‌جا `NOT_NATIVE` می‌دهد.
+ */
+export async function checkExactAlarmCapability(): Promise<ExactAlarmDiagnostic> {
+    const resolved = await resolvePlugin()
+    if (!resolved.ok) {
+        return {
+            native: false,
+            canReadExactSetting: false,
+            exactAlarmSetting: "unknown",
+            manifestDeclarativeOnly: false,
+        }
+    }
+
+    return readExactAlarmDiagnostic(() => resolved.plugin.checkExactNotificationSetting())
 }

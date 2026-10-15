@@ -8,9 +8,11 @@ import { getCanonicalToday } from "@/app/lib/canonicalDay"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import { categoryInfo, priorityMeta, priorityMissingMeta, type TaskItem } from "./taskTypes"
 import styles from "./task.module.css"
-import { AlarmClock, ChevronDown, Pencil } from "lucide-react"
+import { AlarmClock, BellRing, ChevronDown, Pencil } from "lucide-react"
 // «تنظیم زمان» — فقط خواندن یادآوری از context و یک دکمه/نشان اضافه؛ هیچ منطق موجودی تغییر نکرده
 import { useTaskReminders } from "@/app/hooks/useTaskReminder"
+// آلارم واقعی تسک (Feature B) — context جدا و مستقل از یادآور
+import { useTaskAlarms } from "@/app/hooks/useTaskAlarm"
 import { formatReminderTime } from "@/app/lib/taskReminder"
 import reminderStyles from "./reminder.module.css"
 
@@ -36,6 +38,8 @@ type Props = {
     onReanalyze?: (task: TaskItem) => void
     /** اختیاری — باز کردن مودال «تنظیم زمان» (additive؛ بدون آن کارت مثل قبل کار می‌کند) */
     onRemind?: (task: TaskItem) => void
+    /** اختیاری — باز کردن مودال «آلارم واقعی» (additive؛ مستقل از یادآور) */
+    onAlarm?: (task: TaskItem) => void
     /** اختیاری — باز کردن مودال ویرایش (additive؛ بدون آن کارت مثل قبل کار می‌کند) */
     onEdit?: (task: TaskItem) => void
 }
@@ -53,12 +57,15 @@ type Props = {
  * به همین دلیل پنل همیشه در DOM می‌ماند و با `visibility` از ناظر پنهان می‌شود.
  * کارتِ DONE خودش جمع می‌شود؛ کارتِ DONE بدون دلیل، چیزی برای باز‌کردن ندارد.
  */
-function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind, onEdit }: Props) {
+function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind, onAlarm, onEdit }: Props) {
     const { timezone } = useCalendar()
     const [open, setOpen] = useState(false)
     // یادآوری فقط بعد از خواندن localStorage معنا دارد (ready) → رندر سرور و کلاینت یکسان می‌ماند
     const { ready: remindersReady, getReminder } = useTaskReminders()
     const reminder = remindersReady ? getReminder(task.id) : undefined
+    // آلارم هم مثل یادآوری فقط بعد از خواندن ذخیره‌ی محلی نمایش داده می‌شود
+    const { ready: alarmsReady, getAlarm } = useTaskAlarms()
+    const alarm = alarmsReady ? getAlarm(task.id) : undefined
     const uid = useId()
     const headerId = `${uid}-header`
     const panelId = `${uid}-panel`
@@ -98,6 +105,18 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind, onEdit }:
         </span>
     ) : null
 
+    // نشان آلارم کنار عنوان — آلارم واقعی (صدای بلند + صفحه‌ی تمام‌عرض)
+    const alarmBadge = alarm ? (
+        <span
+            className={`${reminderStyles.badge} ${
+                alarm.at <= Date.now() ? reminderStyles.badgePast : ""
+            }`}
+            title="آلارم واقعی برای این تسک تنظیم شده است"
+        >
+            ⏰ {formatReminderTime(alarm.at, timezone)}
+        </span>
+    ) : null
+
     return (
         <motion.li
             /* لنگرِ DOM برای «تپ روی اعلان → اسکرول به همین تسک» */
@@ -133,6 +152,7 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind, onEdit }:
                     >
                         <span className={styles.text}>{task.title}</span>
                         {reminderBadge}
+                        {alarmBadge}
                         {done && <span className={styles.doneTag}>✓ انجام شد</span>}
                         <span
                             className={`${styles.chevron} ${open ? styles.chevronOpen : ""}`}
@@ -145,6 +165,7 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind, onEdit }:
                     <div className={styles.cardStatic}>
                         <span className={styles.text}>{task.title}</span>
                         {reminderBadge}
+                        {alarmBadge}
                         {done && <span className={styles.doneTag}>✓ انجام شد</span>}
                     </div>
                 )}
@@ -242,6 +263,13 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind, onEdit }:
                                     title="تنظیم زمان یادآوری با زنگ هشدار"
                                 >
                                     <AlarmClock size={15} aria-hidden="true" /> تنظیم زمان
+                                </button>
+                                <button
+                                    className={`${styles.btnGhost} ${reminderStyles.iconBtn}`}
+                                    onClick={() => onAlarm?.(task)}
+                                    title="آلارم واقعی: صدای بلند و صفحه‌ی تمام‌عرض با توقف/تعویق"
+                                >
+                                    <BellRing size={15} aria-hidden="true" /> آلارم
                                 </button>
                                 <button
                                     className={styles.btnGhost}

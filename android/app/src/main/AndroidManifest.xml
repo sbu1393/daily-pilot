@@ -24,6 +24,52 @@
 
         </activity>
 
+        <!--
+            صفحه‌ی آلارم تسک (ویژگی Feature B).
+            - exported=false: فقط خودِ اپ آن را باز می‌کند (از PendingIntent).
+            - showWhenLocked/turnScreenOn (API 27+): روی صفحه‌ی قفل نمایش داده
+              می‌شود و صفحه را روشن می‌کند. روی API 24-26 همین کار با فلگ‌های
+              پنجره در TaskAlarmActivity انجام می‌شود.
+            - launchMode=singleInstance + taskAffinity خالی: صفحه‌ی آلارم کارِ
+              خودش را دارد و با WebView قاطی نمی‌شود.
+        -->
+        <activity
+            android:name=".alarm.TaskAlarmActivity"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:theme="@style/AppTheme.NoActionBar"
+            android:turnScreenOn="true" />
+
+        <!-- گیرنده‌ی آلارم؛ فقط AlarmManager آن را صدا می‌زند. -->
+        <receiver
+            android:name=".alarm.TaskAlarmReceiver"
+            android:exported="false" />
+
+        <!--
+            بازیابی پس از reboot / به‌روزرسانی اپ / تغییر زمان.
+            RECEIVE_BOOT_COMPLETED پایین اعلام شده است.
+        -->
+        <receiver
+            android:name=".alarm.TaskAlarmBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- سرویس پیش‌زمینه‌ی زنگ‌زدن: پروسه را زنده و اعلان را پایدار نگه می‌دارد. -->
+        <service
+            android:name=".alarm.TaskAlarmService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -38,4 +84,21 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+        مجوزهای آلارم تسک (Feature B).
+        ⚠️ USE_EXACT_ALARM عمداً اعلام نشده است: آن مجوز طبق سیاست گوگل‌پلی فقط
+        برای اپ‌هایی است که کارِ اصلی‌شان ساعت/آلارم/تقویم است و اینجا فقط یکی از
+        قابلیت‌هاست. مسیر درست، SCHEDULE_EXACT_ALARM + اجازه‌ی صریح کاربر است.
+        ⚠️ اعلام یک مجوز در manifest به‌معنای «گرفته شدن» آن نیست؛ وضعیت واقعی
+        هر بار از خودِ سیستم پرسیده می‌شود (canScheduleExactAlarms و
+        areNotificationsEnabled) و به کاربر گزارش می‌شود.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 </manifest>

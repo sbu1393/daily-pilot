@@ -8,6 +8,8 @@ import PwaRegister from "./components/PwaRegister"
 import OfflineIndicator from "./components/OfflineIndicator"
 // «تنظیم زمان» — یادآوری تسک + آلارم صوتی (کاملاً additive؛ فقط localStorage)
 import { ReminderProvider } from "./hooks/useTaskReminder"
+// آلارم واقعی تسک (Feature B) — جدا از یادآور، با پلاگین نیتیو مستقل
+import { TaskAlarmProvider } from "./hooks/useTaskAlarm"
 import Splash from "./components/Splash"
 import { ToastContainer } from "react-toastify"
 
@@ -75,10 +77,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <CalendarProvider>
           <SettingsProvider>
             <ReminderProvider>
-              {children}
-              <OfflineIndicator />
-              <ToastContainer position="bottom-left" rtl closeOnClick pauseOnHover />
-              <PwaRegister />
+              <TaskAlarmProvider>
+                {children}
+                <OfflineIndicator />
+                <ToastContainer position="bottom-left" rtl closeOnClick pauseOnHover />
+                <PwaRegister />
+              </TaskAlarmProvider>
             </ReminderProvider>
           </SettingsProvider>
         </CalendarProvider>

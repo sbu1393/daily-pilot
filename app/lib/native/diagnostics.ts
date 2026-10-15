@@ -25,8 +25,8 @@ import type { LocalNotificationsPlugin } from "@capacitor/local-notifications"
  * - نوشتن هرگز throw نمی‌کند (هم‌خانواده‌ی بقیه‌ی لایه‌ی نیتیو).
  */
 
-/** نوع یادآور — `UNKNOWN` یعنی عنوان با هیچ‌کدام از دو مسیر شناخته‌شده جور نیست. */
-export type ReminderKind = "TASK" | "DAILY" | "UNKNOWN"
+/** نوع یادآور — `UNKNOWN` یعنی عنوان با هیچ‌کدام از مسیرها جور نیست. */
+export type ReminderKind = "TASK" | "DAILY" | "ALARM" | "UNKNOWN"
 
 /** چه چیزی ثبت شده — رویدادها عمداً ریز هستند تا ترتیب وقایع قابل بازسازی باشد. */
 export type NativeDiagnosticEvent =

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import { useTaskReminders } from "@/app/hooks/useTaskReminder"
+import { useTaskAlarms } from "@/app/hooks/useTaskAlarm"
 import { useDaySummary, type DaySummary } from "../../hooks/useDaySummary"
 import { getCanonicalToday, shiftCanonicalKey } from "../../lib/canonicalDay"
 import { faDigits } from "@/app/lib/time"
@@ -31,6 +32,8 @@ import ReanalyzeModal from "./ReanalyzeModal"
 import EditTaskModal from "./EditTaskModal"
 // «تنظیم زمان» — مودال یادآوری (additive؛ هیچ جریان موجودی را تغییر نمی‌دهد)
 import ReminderModal from "./ReminderModal"
+// آلارم واقعی تسک (Feature B) — مودال جدا و مستقل از یادآور
+import TaskAlarmModal from "./TaskAlarmModal"
 import SuggestionModal from "./SuggestionModal"
 import AdvisorCard from "./AdvisorCard"
 import { useDaySuggestion } from "@/app/hooks/useDaySuggestion"
@@ -47,6 +50,7 @@ export default function DailyTaskList() {
     const { selectedDate, timezone } = useCalendar()
     const { summary, refresh: refreshSummary } = useDaySummary()
     const { removeTaskReminder } = useTaskReminders()
+    const { removeAlarm } = useTaskAlarms()
 
     // Phase 2 — روزِ کانونیکالِ امروز: کارت مشاور و «چیدمان هوشمند» فقط برای همین روز معنا دارند
     const isToday = selectedDate === getCanonicalToday(timezone)
@@ -88,6 +92,8 @@ export default function DailyTaskList() {
     const [editTask, setEditTask] = useState<TaskItem | null>(null)
     // «تنظیم زمان»: تنها یک state نمایشی برای مودال یادآوری
     const [remindTask, setRemindTask] = useState<TaskItem | null>(null)
+    // آلارم واقعی تسک: state نمایشی مستقل (Feature B)
+    const [alarmTask, setAlarmTask] = useState<TaskItem | null>(null)
 
     // استیت‌های مربوط به هوش مصنوعی
     const [suggestionOpen, setSuggestionOpen] = useState(false)
@@ -255,6 +261,8 @@ export default function DailyTaskList() {
             await api(`/api/tasks/${deleteTask.id}`, { method: "DELETE" })
             // کار حذف شد ⇒ یادآورش هم باید برود (و اعلان نیتیو لغو شود).
             void removeTaskReminder(deleteTask.id)
+            // … و آلارم نیتیوش هم (وگرنه برای کاری که وجود ندارد زنگ می‌زند).
+            void removeAlarm(deleteTask.id)
             setDeleteTask(null)
             await afterMutation("کار حذف شد؛ زمانش به استخر روز برگشت 🕊")
         } catch (e) {
@@ -424,6 +432,7 @@ export default function DailyTaskList() {
                                 onDelete={setDeleteTask}
                                 onReanalyze={setReanalyzeTask}
                                 onRemind={setRemindTask}
+                                onAlarm={setAlarmTask}
                                 onEdit={setEditTask}
                             />
                         ))}
@@ -548,6 +557,13 @@ export default function DailyTaskList() {
                 task={remindTask}
                 open={remindTask !== null}
                 onClose={() => setRemindTask(null)}
+            />
+
+            {/* Feature B — آلارم واقعی تسک (مستقل از یادآور) */}
+            <TaskAlarmModal
+                task={alarmTask}
+                open={alarmTask !== null}
+                onClose={() => setAlarmTask(null)}
             />
 
             {/* Phase 4.3 — پیش‌نمایش پیشنهاد؛ فقط با تأیید صریح به Apply وصل می‌شود.

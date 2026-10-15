@@ -1,6 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+// Feature B — آلارم واقعی تسک (context مستقل از یادآور)
+import { useTaskAlarms } from "@/app/hooks/useTaskAlarm"
 import {
     LOCAL_REMINDER_CHANNEL_ID,
     cancelLocalReminder,
@@ -86,6 +88,7 @@ const LOG_COLOR: Record<LogLevel, string> = {
 const KIND_LABEL: Record<ReminderKind, string> = {
     TASK: "تسک",
     DAILY: "روزانه",
+    ALARM: "آلارم",
     UNKNOWN: "نامعلوم",
 }
 
@@ -231,10 +234,69 @@ export default function NativePocPage() {
     const [sessionProbe, setSessionProbe] = useState<SessionProbe | null>(null)
     const [sessionBusy, setSessionBusy] = useState(false)
 
+    /*
+     * Feature B — آلارم واقعی تسک.
+     *
+     * این بخش فقط «رابط آزمایش روی دستگاه» است: از همان context واقعیِ آلارم
+     * استفاده می‌کند (نه یک مسیر موازی)، تا آنچه اینجا آزمایش می‌شود دقیقاً همان
+     * چیزی باشد که از کارت تسک ثبت می‌شود.
+     */
+    const {
+        nativePlatform: alarmPlatform,
+        bridgeAvailable: alarmBridge,
+        nativeStatus: alarmStatus,
+        alarms: alarmList,
+        setAlarm: setProbeAlarm,
+        removeAlarm: removeProbeAlarm,
+        refreshNativeStatus,
+        requestExactPermission,
+        requestNotificationPermission,
+        requestFullScreenPermission,
+    } = useTaskAlarms()
+    const [alarmProbe, setAlarmProbe] = useState("—")
+    const [alarmBusy, setAlarmBusy] = useState(false)
+
     const logLine = useCallback((level: LogLevel, text: string) => {
         logKey.current += 1
         setLog((prev) => [{ key: logKey.current, level, text }, ...prev].slice(0, 30))
     }, [])
+
+    /**
+     * ثبت آلارم آزمایشی ۱ دقیقه‌ای — از همان مسیر واقعی کارت تسک.
+     * شناسه‌ی تسک ثابت است تا اجرای دوباره همان آلارم را جایگزین کند.
+     */
+    const POC_ALARM_TASK_ID = 1_199_001
+
+    const probeAlarmOneMinute = useCallback(async () => {
+        setAlarmBusy(true)
+        setAlarmProbe("در حال ثبت…")
+        try {
+            const result = await setProbeAlarm(
+                { id: POC_ALARM_TASK_ID, title: "آزمایش آلارم (PoC)" },
+                Date.now() + 60_000,
+            )
+            setAlarmProbe(
+                result.ok
+                    ? `ثبت شد · exact=${String(result.exact)} · ${new Date(Date.now() + 60_000).toLocaleTimeString("fa-IR")}`
+                    : `ناموفق: ${result.reason} · ${result.message}`,
+            )
+            logLine(result.ok ? "ok" : "error", `آلارم آزمایشی: ${result.ok ? "ok" : result.reason}`)
+        } catch (error) {
+            setAlarmProbe(`خطا: ${error instanceof Error ? error.message : String(error)}`)
+        } finally {
+            setAlarmBusy(false)
+        }
+    }, [setProbeAlarm, logLine])
+
+    const probeAlarmCancel = useCallback(async () => {
+        setAlarmBusy(true)
+        try {
+            const result = await removeProbeAlarm(POC_ALARM_TASK_ID)
+            setAlarmProbe(result.ok ? "لغو شد" : `لغو ناموفق: ${result.reason}`)
+        } finally {
+            setAlarmBusy(false)
+        }
+    }, [removeProbeAlarm])
 
     /*
      * بررسی read-only نشست.
@@ -902,6 +964,111 @@ export default function NativePocPage() {
                         ))}
                     </ul>
                 )}
+            </section>
+
+            {/* ── Feature B: آلارم واقعی تسک ── */}
+            <section
+                style={{
+                    border: "1px solid #b26a00",
+                    borderRadius: 8,
+                    padding: "0.75rem",
+                    marginBottom: "0.75rem",
+                    fontSize: "0.85rem",
+                }}
+            >
+                <h2 style={{ fontSize: "0.95rem", margin: "0 0 0.5rem" }}>
+                    آلارم واقعی تسک (TaskAlarm)
+                </h2>
+                <div style={{ lineHeight: 1.9 }}>
+                    <div>
+                        پلتفرم:{" "}
+                        <strong>
+                            {alarmPlatform === null
+                                ? "در حال بررسی…"
+                                : alarmPlatform
+                                  ? "نیتیو (APK)"
+                                  : "مرورگر"}
+                        </strong>
+                    </div>
+                    <div>
+                        پلاگین TaskAlarm:{" "}
+                        <strong>{alarmBridge ? "ثبت شده" : "ثبت نشده"}</strong>
+                    </div>
+                    <div>
+                        آلارم دقیق:{" "}
+                        <strong>
+                            {alarmStatus == null ? "—" : String(alarmStatus.exactAlarm)}
+                        </strong>{" "}
+                        · تمام‌صفحه:{" "}
+                        <strong>
+                            {alarmStatus == null ? "—" : String(alarmStatus.fullScreenIntent)}
+                        </strong>{" "}
+                        · اعلان:{" "}
+                        <strong>
+                            {alarmStatus == null ? "—" : String(alarmStatus.notifications)}
+                        </strong>
+                    </div>
+                    <div>
+                        آلارم‌های آینه‌ی محلی: <strong>{alarmList.length}</strong>
+                    </div>
+                    <div>
+                        نتیجه: <strong>{alarmProbe}</strong>
+                    </div>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "0.5rem" }}>
+                    <button
+                        type="button"
+                        style={btnBase}
+                        disabled={alarmBusy}
+                        onClick={() => void probeAlarmOneMinute()}
+                    >
+                        آلارم ۱ دقیقه
+                    </button>
+                    <button
+                        type="button"
+                        style={btnBase}
+                        disabled={alarmBusy}
+                        onClick={() => void probeAlarmCancel()}
+                    >
+                        لغو آلارم آزمایشی
+                    </button>
+                    <button
+                        type="button"
+                        style={btnBase}
+                        disabled={alarmBusy}
+                        onClick={() => void refreshNativeStatus()}
+                    >
+                        تازه‌سازی وضعیت
+                    </button>
+                    <button
+                        type="button"
+                        style={btnBase}
+                        disabled={alarmBusy}
+                        onClick={() => void requestNotificationPermission()}
+                    >
+                        اجازه اعلان
+                    </button>
+                    <button
+                        type="button"
+                        style={btnBase}
+                        disabled={alarmBusy}
+                        onClick={() => void requestExactPermission()}
+                    >
+                        اجازه آلارم دقیق
+                    </button>
+                    <button
+                        type="button"
+                        style={btnBase}
+                        disabled={alarmBusy}
+                        onClick={() => void requestFullScreenPermission()}
+                    >
+                        اجازه تمام‌صفحه
+                    </button>
+                </div>
+                <p style={{ color: "#555", margin: "0.5rem 0 0", lineHeight: 1.8, fontSize: "0.78rem" }}>
+                    مراحل تست روی دستگاه: «آلارم ۱ دقیقه» → اپ را ببند/صفحه را خاموش کن → صدا +
+                    صفحه‌ی آلارم با توقف/تعویق باید بیاید.
+                </p>
             </section>
 
             {/* ── گزارش تشخیصی زمان‌بندی نیتیو ── */}

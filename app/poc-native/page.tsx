@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
     LOCAL_REMINDER_CHANNEL_ID,
     cancelLocalReminder,
@@ -63,6 +63,17 @@ type PendingReport = {
     now: Date
     items: PendingLocalReminder[]
 }
+
+/**
+ * نتیجهٔ بررسی read-only نشست.
+ *
+ * این نوع عمداً هیچ مفهومِ «رفع/ورود/خروج» ندارد: فقط وضعیت HTTP را نگه
+ * می‌دارد تا هیچ‌کس از این بخش انتظار تغییر نشست نداشته باشد.
+ */
+type SessionProbe =
+    | { phase: "loading"; at: string }
+    | { phase: "done"; status: number; ok: boolean; userId?: number; at: string }
+    | { phase: "error"; error: string; at: string }
 
 const LOG_COLOR: Record<LogLevel, string> = {
     info: "#555",
@@ -133,6 +144,25 @@ const DIAG_EVENT_COLOR: Record<NativeDiagnosticEvent, string> = {
     EXACT_CAPABILITY: "#3b5bdb",
 }
 
+/**
+ * ترتیب ثابت رویدادهای یک «تلاشِ» زمان‌بندی.
+ *
+ * این‌ها دقیقاً همان رویدادهایی هستند که `attemptNo` را حمل می‌کنند، پس
+ * فیلترکردن گزارش با آخرین `attemptNo` فقط همین‌ها را برمی‌گرداند و ترتیب
+ * زیر همان ترتیب واقعی اجراست. نمایش ثابت باعث می‌شود مرحلهٔ «ثبت‌نشده»
+ * هم صراحتاً دیده شود (بدون حدس).
+ */
+const ATTEMPT_EVENT_ORDER: NativeDiagnosticEvent[] = [
+    "SCHEDULE_START",
+    "PERMISSION_RESULT",
+    "EXACT_CAPABILITY",
+    "CHANNEL_RESULT",
+    "NATIVE_SCHEDULE_START",
+    "NATIVE_SCHEDULE_RESOLVED",
+    "NATIVE_SCHEDULE_REJECTED",
+    "SCHEDULE_UNRESOLVED",
+]
+
 const monoStyle: React.CSSProperties = {
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
     fontSize: "0.72rem",
@@ -197,10 +227,57 @@ export default function NativePocPage() {
 
     const [pendingError, setPendingError] = useState<string | null>(null)
 
+    /* نتیجهٔ بررسی read-only نشست — فقط نمایش وضعیت HTTP. */
+    const [sessionProbe, setSessionProbe] = useState<SessionProbe | null>(null)
+    const [sessionBusy, setSessionBusy] = useState(false)
+
     const logLine = useCallback((level: LogLevel, text: string) => {
         logKey.current += 1
         setLog((prev) => [{ key: logKey.current, level, text }, ...prev].slice(0, 30))
     }, [])
+
+    /*
+     * بررسی read-only نشست.
+     *
+     * عمداً هیچ کاری جز یک GET نمی‌کند: نه logout، نه redirect، نه تغییر کوکی.
+     * `credentials: "same-origin"` یعنی کوکی نشست همراه درخواست می‌رود (همان‌طور
+     * که در ناوبری عادی می‌رفت) و نتیجه فقط خوانده می‌شود. هدف این است که بدون
+     * DevTools مشخص شود «آیا کوکی نشست روی دستگاه زنده است یا نه» — چون تنها
+     * مسیر خودکار به صفحهٔ ورود، همین ۴۰۱ در سمت سرور است.
+     */
+    const readSession = useCallback(async () => {
+        setSessionBusy(true)
+        setSessionProbe({ phase: "loading", at: new Date().toISOString() })
+
+        try {
+            const res = await fetch("/api/auth/profile", {
+                method: "GET",
+                credentials: "same-origin",
+                cache: "no-store",
+            })
+
+            let userId: number | undefined
+            try {
+                const body = (await res.json()) as { data?: { id?: unknown } }
+                const id = body?.data?.id
+                if (res.ok && typeof id === "number" && Number.isInteger(id)) userId = id
+            } catch {
+                /* بدنهٔ غیر-JSON — وضعیت HTTP تنها چیزی است که لازم داریم */
+            }
+
+            setSessionProbe({ phase: "done", status: res.status, ok: res.ok, userId, at: new Date().toISOString() })
+            logLine(
+                res.ok ? "ok" : "warn",
+                `session · HTTP ${res.status}${userId !== undefined ? ` · userId=${userId}` : ""}`,
+            )
+        } catch (err) {
+            const message = describeDiagnosticError(err)
+            setSessionProbe({ phase: "error", error: message, at: new Date().toISOString() })
+            logLine("error", `session · درخواست انجام نشد — ${message}`)
+        } finally {
+            setSessionBusy(false)
+        }
+    }, [logLine])
 
     /*
      * اشتراک روی حلقه‌ی گزارش تشخیصی.
@@ -218,6 +295,42 @@ export default function NativePocPage() {
         const id = window.setInterval(() => setDiagClock(new Date()), 1000)
         return () => window.clearInterval(id)
     }, [])
+
+    /*
+     * آخرین «تلاش» زمان‌بندی، از روی همان گزارش تشخیصی موجود.
+     *
+     * هیچ رویداد جدیدی ثبت نمی‌شود و هیچ تابعی از لایهٔ نیتیو صدا زده نمی‌شود؛
+     * فقط گزارشِ ذخیره‌شده فیلتر می‌شود. بزرگ‌ترین `attemptNo` = آخرین اجرا، و
+     * برای آن اجرا هر رویداد با زمان و پیامش (یا «ثبت‌نشده») نمایش داده می‌شود.
+     */
+    const attemptReport = useMemo(() => {
+        const withAttempt = diag.filter(
+            (entry): entry is NativeDiagnosticEntry & { attemptNo: number } =>
+                typeof entry.attemptNo === "number",
+        )
+
+        if (withAttempt.length === 0) return null
+
+        const latestAttemptNo = withAttempt.reduce(
+            (max, entry) => (entry.attemptNo > max ? entry.attemptNo : max),
+            withAttempt[0].attemptNo,
+        )
+
+        const events = withAttempt
+            .filter((entry) => entry.attemptNo === latestAttemptNo)
+            .sort((a, b) => a.seq - b.seq)
+
+        const byEvent = new Map<NativeDiagnosticEvent, NativeDiagnosticEntry>()
+        for (const entry of events) byEvent.set(entry.event, entry)
+
+        return {
+            latestAttemptNo,
+            events,
+            byEvent,
+            last: events[events.length - 1],
+            notificationId: events.find((entry) => entry.id !== undefined)?.id,
+        }
+    }, [diag])
 
     const askPermission = useCallback(async () => {
         const result = await requestLocalNotificationPermission()
@@ -463,6 +576,89 @@ export default function NativePocPage() {
                 </div>
             </section>
 
+            {/* ── تشخیص: وضعیت نشست (Read-only) ── */}
+            <section
+                style={{
+                    border: "1px solid #6b7280",
+                    borderRadius: 8,
+                    padding: "0.75rem",
+                    marginBottom: "0.75rem",
+                    fontSize: "0.85rem",
+                }}
+            >
+                <h2 style={{ fontSize: "0.95rem", margin: "0 0 0.4rem" }}>
+                    وضعیت نشست (Read-only)
+                </h2>
+
+                <div style={{ lineHeight: 1.9 }}>
+                    <div>
+                        endpoint: <strong style={monoStyle}>GET /api/auth/profile</strong>
+                    </div>
+                    {sessionProbe === null && (
+                        <div style={{ color: "#777" }}>
+                            بررسی نشده — روی «بررسی session (Read-only)» بزن.
+                        </div>
+                    )}
+                    {sessionProbe !== null && sessionProbe.phase === "loading" && (
+                        <div>در حال بررسی…</div>
+                    )}
+                    {sessionProbe !== null && sessionProbe.phase === "done" && (
+                        <>
+                            <div>
+                                HTTP:{" "}
+                                <strong style={{ color: sessionProbe.ok ? "#0a7" : "#c00" }}>
+                                    {sessionProbe.status}
+                                </strong>
+                                {" · "}
+                                {sessionProbe.status === 200 ? (
+                                    <span style={{ color: "#0a7" }}>Session معتبر است</span>
+                                ) : sessionProbe.status === 401 ? (
+                                    <span style={{ color: "#c00" }}>
+                                        Session وجود ندارد/نامعتبر است
+                                    </span>
+                                ) : (
+                                    <span style={{ color: "#c00" }}>پاسخ نامنتظره از سرور</span>
+                                )}
+                            </div>
+                            {sessionProbe.userId !== undefined && (
+                                <div>
+                                    userId: <strong>{sessionProbe.userId}</strong>
+                                </div>
+                            )}
+                            <div style={{ color: "#777", fontSize: "0.78rem" }}>
+                                در {new Date(sessionProbe.at).toLocaleTimeString("fa-IR")}
+                            </div>
+                        </>
+                    )}
+                    {sessionProbe !== null && sessionProbe.phase === "error" && (
+                        <>
+                            <div style={{ color: "#c00" }}>
+                                درخواست قابل انجام نیست (network/error)
+                            </div>
+                            <div style={{ ...monoStyle, color: "#c00" }}>{sessionProbe.error}</div>
+                            <div style={{ color: "#777", fontSize: "0.78rem" }}>
+                                در {new Date(sessionProbe.at).toLocaleTimeString("fa-IR")} ·
+                                navigator.onLine={
+                                    typeof navigator !== "undefined" ? String(navigator.onLine) : "—"
+                                }
+                            </div>
+                        </>
+                    )}
+                </div>
+
+                <p
+                    style={{
+                        color: "#555",
+                        margin: "0.5rem 0 0",
+                        lineHeight: 1.8,
+                        fontSize: "0.78rem",
+                    }}
+                >
+                    این بخش فقط یک GET می‌زند: نه logout، نه redirect، نه تغییر نشست. ۴۰۱ اینجا
+                    روشن می‌کند که همان redirect سمت سرور به /auth/login چرا رخ داده است.
+                </p>
+            </section>
+
             {native === false && (
                 <p
                     style={{
@@ -493,6 +689,14 @@ export default function NativePocPage() {
             >
                 <button type="button" style={btnBase} disabled={busy} onClick={() => void askPermission()}>
                     درخواست مجوز
+                </button>
+                <button
+                    type="button"
+                    style={btnBase}
+                    disabled={sessionBusy}
+                    onClick={() => void readSession()}
+                >
+                    بررسی session (Read-only)
                 </button>
                 <button
                     type="button"
@@ -801,6 +1005,125 @@ export default function NativePocPage() {
                             </li>
                         ))}
                     </ul>
+                )}
+            </section>
+
+            {/* ── تشخیص: آخرین تلاش زمان‌بندی (attemptNo) ── */}
+            <section
+                style={{
+                    border: "1px solid #3b5bdb",
+                    borderRadius: 8,
+                    padding: "0.75rem",
+                    marginBottom: "0.75rem",
+                    fontSize: "0.85rem",
+                }}
+            >
+                <h2 style={{ fontSize: "0.95rem", margin: "0 0 0.4rem" }}>
+                    آخرین تلاش زمان‌بندی (attemptNo)
+                </h2>
+
+                {attemptReport === null ? (
+                    <p style={{ color: "#999", margin: "0.4rem 0 0", lineHeight: 1.8 }}>
+                        هیچ eventی ثبت نشده است.
+                    </p>
+                ) : (
+                    <>
+                        <div style={{ lineHeight: 1.9 }}>
+                            <div>
+                                attemptNo: <strong>{attemptReport.latestAttemptNo}</strong>
+                            </div>
+                            <div>
+                                notification id:{" "}
+                                <strong>{attemptReport.notificationId ?? "—"}</strong>
+                            </div>
+                            <div>
+                                تعداد event: <strong>{attemptReport.events.length}</strong>
+                            </div>
+                            <div>
+                                آخرین event:{" "}
+                                <strong
+                                    style={{ color: DIAG_EVENT_COLOR[attemptReport.last.event] }}
+                                >
+                                    {DIAG_EVENT_LABEL[attemptReport.last.event]}
+                                </strong>{" "}
+                                ·{" "}
+                                <span style={{ color: "#555" }}>
+                                    {new Date(attemptReport.last.at).toLocaleTimeString("fa-IR")}
+                                </span>
+                            </div>
+                        </div>
+
+                        <ul
+                            style={{
+                                listStyle: "none",
+                                margin: "0.4rem 0 0",
+                                padding: 0,
+                                lineHeight: 1.8,
+                            }}
+                        >
+                            {ATTEMPT_EVENT_ORDER.map((event) => {
+                                const entry = attemptReport.byEvent.get(event)
+
+                                return (
+                                    <li
+                                        key={event}
+                                        style={{
+                                            borderTop: "1px dashed #ddd",
+                                            paddingTop: "0.3rem",
+                                            marginTop: "0.3rem",
+                                        }}
+                                    >
+                                        <div
+                                            style={{
+                                                color: entry ? DIAG_EVENT_COLOR[event] : "#999",
+                                                fontWeight: 600,
+                                            }}
+                                        >
+                                            {DIAG_EVENT_LABEL[event]}
+                                        </div>
+                                        {entry ? (
+                                            <div style={monoStyle}>
+                                                <div>
+                                                    ثبت شد ·{" "}
+                                                    {new Date(entry.at).toLocaleTimeString("fa-IR")}
+                                                    {entry.id !== undefined && ` · id=${entry.id}`}
+                                                </div>
+                                                {(entry.isExact !== undefined ||
+                                                    entry.allowWhileIdle !== undefined) && (
+                                                    <div>
+                                                        exact={String(entry.isExact)} whileIdle={
+                                                            String(entry.allowWhileIdle)
+                                                        }
+                                                    </div>
+                                                )}
+                                                {entry.message && <div>message={entry.message}</div>}
+                                                {entry.warning && (
+                                                    <div>warning={entry.warning.code}</div>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <div style={{ color: "#999", fontSize: "0.78rem" }}>
+                                                ثبت نشده
+                                            </div>
+                                        )}
+                                    </li>
+                                )
+                            })}
+                        </ul>
+
+                        <p
+                            style={{
+                                color: "#555",
+                                margin: "0.5rem 0 0",
+                                lineHeight: 1.8,
+                                fontSize: "0.78rem",
+                            }}
+                        >
+                            فقط خوانده‌شده از گزارش موجود است؛ هیچ schedule/cancel/permission/exact/queue
+                            تغییر نمی‌کند. اگر «هیچ eventی ثبت نشده است» دیده شود، یعنی برای این یادآور
+                            اصلاً به لایهٔ نیتیو نرسیده‌ایم.
+                        </p>
+                    </>
                 )}
             </section>
 

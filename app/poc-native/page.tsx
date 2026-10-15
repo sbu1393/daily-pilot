@@ -164,6 +164,18 @@ export default function NativePocPage() {
         deliveryFocusFound: boolean | undefined
     } | null>(null)
 
+    type DeliveryProbePhase = "idle" | "loading" | "done" | "error"
+
+    const [deliveryProbe, setDeliveryProbe] = useState<{
+        phase: DeliveryProbePhase
+        focusId?: number
+        pendingCount?: number
+        deliveredCount?: number
+        deliveryFocusFound?: boolean
+        error?: string
+        at?: string
+    } | null>(null)
+
     const logLine = useCallback((level: LogLevel, text: string) => {
         logKey.current += 1
         setLog((prev) => [{ key: logKey.current, level, text }, ...prev].slice(0, 30))
@@ -316,39 +328,75 @@ export default function NativePocPage() {
 
 
     const readDeliverySnapshot = useCallback(async () => {
+        logLine("info", `شروع بررسی وضعیت تحویل — کلیک روی دکمه دریافت شد.`)
         setBusy(true)
+        setDeliveryProbe({ phase: "loading", focusId: scheduled[0]?.id })
+
+        function finish(phase: "done" | "error", payload?: { error?: string }) {
+            setBusy(false)
+            setDeliveryProbe((prev) => {
+                if (!prev) return null
+                return { ...prev, phase, error: payload?.error }
+            })
+        }
 
         try {
             const pluginRes = await getLocalNotificationsPluginForDiagnostics()
 
             if (!pluginRes.ok) {
-                logLine("error", `پلاگین تشخیصی در دسترس نیست (${pluginRes.reason}): ${pluginRes.message}`)
+                const error = `پلاگین تشخیصی در دسترس نیست (${pluginRes.reason}): ${pluginRes.message}`
+                logLine("error", error)
+                setDeliveryProbe((prev) => (prev ? { ...prev, phase: "error", error } : null))
+                finish("error", { error })
                 return
             }
 
             const latestScheduled = scheduled[0]
             if (!latestScheduled) {
-                logLine("warn", `برای بررسی وضعیت تحویل، önce یک یادآور زمان‌بندی کنید.`)
+                const error = `برای بررسی وضعیت تحویل، اول یک یادآور زمان‌بندی کنید؛ هرگز از صفحه‌ی تنظیمات اندروید استفاده نکنید.`
+                logLine("warn", error)
+                setDeliveryProbe((prev) => (prev ? { ...prev, phase: "error", error } : null))
+                finish("error", { error })
                 return
             }
 
             await recordDeliverySnapshot(pluginRes.plugin, latestScheduled.id, "TASK", "روزساز — یادآور آزمایشی")
 
+            logLine("info", `دستور وضعیت تحویل ثبت شد — خواندن گزارش تشخیصی.`)
+
             const after = getNativeDiagnostics()
             const last = after.slice().reverse().find((e) => e.event === "DELIVERY_SNAPSHOT")
+
             if (last) {
+                const atIso = last.iso ?? "—"
                 setPendingDeliverySnapshot({
                     pendingCount: last.pending?.length ?? 0,
                     deliveredCount: last.delivered?.length ?? 0,
                     deliveryFocusFound: last.deliveryFocusFound,
                 })
+                setDeliveryProbe({
+                    phase: "done",
+                    focusId: last.id,
+                    pendingCount: last.pending?.length ?? 0,
+                    deliveredCount: last.delivered?.length ?? 0,
+                    deliveryFocusFound: last.deliveryFocusFound,
+                    at: atIso,
+                })
+                logLine("ok", `وضعیت تحویل ثبت شد (id=${last.id}, pending=${last.pending?.length ?? 0}, delivered=${last.delivered?.length ?? 0}, focusInDelivered=${last.deliveryFocusFound ?? false}, at=${atIso})`)
+            } else {
+                const error = `يقینی نیست: هیچ رویداد DELIVERY_SNAPSHOT در گزارش تشخیصی یافت نشد؛ یا پل پاسخ نداد یا ذخیره‌ی گزارش شکست خورد.`
+                logLine("error", error)
+                setDeliveryProbe((prev) => (prev ? { ...prev, phase: "error", error } : null))
+                finish("error", { error })
+                return
             }
 
-            logLine("ok", `وضعیت تحویل ثبت شد (id=${latestScheduled.id})`)
+            finish("done")
         } catch (err) {
-            logLine("error", `ثبت وضعیت تحویل ناگهانی شکست خورد: ${describeDiagnosticError(err)}`)
-        } finally {
-            setBusy(false)
+            const error = `ثبت وضعیت تحویل ناگهانی شکست خورد: ${describeDiagnosticError(err)}`
+            logLine("error", error)
+            setDeliveryProbe((prev) => (prev ? { ...prev, phase: "error", error } : null))
+            finish("error", { error })
         }
     }, [logLine, scheduled])
 
@@ -714,8 +762,8 @@ export default function NativePocPage() {
                 )}
             </section>
 
-            {/* ── وضعیت تحویل (Read-only) ── */}
-            {pendingDeliverySnapshot !== null && (
+            {/* ── وضعیت تشخیص تحویل ── */}
+            {deliveryProbe !== null && (
                 <section
                     style={{
                         border: "1px solid #3b5bdb",
@@ -730,22 +778,52 @@ export default function NativePocPage() {
                     </h2>
                     <div style={{ lineHeight: 1.9 }}>
                         <div>
-                            زمان Effective: <strong>{diagClock ? diagClock.toLocaleString("fa-IR") : "—"}</strong>
+                            {deliveryProbe.phase === "loading" && (
+                                <strong>در حال بررسی…</strong>
+                            )}
+                            {deliveryProbe.phase === "done" && (
+                                <>
+                                    <strong>مشاهده شد · شناسه: {deliveryProbe.focusId}</strong>
+                                    {" "}
+                                    <span style={{ color: "#555" }}>
+                                        در {deliveryProbe.at ? new Date(deliveryProbe.at).toLocaleString("fa-IR") : "—"}
+                                    </span>
+                                </>
+                            )}
+                            {deliveryProbe.phase === "error" && (
+                                <>
+                                    <strong style={{ color: "#c00" }}>خطا یا ناامید</strong>
+                                    {" "}
+                                    <span style={{ color: "#555", fontSize: "0.78rem" }}>
+                                        در گزارش یا لاگ عبارت مربوطه قابل مطالعه است
+                                    </span>
+                                </>
+                            )}
                         </div>
-                        <div>
-                            pending: <strong>{pendingDeliverySnapshot.pendingCount}</strong>
-                        </div>
-                        <div>
-                            delivered (visible in shade/notification-list): <strong>{pendingDeliverySnapshot.deliveredCount}</strong>
-                        </div>
-                        <div>
-                            focusFound در delivered:{" "}
-                            <strong>
-                                {pendingDeliverySnapshot.deliveryFocusFound === undefined
-                                    ? "—"
-                                    : String(pendingDeliverySnapshot.deliveryFocusFound)}
-                            </strong>
-                        </div>
+                        {deliveryProbe.phase === "done" && (
+                            <>
+                                <div>
+                                    pending: <strong>{deliveryProbe.pendingCount ?? 0}</strong>
+                                </div>
+                                <div>
+                                    delivered (visible in shade/notification-list):
+                                    <strong>{deliveryProbe.deliveredCount ?? 0}</strong>
+                                </div>
+                                <div>
+                                    focusFound در delivered:{" "}
+                                    <strong>
+                                        {deliveryProbe.deliveryFocusFound === undefined
+                                            ? "—"
+                                            : String(deliveryProbe.deliveryFocusFound)}
+                                    </strong>
+                                </div>
+                            </>
+                        )}
+                        {deliveryProbe.phase === "error" && deliveryProbe.error && (
+                            <div style={{ color: "#c00", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                                {deliveryProbe.error}
+                            </div>
+                        )}
                     </div>
                     <p style={{ color: "#555", margin: "0.5rem 0 0", lineHeight: 1.8, fontSize: "0.78rem" }}>
                         این بخش فقط خوانی است و هیچ schedule/cancel/permission/exact/queue تغییر نمی‌کند.

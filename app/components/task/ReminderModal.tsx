@@ -42,6 +42,8 @@ const NATIVE_REASON_LABEL: Record<string, string> = {
     INVALID_TASK_ID: "این کار معتبر نیست",
     NOT_NATIVE: "یادآوری نیتیو فقط در اپ اندروید کار می‌کند",
     PLUGIN_UNAVAILABLE: "سرویس اعلان در دسترس نیست",
+    SCHEDULE_FAILED: "زمان‌بندی یادآور در سیستم‌عامل انجام نشد",
+    CANCEL_FAILED: "لغو یادآور ناموفق بود",
 }
 
 /**

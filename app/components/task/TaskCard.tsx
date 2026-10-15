@@ -100,6 +100,8 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind, onEdit }:
 
     return (
         <motion.li
+            /* لنگرِ DOM برای «تپ روی اعلان → اسکرول به همین تسک» */
+            id={`dp-task-${task.id}`}
             className={`${styles.card} ${done ? styles.done : ""}`}
             variants={cardVariants}
             initial="hidden"

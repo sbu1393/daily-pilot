@@ -9,6 +9,7 @@ import {
     useRef,
     useState,
 } from "react"
+import { useRouter } from "next/navigation"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import { useSettings } from "@/app/contexts/SettingsContext"
 import { getOfflineUserId, OFFLINE_SCOPE_EVENT } from "@/app/lib/offline"
@@ -24,6 +25,7 @@ import {
     type TaskReminderAuthorizeOutcome,
 } from "@/app/lib/native/task-reminder"
 import ReminderAlarmBanner from "@/app/components/task/ReminderAlarmBanner"
+import { planNativeReminders } from "@/app/lib/native/reminderPlan"
 import {
     clearLegacyRemindersKey,
     markDueReminders,
@@ -129,6 +131,34 @@ export function ReminderProvider({ children }: { children: React.ReactNode }) {
         setReminders(next)
     }, [])
 
+    const router = useRouter()
+
+    /**
+     * تپ روی اعلان → رفتن به همان تسک.
+     *
+     * لینکِ مستقیم به یک تسک وجود ندارد، پس به داشبورد می‌رویم و اگر آن تسک در
+     * لیست امروز باشد به آن اسکرول می‌کنیم (`dp-task-<id>` روی `TaskCard`).
+     * اگر نبود، بی‌صدا رها می‌شود — یعنی «وقتی ممکن است».
+     */
+    const openTaskOnDashboard = useCallback(
+        (taskId: number) => {
+            router.push(`/dashboard?focusTask=${taskId}`)
+
+            /* صفحه بعد از ناوبری رندر می‌شود؛ چند تلاش کوتاه کافی است. */
+            let attempts = 0
+            const scroll = () => {
+                const element = document.getElementById(`dp-task-${taskId}`)
+                if (element) {
+                    element.scrollIntoView({ behavior: "smooth", block: "center" })
+                    return
+                }
+                if (attempts++ < 10) window.setTimeout(scroll, 300)
+            }
+            window.setTimeout(scroll, 300)
+        },
+        [router],
+    )
+
     // 0) نشست + پاک‌سازی کلیدِ قدیمیِ بدون scope (خروج/ورود)
     useEffect(() => {
         const userId = getOfflineUserId()
@@ -149,6 +179,48 @@ export function ReminderProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         setNativePlatform(isNativeLocalNotificationPlatform())
     }, [])
+
+    /*
+     * 1b) تپ روی اعلانِ نیتیو → باز کردن همان تسک.
+     *
+     * روی Android، `extra.taskId` همراه اعلان ذخیره می‌شود و هنگام تپ شدن از
+     * پل برمی‌گردد. این listener هیچ تصمیمی درباره‌ی زمان‌بندی/لغو نمی‌گیرد و
+     * فقط روی نیتیو ثبت می‌شود. اگر پلاگین در دسترس نباشد، فقط «تپ → ناوبری»
+     * کار نمی‌کند و خودِ اعلان دست‌نخورده می‌ماند.
+     */
+    useEffect(() => {
+        if (nativePlatform !== true) return
+
+        let disposed = false
+        let handle: { remove: () => Promise<void> } | null = null
+
+        const attach = async () => {
+            try {
+                const { LocalNotifications } = await import("@capacitor/local-notifications")
+                const listener = await LocalNotifications.addListener(
+                    "localNotificationActionPerformed",
+                    (event) => {
+                        const extra = event.notification.extra as { taskId?: unknown } | undefined
+                        const taskId = extra?.taskId
+                        if (typeof taskId !== "number") return
+                        openTaskOnDashboard(taskId)
+                    },
+                )
+
+                if (disposed) void listener.remove()
+                else handle = listener
+            } catch {
+                /* نبودِ پلاگین: فقط ناوبری از روی اعلان از کار می‌افتد. */
+            }
+        }
+
+        void attach()
+
+        return () => {
+            disposed = true
+            if (handle) void handle.remove()
+        }
+    }, [nativePlatform, openTaskOnDashboard])
 
     // 2) خواندن یادآورهای همان scope — فقط بعد از mount (بدون خطای hydration)
     useEffect(() => {
@@ -176,18 +248,19 @@ export function ReminderProvider({ children }: { children: React.ReactNode }) {
 
         let disposed = false
 
-        const wanted = new Set<number>()
-        for (const reminder of reminders) {
-            if (reminder.firedAt === null) wanted.add(reminder.taskId)
-        }
-
-        const stale = Array.from(scheduledNativeRef.current).filter((taskId) => !wanted.has(taskId))
-        for (const taskId of stale) {
+        /*
+         * تصمیم «زمان‌بندی یا لغو» در `planNativeReminders` است (منطق خالص و
+         * تست‌شده). نکته‌ی مهمی که آنجا مستند شده: یادآورِ **اجراشده** لغو
+         * نمی‌شود — وگرنه روی آلارم غیردقیقِ Android، اعلانِ در انتظار پیش از
+         * رسیدن توسط خودِ اپ لغو می‌شد.
+         */
+        const plan = planNativeReminders(reminders, scheduledNativeRef.current)
+        for (const taskId of plan.stale) {
             scheduledNativeRef.current.delete(taskId)
         }
 
         const run = async () => {
-            for (const taskId of stale) {
+            for (const taskId of plan.stale) {
                 await cancelTaskReminder(taskId)
                 if (disposed) return
             }
@@ -261,9 +334,22 @@ export function ReminderProvider({ children }: { children: React.ReactNode }) {
         }
     }, [applyList, playBeep, nativePlatform])
 
+    /*
+     * تیکِ علامت‌گذاری در **هر دو** محیط لازم است.
+     *
+     * روی مرورگر، همین تیک هم‌زمان بنر/بوق را می‌سازد. روی Android، خودِ
+     * اعلان سیستم‌عامل رسیده است و این تیک فقط `firedAt` را پر می‌کند — ولی
+     * همین یک کار ضروری است: `firedAt` منبع حقیقتِ لیست است، و اگر روی نیتیو
+     * هیچ‌وقت پر نشود، یادآورِ گذشته تا ابد «در انتظار» می‌ماند و هر بار باز
+     * شدن اپ دوباره تلاش زمان‌بندی می‌کند که همیشه با `IN_THE_PAST` رد می‌شود.
+     *
+     * ⚠️ این تیک **مسیر تحویل** نیست: روی نیتیو تحویل کاملاً دست AlarmManager
+     * است و اگر اپ بسته باشد این تایمر اصلاً اجرا نمی‌شود.
+     */
     useEffect(() => {
         if (!ready) return
-        if (nativePlatform !== false) return
+        /* تا وقتی پلتفرم معلوم نیست، هیچ تصمیمی درباره‌ی delivery گرفته نمی‌شود. */
+        if (nativePlatform === null) return
 
         check() // همان لحظه‌ی بارگذاری (بدون انتظار یک تیک)
 

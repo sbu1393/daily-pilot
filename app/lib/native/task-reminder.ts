@@ -65,7 +65,7 @@ export function taskReminderNotificationId(taskId: number): number {
     return stableNotificationId(`${TASK_REMINDER_KEY_PREFIX}:${taskId}`)
 }
 
-/** آیا شناسه‌ی تسک قابل استفاده است؟ (۱ و ب��تر) */
+/** آیا شناسه‌ی تسک قابل استفاده است؟ (عدد صحیح و بزرگ‌تر از صفر) */
 function isValidTaskId(taskId: number): boolean {
     return Number.isInteger(taskId) && taskId > 0
 }
@@ -129,6 +129,12 @@ export async function scheduleTaskReminder(input: {
             body: "زمان انجام این کار رسیده است ⏰",
             id: taskReminderNotificationId(input.taskId),
             at,
+            /*
+             * `taskId` همراه اعلان می‌رود تا هنگام تپ شدن، اپ بتواند همان تسک را
+             * باز کند (روی Android این داده از `extra` برمی‌گردد). روی نمایش و
+             * صدا هیچ اثری ندارد.
+             */
+            extra: { taskId: input.taskId },
         })
 
         if (!result.ok) return result

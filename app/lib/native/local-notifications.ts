@@ -121,10 +121,10 @@ function logNativeDiagnostic(input: NativeDiagnosticInput): void {
     if (entry) console.info(formatNativeDiagnostic(entry))
 }
 
-/** گلوگاهِ ثابت شروعᬓ هرาจะ schedule-local در همین page-ی diagnostic. */
+/** پیشوند یکتای هر «تلاش زمان‌بندی» — فقط برای تفکیک در گزارش تشخیصی. */
 export const SCHEDULE_ATTEMPT_PREFIX = "immortal-scheduled"
 
-/** شماره‌ی 순서를 یک 시도는 해چ‌باید. */
+/** شماره‌ی ترتیبی هر تلاش زمان‌بندی در همین اجرا (برای ردیابی در گزارش). */
 let _scheduleAttemptSeq = 0
 
 /**
@@ -282,6 +282,12 @@ export type ScheduleLocalReminderInput = {
     /** شناسه‌ی ثابت (اختیاری)؛ پیش‌فرض یک شناسه‌ی تصادفی ۳۲ بیتی است. */
     id?: number
     /**
+     * داده‌ی همراهِ اعلان که هنگام تپ شدن به JS برمی‌گردد
+     * (`localNotificationActionPerformed`). برای «تپ روی اعلان → باز شدن
+     * همان تسک» استفاده می‌شود و روی رفتار نمایش/صدا اثری ندارد.
+     */
+    extra?: Record<string, unknown>
+    /**
      * «آیا آلارم دقیق خواسته می‌شود؟» — پیش‌فرض `true`.
      *
      * `true` یعنی *درخواست*، نه تضمین: اگر `canScheduleExactAlarms()` مجوز را
@@ -386,6 +392,8 @@ export async function scheduleLocalReminder(
         channelId: LOCAL_REMINDER_CHANNEL_ID,
         isExactNotification: useExactAlarm,
         schedule: { at, allowWhileIdle: true },
+        /* فقط وقتی چیزی برای همراه‌کردن هست — تا اسکیمای اعلان ساده بماند. */
+        ...(input.extra ? { extra: input.extra } : {}),
     }
 
     const requestedAtMs = Date.now()

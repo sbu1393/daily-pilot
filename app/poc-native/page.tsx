@@ -5,6 +5,7 @@ import {
     LOCAL_REMINDER_CHANNEL_ID,
     cancelLocalReminder,
     checkExactAlarmCapability,
+    getLocalNotificationsPluginForDiagnostics,
     isNativeLocalNotificationPlatform,
     listPendingLocalReminders,
     requestLocalNotificationPermission,
@@ -13,6 +14,8 @@ import {
 } from "@/app/lib/native/local-notifications"
 import {
     clearNativeDiagnostics,
+    getNativeDiagnostics,
+    recordDeliverySnapshot,
     subscribeNativeDiagnostics,
     type ExactAlarmDiagnostic,
     type NativeDiagnosticEntry,
@@ -85,6 +88,7 @@ const DIAG_EVENT_LABEL: Record<NativeDiagnosticEvent, string> = {
     CANCEL_REQUESTED: "درخواست لغو",
     CANCEL_DONE: "لغو شد",
     CANCEL_FAILED: "لغو ناموفق",
+    DELIVERY_SNAPSHOT: "عکس وضعیت تحویل (Read-only)",
 }
 
 /** برچسب خوانای وضعیت مجوز آلارم دقیق — همان سه حالتی که تصمیم را می‌سازند. */
@@ -105,6 +109,7 @@ const DIAG_EVENT_COLOR: Record<NativeDiagnosticEvent, string> = {
     CANCEL_REQUESTED: "#b26a00",
     CANCEL_DONE: "#b26a00",
     CANCEL_FAILED: "#c00",
+    DELIVERY_SNAPSHOT: "#3b5bdb",
 }
 
 const monoStyle: React.CSSProperties = {
@@ -152,6 +157,11 @@ export default function NativePocPage() {
     const [exactAlarmDiag, setExactAlarmDiag] = useState<ExactAlarmDiagnostic | null>(null)
     /** نسخه‌ی اندروید از UA وب‌ویو — تنها راه بدون افزودن پلاگین Device. */
     const [osLabel, setOsLabel] = useState("—")
+    const [pendingDeliverySnapshot, setPendingDeliverySnapshot] = useState<{
+        pendingCount: number
+        deliveredCount: number
+        deliveryFocusFound: boolean | undefined
+    } | null>(null)
 
     const logLine = useCallback((level: LogLevel, text: string) => {
         logKey.current += 1
@@ -297,6 +307,37 @@ export default function NativePocPage() {
         )
     }, [logLine])
 
+    const readDeliverySnapshot = useCallback(async () => {
+        setBusy(true)
+        const pluginRes = await getLocalNotificationsPluginForDiagnostics()
+        setBusy(false)
+
+        if (!pluginRes.ok) {
+            logLine("error", `پلاگین تشخیصی در دسترس نیست (${pluginRes.reason}): ${pluginRes.message}`)
+            return
+        }
+
+        const latestScheduled = scheduled[0]
+        if (!latestScheduled) {
+            logLine("warn", `분석할 알림이 없습니다 — 먼저 알림을 예약하세요.`)
+            return
+        }
+
+        await recordDeliverySnapshot(pluginRes.plugin, latestScheduled.id, "TASK", "روزساز — یادآور آزمایشی")
+
+        const after = getNativeDiagnostics()
+        const last = after.slice().reverse().find((e) => e.event === "DELIVERY_SNAPSHOT")
+        if (last) {
+            setPendingDeliverySnapshot({
+                pendingCount: last.pending?.length ?? 0,
+                deliveredCount: last.delivered?.length ?? 0,
+                deliveryFocusFound: last.deliveryFocusFound,
+            })
+        }
+
+        logLine("ok", `وضعیت تحویل ثبت شد (id=${latestScheduled.id})`)
+    }, [logLine, scheduled])
+
     return (
         <main
             dir="rtl"
@@ -388,9 +429,17 @@ export default function NativePocPage() {
                     disabled={busy}
                     onClick={() => void readPending()}
                 >
-                    بررسی اعلان‌های Pending
-                </button>
-            </section>
+                بررسی اعلان‌های Pending
+            </button>
+            <button
+                type="button"
+                style={btnPrimary}
+                disabled={busy}
+                onClick={() => void readDeliverySnapshot()}
+            >
+                وضعیت تحویل (Read-only)
+            </button>
+        </section>
 
             {/* ── Exact Alarm Diagnostic ── Only readout; no behavioral change. ── */}
             {native === true && (
@@ -650,6 +699,45 @@ export default function NativePocPage() {
                     </ul>
                 )}
             </section>
+
+            {/* ── وضعیت تحویل (Read-only) ── */}
+            {pendingDeliverySnapshot !== null && (
+                <section
+                    style={{
+                        border: "1px solid #3b5bdb",
+                        borderRadius: 8,
+                        padding: "0.75rem",
+                        marginBottom: "0.75rem",
+                        fontSize: "0.85rem",
+                    }}
+                >
+                    <h2 style={{ fontSize: "0.95rem", margin: "0 0 0.4rem" }}>
+                        وضعیت تحویل (Read-only)
+                    </h2>
+                    <div style={{ lineHeight: 1.9 }}>
+                        <div>
+                            زمان Effective: <strong>{diagClock ? diagClock.toLocaleString("fa-IR") : "—"}</strong>
+                        </div>
+                        <div>
+                            pending: <strong>{pendingDeliverySnapshot.pendingCount}</strong>
+                        </div>
+                        <div>
+                            delivered (visible in shade/notification-list): <strong>{pendingDeliverySnapshot.deliveredCount}</strong>
+                        </div>
+                        <div>
+                            focusFound در delivered:{" "}
+                            <strong>
+                                {pendingDeliverySnapshot.deliveryFocusFound === undefined
+                                    ? "—"
+                                    : String(pendingDeliverySnapshot.deliveryFocusFound)}
+                            </strong>
+                        </div>
+                    </div>
+                    <p style={{ color: "#555", margin: "0.5rem 0 0", lineHeight: 1.8, fontSize: "0.78rem" }}>
+                        این بخش فقط خوانی است و هیچ schedule/cancel/permission/exact/queue تغییر نمی‌کند.
+                    </p>
+                </section>
+            )}
 
             {/* ── لاگ ── */}
             <section

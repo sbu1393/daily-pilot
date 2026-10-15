@@ -538,3 +538,15 @@ export async function checkExactAlarmCapability(): Promise<ExactAlarmDiagnostic>
 
     return readExactAlarmDiagnostic(() => resolved.plugin.checkExactNotificationSetting())
 }
+
+/** Read-only accessor for the LocalNotifications plugin instance.
+ * Used only by the delivery probe; does not schedule, cancel, or change permissions
+ * or exact-alarm state or the serial queue guard.
+ */
+export async function getLocalNotificationsPluginForDiagnostics() {
+    const resolved = await resolvePlugin()
+    if (!resolved.ok) {
+        return resolved
+    }
+    return { ok: true as const, plugin: resolved.plugin }
+}

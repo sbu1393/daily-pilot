@@ -1,5 +1,7 @@
 "use client"
 
+import type { LocalNotificationsPlugin } from "@capacitor/local-notifications"
+
 /*
  * گزارش تشخیصی یادآورهای نیتیو (فقط شواهد — بدون هیچ رفتار درمانی)
  * -----------------------------------------------------------------
@@ -37,12 +39,30 @@ export type NativeDiagnosticEvent =
     | "CANCEL_REQUESTED"
     | "CANCEL_DONE"
     | "CANCEL_FAILED"
+    | "DELIVERY_SNAPSHOT" // خواندن `getPending()` + `getDeliveredNotifications()` در زمان بررسی; read-only
 
 /** یک اعلان در snapshot — دقیقاً همان چیزی که سیستم‌عامل برگردانده. */
 export type NativeDiagnosticPendingItem = {
     id: number
     title: string
     atIso: string | null
+}
+
+/**
+ * یک اعلانِ visible در shade/notification-list از `getDeliveredNotifications()`.
+ * حاوی همان چیزی که پلاگین delivered-return می‌کند (خونه newline with android
+ * StatusBarNotification-derived record).
+ */
+export type NativeDiagnosticDeliveredItem = {
+    id: number
+    /** Android tag; ممکن است null یا خالی باشد (در resp. cases). */
+    tag?: string
+    title?: string
+    body?: string
+    /** nullable — در موارد where notification body not available. */
+    bodyNull?: boolean
+    /** extra keys count برای نشان دادن که داده extra alongside id/title/body موجود است یا نه. */
+    extraKeysCount?: number
 }
 
 export type NativeDiagnosticEntry = {
@@ -70,6 +90,14 @@ export type NativeDiagnosticEntry = {
     pending?: NativeDiagnosticPendingItem[]
     /** آیا شناسه‌ی هدف در snapshot بود؟ */
     focusFound?: boolean
+    /**
+     * فهرست delivered notifications_same moment (فقط در `DELIVERY_SNAPSHOT`).
+     * اینجا از `getDeliveredNotifications()` می‌آید و فقط برای تشخیص آیا
+     * اعلانی در shade/notification-list visible بوده یا نه.
+     */
+    delivered?: NativeDiagnosticDeliveredItem[]
+    /** آیا شناسه‌ی هدف در delivered snapshot بود؟ */
+    deliveryFocusFound?: boolean
     /**
      * چند فریم اول پشته‌ی تماس — فقط برای رویدادهای لغو.
      * این تنها راه دیدنِ این است که «چه کسی لغو کرد»، بدون اینکه در
@@ -210,6 +238,15 @@ export function recordNativeDiagnostic(input: NativeDiagnosticInput): NativeDiag
     }
 }
 
+/** ترجمه‌ی خرابی غیرمنتظره به یک پیام کوتاه برای گزارش تشخیصی. */
+export function describeDiagnosticError(err: unknown): string {
+    if (err instanceof Error) return `${err.name}: ${err.message}`
+    if (err && typeof err === "object" && "message" in err) {
+        return String((err as { message: unknown }).message)
+    }
+    return String(err)
+}
+
 /** کل گزارش به ترتیب قدیمی→جدید (نسخه‌ی کپی، تا بیرون دستکاری نشود). */
 export function getNativeDiagnostics(): NativeDiagnosticEntry[] {
     ensureLoaded()
@@ -237,6 +274,80 @@ export function clearNativeDiagnostics(): void {
     entries = []
     persist()
     notify()
+}
+
+/**
+ * ثبت یک رویداد `DELIVERY_SNAPSHOT` `read-only`.
+ *
+ * این تابع هیچ schedule/cancel/reschedule/permission/exact/queue تغییری نمی‌کند.
+ * فقط یک لحظه‌ی خوانی از وضعیت سیستم‌عامل با استفاده از `getPending()` و
+ * `getDeliveredNotifications()` است، و نتیجه را در گزارش تشخیصی ثابت می‌کند.
+ *
+ * از آنجا که `getDeliveredNotifications()` روی مرورگر در/plugin-level returns empty
+ * یا可能 thrown/catched، همه چیز محافظت‌شده در `try/catch` است و هرگز throw نمی‌کند.
+ */
+export async function recordDeliverySnapshot(
+    plugin: LocalNotificationsPlugin,
+    focusId: number,
+    kind: ReminderKind,
+    title: string,
+): Promise<void> {
+    try {
+        const [pendingResult, deliveredResult] = await Promise.all([
+            plugin.getPending(),
+            plugin.getDeliveredNotifications(),
+        ])
+
+        const pendingItems: NativeDiagnosticPendingItem[] = pendingResult.notifications.map(
+            (n) => ({
+                id: n.id,
+                title: n.title,
+                atIso: n.schedule?.at
+                    ? new Date(n.schedule.at).toISOString()
+                    : null,
+            }),
+        )
+
+        const deliveredItems: NativeDiagnosticDeliveredItem[] = deliveredResult.notifications.map(
+            (n) => {
+                const extraKeysCount =
+                    (typeof n.extra === "object" && n.extra != null && !Array.isArray(n.extra)
+                        ? Object.keys(n.extra).length
+                        : 0) ?? 0
+
+                return {
+                    id: n.id,
+                    tag: n.tag ?? undefined,
+                    title: n.title ?? undefined,
+                    body: n.body ?? undefined,
+                    bodyNull: n.body == null ? true : undefined,
+                    extraKeysCount,
+                }
+            },
+        )
+
+        const focusFoundPending = pendingItems.some((item) => item.id === focusId)
+        const deliveryFocusFound = deliveredItems.some((item) => item.id === focusId)
+
+        recordNativeDiagnostic({
+            event: "DELIVERY_SNAPSHOT",
+            kind,
+            id: focusId,
+            title,
+            pending: pendingItems,
+            focusFound: focusFoundPending,
+            delivered: deliveredItems,
+            deliveryFocusFound,
+        })
+    } catch (err) {
+        recordNativeDiagnostic({
+            event: "DELIVERY_SNAPSHOT",
+            kind,
+            id: focusId,
+            title,
+            message: describeDiagnosticError(err),
+        })
+    }
 }
 
 /**
@@ -352,6 +463,8 @@ export function formatNativeDiagnostic(entry: NativeDiagnosticEntry): string {
     if (entry.warning) parts.push(`warning=${entry.warning.code}`)
     if (entry.focusFound !== undefined) parts.push(`focusInPending=${entry.focusFound}`)
     if (entry.pending) parts.push(`pending=${entry.pending.length}`)
+    if (entry.delivered) parts.push(`delivered=${entry.delivered.length}`)
+    if (entry.deliveryFocusFound !== undefined) parts.push(`deliveryFocusFound=${entry.deliveryFocusFound}`)
     if (entry.message) parts.push(`message=${entry.message}`)
 
     return parts.join(" · ")

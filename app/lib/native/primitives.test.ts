@@ -58,4 +58,37 @@ describe("enqueueNative", () => {
         await expect(second).resolves.toBe("ok")
         expect(secondRan).toBe(true)
     })
+
+    /*
+     * همان سناریوی باگ «فقط اولین یادآور کار می‌کند»، ولی در لایه‌ی درست.
+     *
+     * یک عملیات معلق (schedule اول) صف را قفل می‌کند؛ بعد دو عملیات سالم
+     * (schedule دوم و سوم) صف می‌شوند. چیزی که باید اثبات شود این است که صف
+     * بعد از مهلت رها می‌شود و **هر دو** عملیات بعدی واقعاً اجرا می‌شوند —
+     * یعنی قفل همیشگی رخ نمی‌دهد و بعدی‌ها پشت promise مرده گیر نمی‌مانند.
+     */
+    it("بعد از یک عملیات معلق، دو عملیات بعدی پشت‌سرهم اجرا می‌شوند", async () => {
+        vi.useFakeTimers()
+
+        const ran: string[] = []
+
+        void enqueueNative(() => new Promise<void>(() => undefined))
+
+        const second = enqueueNative(async () => {
+            ran.push("second")
+            return 2
+        })
+        const third = enqueueNative(async () => {
+            ran.push("third")
+            return 3
+        })
+
+        await vi.advanceTimersByTimeAsync(NATIVE_QUEUE_STALL_RELEASE_MS + 1)
+
+        await expect(second).resolves.toBe(2)
+        await expect(third).resolves.toBe(3)
+
+        // هر دو اجرا شدند و ترتیب سریال حفظ شد.
+        expect(ran).toEqual(["second", "third"])
+    })
 })

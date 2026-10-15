@@ -7,6 +7,13 @@ import {
 import { clearNativeDiagnostics, getNativeDiagnostics } from "@/app/lib/native/diagnostics"
 
 /*
+ * گزارش تشخیصی در scope ماژول نگه‌داری می‌شود، پس اگر بین تست‌ها پاک نشود،
+ * رویدادهای تست قبلی روی ادعاهای این تست سوار می‌شوند. پاک‌کردن در
+ * `beforeEach` همان چیزی است که روی دستگاه هم کاربر با دکمه‌ی «پاک‌کردن گزارش»
+ * انجام می‌دهد.
+ */
+
+/*
  * دروازه‌ی آلارم دقیق در `scheduleLocalReminder()`
  * ----------------------------------------------
  * این تست دقیقاً همان چیزی را قفل می‌کند که روی دستگاه اعلان را از کار انداخته
@@ -52,6 +59,17 @@ vi.mock("@capacitor/local-notifications", () => ({
     },
 }))
 
+/**
+ * پیاده‌سازی پیش‌فرض پل: هر اعلان را با همان شناسه‌اش تأیید می‌کند.
+ * در `beforeEach` بازنشانی می‌شود تا `mockImplementation`های تست‌های قبلی
+ * (مثل mock بر اساس id) به تست بعدی نشت نکنند.
+ */
+function defaultScheduleImpl(options: { notifications: { id: number }[] }) {
+    return Promise.resolve({
+        notifications: options.notifications.map((notification) => ({ id: notification.id })),
+    })
+}
+
 /** آخرین اعلانی که واقعاً به پل داده شده — همان چیزی که به AlarmManager می‌رسد. */
 function lastScheduledNotification(): Record<string, unknown> {
     expect(mocks.schedule).toHaveBeenCalledTimes(1)
@@ -68,9 +86,18 @@ describe("scheduleLocalReminder — دروازه‌ی آلارم دقیق", () =
         // محیط نیتیو را شبیه‌سازی می‌کنیم، وگرنه هیچ‌وقت به پل نمی‌رسد.
         vi.stubGlobal("window", { Capacitor: { isNativePlatform: () => true } })
 
-        mocks.schedule.mockClear()
+        // `mockReset` هم فراخوانی‌ها و هم implementationها را پاک می‌کند؛
+        // بعدش پیش‌فرض سالم دوباره گذاشته می‌شود.
+        mocks.schedule.mockReset()
+        mocks.schedule.mockImplementation(defaultScheduleImpl)
         mocks.createChannel.mockClear()
+        mocks.checkPermissions.mockClear()
+        mocks.requestPermissions.mockClear()
         mocks.checkExactNotificationSetting.mockReset()
+        mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: "denied" })
+
+        // گزارش قبلی نباشد تا ادعاهای هر تست فقط روی همان اجرا باشند.
+        clearNativeDiagnostics()
     })
 
     afterEach(() => {
@@ -179,5 +206,194 @@ describe("scheduleLocalReminder — دروازه‌ی آلارم دقیق", () =
         } finally {
             vi.useRealTimers()
         }
+    })
+
+    /*
+     * رگرسیون «فقط اولین یادآور کار می‌کند».
+     *
+     * این تست سه schedule پشت‌سرهم را از همان API عمومی اجرا می‌کند و اثبات
+     * می‌کند که هیچ‌کدام به قفل دائمی نمی‌خورند: هر سه به پل می‌رسند و خودِ
+     * رویدادهای حاشیه‌ای با شناسهٔ درست ثبت می‌شوند. اگر queue یا گزارش
+     * به‌خاطر اجرای اول قفل می‌شد، اینجا شکست می‌خورد.
+     */
+    it("سه schedule پشت‌سرهم: هر سه اجرا و هر سه با شناسهٔ درست ثبت می‌شوند", async () => {
+        const result1 = await scheduleLocalReminder({
+            title: "🔔 تست",
+            body: "بدنه",
+            delayMs: 1_000,
+            id: 31,
+        })
+        expect(result1.ok).toBe(true)
+
+        const result2 = await scheduleLocalReminder({
+            title: "🔔 تست",
+            body: "بدنه",
+            delayMs: 1_000,
+            id: 32,
+        })
+        expect(result2.ok).toBe(true)
+
+        const result3 = await scheduleLocalReminder({
+            title: "🔔 تست",
+            body: "بدنه",
+            delayMs: 1_000,
+            id: 33,
+        })
+        expect(result3.ok).toBe(true)
+
+        expect(mocks.schedule).toHaveBeenCalledTimes(3)
+        expect(mocks.createChannel).toHaveBeenCalledTimes(3)
+
+        const scheduledIds = mocks.schedule.mock.calls.map(
+            (call) => (call[0] as unknown as { notifications: { id: number }[] }).notifications[0].id,
+        )
+        expect(scheduledIds).toEqual([31, 32, 33])
+
+        const entries = getNativeDiagnostics()
+
+        // هر تلاش با SCHEDULE_START و شناسهٔ خودش شروع می‌شود.
+        const startEvents = entries.filter((entry) => entry.event === "SCHEDULE_START")
+        expect(startEvents.map((entry) => entry.id)).toEqual([31, 32, 33])
+        const startAttempts = startEvents.map((entry) => entry.attemptNo)
+        expect(new Set(startAttempts).size).toBe(3)
+        expect(startAttempts).toEqual([...startAttempts].sort((a, b) => (a ?? 0) - (b ?? 0)))
+
+        const permEvents = entries.filter((entry) => entry.event === "PERMISSION_RESULT")
+        expect(permEvents.map((entry) => entry.id)).toEqual([31, 32, 33])
+        expect(permEvents.map((entry) => entry.attemptNo)).toEqual(startAttempts)
+
+        const exactEvents = entries.filter((entry) => entry.event === "EXACT_CAPABILITY")
+        expect(exactEvents.map((entry) => entry.id)).toEqual([31, 32, 33])
+
+        const channelEvents = entries.filter((entry) => entry.event === "CHANNEL_RESULT")
+        expect(channelEvents.map((entry) => entry.id)).toEqual([31, 32, 33])
+
+        const nativeStartEvents = entries.filter(
+            (entry) => entry.event === "NATIVE_SCHEDULE_START",
+        )
+        expect(nativeStartEvents.map((entry) => entry.id)).toEqual([31, 32, 33])
+        expect(nativeStartEvents.map((entry) => entry.attemptNo)).toEqual(startAttempts)
+
+        const nativeResolvedEvents = entries.filter(
+            (entry) => entry.event === "NATIVE_SCHEDULE_RESOLVED",
+        )
+        expect(nativeResolvedEvents.map((entry) => entry.id)).toEqual([31, 32, 33])
+        expect(nativeResolvedEvents.map((entry) => entry.attemptNo)).toEqual(startAttempts)
+
+        // محیط mock هرگز معلق نمی‌ماند، پس هیچ‌جای این مسیر نباید «بدون پاسخ» باشد.
+        const events = entries.map((entry) => entry.event)
+        expect(events).not.toContain("SCHEDULE_UNRESOLVED")
+        expect(events).not.toContain("QUEUE_RELEASED")
+
+        // هر رویداد باید timestamp داشته باشد (Dos".
+        for (const entry of entries) {
+            expect(typeof entry.at).toBe("number")
+            expect(entry.iso).toBe(new Date(entry.at).toISOString())
+        }
+
+        // هر سه تلاش مجوز تأیید و capability «denied» دریافت کردند.
+        expect(permEvents[0].message).toContain("تأیید")
+    })
+
+    /*
+     * همان سناریو، ولی با exact-alarm granted.
+     * باید جداگانه پوشش داده شود چون مسیر تصمیم `isExactNotification: true` است.
+     */
+    it("سه schedule پشت‌سرهم با exact-alarm granted: هر سه دقیق ثبت می‌شوند", async () => {
+        mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: "granted" })
+
+        for (const id of [41, 42, 43]) {
+            const result = await scheduleLocalReminder({
+                title: "🔔 تست",
+                body: "بدنه",
+                delayMs: 1_000,
+                id,
+            })
+            expect(result.ok).toBe(true)
+        }
+
+        expect(mocks.schedule).toHaveBeenCalledTimes(3)
+        for (const call of mocks.schedule.mock.calls) {
+            const notification = (call[0] as unknown as { notifications: Record<string, unknown>[] })
+                .notifications[0]
+            expect(notification.isExactNotification).toBe(true)
+        }
+
+        const entries = getNativeDiagnostics()
+
+        const exactEvents = entries.filter((entry) => entry.event === "EXACT_CAPABILITY")
+        expect(exactEvents.map((entry) => entry.id)).toEqual([41, 42, 43])
+        // مجوز داده شده بود، پس پیام باید مسیر «آلارم دقیق» را نشان دهد، نه denied.
+        for (const entry of exactEvents) expect(entry.message).toContain("granted")
+
+        const nativeResolved = entries.filter(
+            (entry) => entry.event === "NATIVE_SCHEDULE_RESOLVED",
+        )
+        expect(nativeResolved.map((entry) => entry.id)).toEqual([41, 42, 43])
+        for (const entry of nativeResolved) expect(entry.isExact).toBe(true)
+    })
+
+    /*
+     * رگرسیون «شکست اول، قفل همیشگی بقیه».
+     *
+     * دقیقاً همان حالت باگ: اولین زمان‌بندی به پل می‌رسد و از دست می‌رود. سؤال
+     * واقعی این است که آیا **بعدی‌ها هنوز اجرا می‌شوند یا نه**. این تست اجرای
+     * اول را رد می‌کند و بعد دو اجرای سالم پشت‌سرهم می‌گیرد.
+     *
+     * نکته‌ی مهم درباره‌ی محدوده: `scheduleLocalReminder` خودش هیچ mutex ای
+     * ندارد؛ صف سریال در `app/lib/native/primitives.ts` → `enqueueNative` است و
+     * تضمین «یک عملیات معلق صف را برای همیشه قفل نمی‌کند» انجا اندازه‌گیری
+     * می‌شود (`primitives.test.ts`). اینجا فقط اثبات می‌کنیم که خودِ این تابع
+     * پس از یک شکست، دوباره کامل و مستقل اجرا می‌شود.
+     */
+    it("اگر native schedule اول reject کند، schedule دوم و سوم هنوز کار می‌کنند", async () => {
+        mocks.schedule.mockRejectedValueOnce(new Error("native boom"))
+
+        const first = await scheduleLocalReminder({
+            title: "🔔 تست",
+            body: "بدنه",
+            delayMs: 1_000,
+            id: 51,
+        })
+
+        expect(first.ok).toBe(false)
+        if (first.ok) throw new Error("انتظار شکست داشتیم")
+        expect(first.reason).toBe("SCHEDULE_FAILED")
+
+        const second = await scheduleLocalReminder({
+            title: "🔔 تست",
+            body: "بدنه",
+            delayMs: 1_000,
+            id: 52,
+        })
+        const third = await scheduleLocalReminder({
+            title: "🔔 تست",
+            body: "بدنه",
+            delayMs: 1_000,
+            id: 53,
+        })
+
+        expect(second.ok, `second=${JSON.stringify(second)}`).toBe(true)
+        expect(third.ok, `third=${JSON.stringify(third)}`).toBe(true)
+
+        const entries = getNativeDiagnostics()
+        const startIds = entries
+            .filter((entry) => entry.event === "SCHEDULE_START")
+            .map((entry) => entry.id)
+        expect(startIds).toEqual([51, 52, 53])
+
+        const permIds = entries
+            .filter((entry) => entry.event === "PERMISSION_RESULT")
+            .map((entry) => entry.id)
+        expect(permIds).toEqual([51, 52, 53])
+
+        // شکست اول یک رویداد rejected ثبت کرده؛ دو اجرای بعدی resolved شده‌اند.
+        const resolvedIds = entries
+            .filter((entry) => entry.event === "NATIVE_SCHEDULE_RESOLVED")
+            .map((entry) => entry.id)
+        expect(resolvedIds).toEqual([52, 53])
+
+        const rejected = entries.filter((entry) => entry.event === "NATIVE_SCHEDULE_REJECTED")
+        expect(rejected.map((entry) => entry.id)).toEqual([51])
     })
 })

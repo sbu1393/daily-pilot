@@ -90,6 +90,16 @@ const DIAG_EVENT_LABEL: Record<NativeDiagnosticEvent, string> = {
     CANCEL_DONE: "لغو شد",
     CANCEL_FAILED: "لغو ناموفق",
     DELIVERY_SNAPSHOT: "عکس وضعیت تحویل (Read-only)",
+    NATIVE_SCHEDULE_START: "شروع زمان‌بندی در پل",
+    NATIVE_SCHEDULE_RESOLVED: "زمان‌بندی با پل حل شد",
+    NATIVE_SCHEDULE_REJECTED: "زمان‌بندی با پل رد شد",
+    CHANNEL_RESULT: "نتیجه‌ی عملیات کانال",
+    UNRESOLVED_GUARDED: "نگه‌بان قفل شدن فعلاً فقط ثبت شد",
+    CANCEL_ATTEMPT_FOR_UNRESOLVED: "تلاش قفل‌شده با cancel لغو شد",
+    CANCEL_FAILED_FOR_UNRESOLVED: "لغو قفل‌شده ناموفق بود",
+    SCHEDULE_START: "شروع تلاش زمان‌بندی",
+    PERMISSION_RESULT: "نتیجه‌ی مجوز اعلان",
+    EXACT_CAPABILITY: "نتیجه‌ی capability آلارم دقیق",
 }
 
 /** برچسب خوانای وضعیت مجوز آلارم دقیق — همان سه حالتی که تصمیم را می‌سازند. */
@@ -111,6 +121,16 @@ const DIAG_EVENT_COLOR: Record<NativeDiagnosticEvent, string> = {
     CANCEL_DONE: "#b26a00",
     CANCEL_FAILED: "#c00",
     DELIVERY_SNAPSHOT: "#3b5bdb",
+    NATIVE_SCHEDULE_START: "#555",
+    NATIVE_SCHEDULE_RESOLVED: "#0a7",
+    NATIVE_SCHEDULE_REJECTED: "#c00",
+    CHANNEL_RESULT: "#0a7",
+    UNRESOLVED_GUARDED: "#c00",
+    CANCEL_ATTEMPT_FOR_UNRESOLVED: "#b26a00",
+    CANCEL_FAILED_FOR_UNRESOLVED: "#c00",
+    SCHEDULE_START: "#555",
+    PERMISSION_RESULT: "#3b5bdb",
+    EXACT_CAPABILITY: "#3b5bdb",
 }
 
 const monoStyle: React.CSSProperties = {
@@ -165,7 +185,6 @@ export default function NativePocPage() {
     } | null>(null)
 
     type DeliveryProbePhase = "idle" | "loading" | "done" | "error"
-
     const [deliveryProbe, setDeliveryProbe] = useState<{
         phase: DeliveryProbePhase
         focusId?: number
@@ -175,6 +194,8 @@ export default function NativePocPage() {
         error?: string
         at?: string
     } | null>(null)
+
+    const [pendingError, setPendingError] = useState<string | null>(null)
 
     const logLine = useCallback((level: LogLevel, text: string) => {
         logKey.current += 1
@@ -305,27 +326,31 @@ export default function NativePocPage() {
 
     const readPending = useCallback(async () => {
         setBusy(true)
+        setPendingError(null)
 
         try {
             const result = await listPendingLocalReminders()
 
             if (!result.ok) {
                 logLine("error", `خواندن اعلان‌های در انتظار ناموفق بود (${result.reason}): ${result.message}`)
+                setPendingError(`خواندن pending ناموفق: ${result.message}`)
                 return
             }
 
             setPending({ now: result.now, items: result.notifications })
+            setPendingError(null)
             logLine(
                 result.notifications.length === 0 ? "warn" : "ok",
                 `اعلان‌های در انتظارِ سیستم‌عامل: ${result.notifications.length} مورد (${result.now.toLocaleString("fa-IR")})`,
             )
-        } catch (err) {            logLine("error", `خواندن pending ناگهانی شکست خورد: ${describeDiagnosticError(err)}`)
+        } catch (err) {
+            const error = `خواندن pending ناگهانی شکست خورد: ${describeDiagnosticError(err)}`
+            logLine("error", error)
+            setPendingError(error)
         } finally {
             setBusy(false)
         }
     }, [logLine])
-
-
 
     const readDeliverySnapshot = useCallback(async () => {
         logLine("info", `شروع بررسی وضعیت تحویل — کلیک روی دکمه دریافت شد.`)
@@ -613,6 +638,23 @@ export default function NativePocPage() {
                             })}
                         </ul>
                     )}
+                </section>
+            )}
+
+            {/* ── خطای خواندن pending ── */}
+            {pending === null && pendingError !== null && (
+                <section
+                    style={{
+                        border: "1px solid #c00",
+                        borderRadius: 8,
+                        padding: "0.75rem",
+                        marginBottom: "0.75rem",
+                        fontSize: "0.85rem",
+                        lineHeight: 1.9,
+                    }}
+                >
+                    <strong style={{ color: "#c00" }}>خطا در بررسی pending:</strong>
+                    <p style={{ margin: "0.4rem 0 0" }}>{pendingError}</p>
                 </section>
             )}
 

@@ -30,16 +30,31 @@ export type ReminderKind = "TASK" | "DAILY" | "UNKNOWN"
 
 /** چه چیزی ثبت شده — رویدادها عمداً ریز هستند تا ترتیب وقایع قابل بازسازی باشد. */
 export type NativeDiagnosticEvent =
-    | "SCHEDULE_REQUESTED" // درخواست به پل داده شد (قبل از resolve)
-    | "SCHEDULE_RESOLVED" // پل resolve کرد و شناسه برگشت
-    | "SCHEDULE_FAILED" // پل reject کرد (خطای پایتون/اندروید)
-    | "SCHEDULE_UNRESOLVED" // پل هیچ‌وقت جواب نداد ← نشانه‌ی مهم برای قفل شدن صف
-    | "PENDING_SNAPSHOT" // خواندن `getPending()` بلافاصله بعد از زمان‌بندی
-    | "QUEUE_RELEASED" // یک عملیات نیتیو هرگز settle نشد و نگهبان صف آن را رها کرد
+    | "SCHEDULE_REQUESTED"
+    | "SCHEDULE_RESOLVED"
+    | "SCHEDULE_FAILED"
+    | "SCHEDULE_UNRESOLVED"
+    | "PENDING_SNAPSHOT"
+    | "QUEUE_RELEASED"
     | "CANCEL_REQUESTED"
     | "CANCEL_DONE"
     | "CANCEL_FAILED"
-    | "DELIVERY_SNAPSHOT" // خواندن `getPending()` + `getDeliveredNotifications()` در زمان بررسی; read-only
+    | "DELIVERY_SNAPSHOT"
+    | "NATIVE_SCHEDULE_START"
+    | "NATIVE_SCHEDULE_RESOLVED"
+    | "NATIVE_SCHEDULE_REJECTED"
+    | "CHANNEL_RESULT"
+    | "UNRESOLVED_GUARDED"
+    | "CANCEL_ATTEMPT_FOR_UNRESOLVED"
+    | "CANCEL_FAILED_FOR_UNRESOLVED"
+    /*
+     * سه رویدادِ حاشیه‌ای که برای تشخیص «کدام مرحله در اجرای دوم متوقف شد»
+     * کم بودند: شروع تلاش، نتیجه‌ی مجوز، و نتیجه‌ی capability آلارم دقیق.
+     * هر سه فقط شواهدند و هیچ تصمیمی نمی‌گیرند.
+     */
+    | "SCHEDULE_START"
+    | "PERMISSION_RESULT"
+    | "EXACT_CAPABILITY"
 
 /** یک اعلان در snapshot — دقیقاً همان چیزی که سیستم‌عامل برگردانده. */
 export type NativeDiagnosticPendingItem = {
@@ -74,6 +89,8 @@ export type NativeDiagnosticEntry = {
     iso: string
     event: NativeDiagnosticEvent
     kind: ReminderKind
+    /** شماره‌ی نوبت این تلاش در طول عمر پروسه — برای تفکیک اجرای اول/دوم/سوم. */
+    attemptNo?: number
     id?: number
     title?: string
     /** `schedule.at.getTime()` — لحظه‌ای که به اندروید داده شد */
@@ -111,7 +128,7 @@ export type NativeDiagnosticEntry = {
 export const NATIVE_DIAGNOSTIC_STACK_FRAMES = 4
 
 /** رویدادهای ثبت‌شده بدون فیلدهای مشتق — ورودی `recordNativeDiagnostic`. */
-export type NativeDiagnosticInput = Omit<NativeDiagnosticEntry, "seq" | "at" | "iso">
+export interface NativeDiagnosticInput extends Omit<NativeDiagnosticEntry, "seq" | "at" | "iso"> {}
 
 /** سقف نگه‌داری — یک ring buffer کوچک تا هرگز حافظه/storage راپر نکند. */
 export const MAX_NATIVE_DIAGNOSTIC_ENTRIES = 100
@@ -452,6 +469,7 @@ export async function readExactAlarmDiagnostic(
 export function formatNativeDiagnostic(entry: NativeDiagnosticEntry): string {
     const parts: string[] = [`[native-diag] ${entry.event}`, `kind=${entry.kind}`]
 
+    if (entry.attemptNo !== undefined) parts.push(`attempt=${entry.attemptNo}`)
     if (entry.id !== undefined) parts.push(`id=${entry.id}`)
     if (entry.title) parts.push(`title=${entry.title}`)
     if (entry.requestedAtIso) parts.push(`at=${entry.requestedAtIso}`)

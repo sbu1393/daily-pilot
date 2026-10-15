@@ -100,10 +100,18 @@ export function isNativeLocalNotificationPlatform(): boolean {
 
 /**
  * اگر پل Capacitor بیشتر از این مدت پاسخ ندهد، یک رویداد `SCHEDULE_UNRESOLVED`
- * ثبت می‌شود. مقدار فعلیِ `schedule()` روی اندروید می‌تواند بی‌پاسخ بماند
- * (باز شدن تنظیمات exact-alarm)، و چون همه‌ی عملیات از یک صف سریال رد
- * می‌شوند، این حالت کل صف را قفل می‌کند. این نگهبان فقط همین را **ثبت**
- * می‌کند؛ هیچ resolve/reject جایگزینی انجام نمی‌دهد.
+ * ثبت می‌شود.
+ *
+ * ⚠️ این مهلت **فقط ثبت می‌کند، هیچ چیزی را آزاد نمی‌کند**:
+ * `plugin.schedule()` هنوز معلق است و promise همین تابع هم تا ابد معلق می‌ماند.
+ * این عمدی است — «آزادکردن» با یک resolve/reject جعلی همان چیزی است که باعث
+ * می‌شود گمان کنیم عملیات تمام شده. وضعیت واقعی در گزارش ثبت می‌شود تا روی
+ * دستگاه قطعی شود که پل جواب نداده.
+ *
+ * صف سریالی که یک عملیات معلق می‌تواند قفلش کند در `primitives.ts` است
+ * (`enqueueNative` + `releaseQueueAfterStall`) و همان‌جا با تست اندازه‌گیری
+ * شده. این تابع خودش هیچ صف/mutex ندارد و هیچ schedule/cancel جایگزینی انجام
+ * نمی‌دهد.
  */
 export const SCHEDULE_UNRESOLVED_WARN_MS = 4_000
 
@@ -113,8 +121,14 @@ function logNativeDiagnostic(input: NativeDiagnosticInput): void {
     if (entry) console.info(formatNativeDiagnostic(entry))
 }
 
-/*
- * خواندن pending بلافاصله بعد از یک زمان‌بندی موفق.
+/** گلوگاهِ ثابت شروعᬓ هرาจะ schedule-local در همین page-ی diagnostic. */
+export const SCHEDULE_ATTEMPT_PREFIX = "immortal-scheduled"
+
+/** شماره‌ی 순서를 یک 시도는 해چ‌باید. */
+let _scheduleAttemptSeq = 0
+
+/**
+ * خواندن pending بلافسره بعد از یک زمان‌بندی موفق.
  *
  * عمداً `await` نمی‌شود (شلیک و فراموش): اگر روی مسیر پاسخ‌دادن به
  * فراخوانی‌کننده منتظر می‌ماند، هم زمان‌بندی کندتر می‌شد و هم ترتیب صف سریال
@@ -291,11 +305,50 @@ export async function scheduleLocalReminder(
 
     const { plugin } = resolved
 
-    const permission = await ensurePermission(plugin)
-    if (!permission.ok) return permission
-
+    /*
+     * شناسه/زمان/نوع قبل از هر تماس با پل قطعی می‌شوند تا همه‌ی رویدادهای
+     * تشخیصی همین try (از جمله مرحله‌ی مجوز) بتوانند id و attempt را حمل کنند.
+     * این صرفاً جابه‌جایی محاسبه است — نه تغییر رفتار.
+     */
     const id = input.id ?? randomNotificationId()
     const at = input.at ?? new Date(Date.now() + (input.delayMs ?? 0))
+    const kind = classifyReminderKind(input.title)
+    const exactRequested = input.exact ?? true
+
+    ++_scheduleAttemptSeq
+    const attemptNo = _scheduleAttemptSeq
+
+    logNativeDiagnostic({
+        event: "SCHEDULE_START",
+        kind,
+        id,
+        title: input.title,
+        attemptNo,
+        requestedAt: at.getTime(),
+        requestedAtIso: at.toISOString(),
+        delayMs: at.getTime() - Date.now(),
+        isExact: exactRequested,
+        allowWhileIdle: true,
+        channelId: LOCAL_REMINDER_CHANNEL_ID,
+    })
+
+    const permission = await ensurePermission(plugin)
+
+    logNativeDiagnostic({
+        event: "PERMISSION_RESULT",
+        kind,
+        id,
+        title: input.title,
+        attemptNo,
+        isExact: exactRequested,
+        allowWhileIdle: true,
+        channelId: LOCAL_REMINDER_CHANNEL_ID,
+        message: permission.ok
+            ? `مجوز اعلان تأیید شد: ${permission.display}`
+            : `خواندن/درخواست مجوز ناموفق بود (${permission.reason}): ${permission.message}`,
+    })
+
+    if (!permission.ok) return permission
 
     /*
      * دروازه‌ی capability پیش از ساختن اعلان.
@@ -305,9 +358,26 @@ export async function scheduleLocalReminder(
      * مسیر `doSchedule() → ACTION_REQUEST_SCHEDULE_EXACT_ALARM` برمی‌گردد و
      * همان قفل صف و «هیچ اعلانی نمی‌آید» تکرار می‌شود.
      */
-    const exactRequested = input.exact ?? true
     const exactGranted = exactRequested ? await canScheduleExactAlarms(plugin) : false
     const useExactAlarm = exactRequested && exactGranted
+
+    logNativeDiagnostic({
+        event: "EXACT_CAPABILITY",
+        kind,
+        id,
+        title: input.title,
+        attemptNo,
+        requestedAt: at.getTime(),
+        requestedAtIso: at.toISOString(),
+        isExact: useExactAlarm,
+        allowWhileIdle: true,
+        channelId: LOCAL_REMINDER_CHANNEL_ID,
+        message: exactRequested
+            ? exactGranted
+                ? "canScheduleExactAlarms: granted ⇒ آلارم دقیق"
+                : "canScheduleExactAlarms: denied ⇒ آلارم غیردقیق (allowWhileIdle)"
+            : "exact صریحاً خاموش است؛ وضعیت خوانده نشد.",
+    })
 
     const notification: LocalNotificationSchema = {
         id,
@@ -318,7 +388,6 @@ export async function scheduleLocalReminder(
         schedule: { at, allowWhileIdle: true },
     }
 
-    const kind = classifyReminderKind(input.title)
     const requestedAtMs = Date.now()
 
     /* همه‌ی پارامترهایی که واقعاً به اندروید می‌روند — قبل از هر تماس با پل. */
@@ -345,6 +414,20 @@ export async function scheduleLocalReminder(
     })
 
     let settled = false
+
+    logNativeDiagnostic({
+        event: "NATIVE_SCHEDULE_START",
+        kind,
+        id,
+        title: input.title,
+        attemptNo,
+        requestedAt: at.getTime(),
+        requestedAtIso: at.toISOString(),
+        isExact: notification.isExactNotification,
+        allowWhileIdle: notification.schedule?.allowWhileIdle,
+        channelId: notification.channelId,
+    })
+
     const hangTimer = setTimeout(() => {
         if (settled) return
 
@@ -356,13 +439,25 @@ export async function scheduleLocalReminder(
             requestedAt: at.getTime(),
             requestedAtIso: at.toISOString(),
             delayMs: at.getTime() - Date.now(),
-            message: `پل بعد از ${SCHEDULE_UNRESOLVED_WARN_MS}ms پاسخ نداد؛ صف سریال همچنان مسدود است.`,
+            attemptNo,
+            message: `plugin.schedule() بعد از ${SCHEDULE_UNRESOLVED_WARN_MS}ms هنوز resolve/reject نشده؛ promise همچنان معلق است. هیچ چیزی اینجا آزاد یا لغو نمی‌شود.`,
         })
     }, SCHEDULE_UNRESOLVED_WARN_MS)
 
     try {
         // ساخت/به‌روزرسانی کانال idempotent است؛ قبل از زمان‌بندی تضمینش می‌کنیم.
         await plugin.createChannel(REMINDER_CHANNEL)
+
+        logNativeDiagnostic({
+            event: "CHANNEL_RESULT",
+            kind,
+            id,
+            title: input.title,
+            attemptNo,
+            channelId: REMINDER_CHANNEL.id,
+            message: "ایجاد/به‌روزرسانی کانال انجام شد.",
+        })
+
         const result = await plugin.schedule({ notifications: [notification] })
 
         settled = true
@@ -371,13 +466,13 @@ export async function scheduleLocalReminder(
         const resolvedId = result.notifications[0]?.id ?? id
 
         logNativeDiagnostic({
-            event: "SCHEDULE_RESOLVED",
+            event: "NATIVE_SCHEDULE_RESOLVED",
             kind,
             id: resolvedId,
             title: input.title,
+            attemptNo,
             requestedAt: at.getTime(),
             requestedAtIso: at.toISOString(),
-            delayMs: at.getTime() - Date.now(),
             isExact: notification.isExactNotification,
             allowWhileIdle: notification.schedule?.allowWhileIdle,
             channelId: notification.channelId,
@@ -396,13 +491,13 @@ export async function scheduleLocalReminder(
         const message = describeError(err)
 
         logNativeDiagnostic({
-            event: "SCHEDULE_FAILED",
+            event: "NATIVE_SCHEDULE_REJECTED",
             kind,
             id,
             title: input.title,
+            attemptNo,
             requestedAt: at.getTime(),
             requestedAtIso: at.toISOString(),
-            delayMs: at.getTime() - Date.now(),
             isExact: notification.isExactNotification,
             allowWhileIdle: notification.schedule?.allowWhileIdle,
             channelId: notification.channelId,

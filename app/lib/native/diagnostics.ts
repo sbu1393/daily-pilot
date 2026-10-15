@@ -90,11 +90,11 @@ export type NativeDiagnosticEntry = {
     pending?: NativeDiagnosticPendingItem[]
     /** آیا شناسه‌ی هدف در snapshot بود؟ */
     focusFound?: boolean
-    /**
-     * فهرست delivered notifications_same moment (فقط در `DELIVERY_SNAPSHOT`).
-     * اینجا از `getDeliveredNotifications()` می‌آید و فقط برای تشخیص آیا
-     * اعلانی در shade/notification-list visible بوده یا نه.
-     */
+/**
+ * فهرست delivered notifications_same moment (فقط در `DELIVERY_SNAPSHOT`).
+ * اینجا از `getDeliveredNotifications()` می‌آید و فقط برای تشخیص آیا
+ * اعلانی در shade/notification-list visible بوده یا نه.
+ */
     delivered?: NativeDiagnosticDeliveredItem[]
     /** آیا شناسه‌ی هدف در delivered snapshot بود؟ */
     deliveryFocusFound?: boolean
@@ -113,7 +113,7 @@ export const NATIVE_DIAGNOSTIC_STACK_FRAMES = 4
 /** رویدادهای ثبت‌شده بدون فیلدهای مشتق — ورودی `recordNativeDiagnostic`. */
 export type NativeDiagnosticInput = Omit<NativeDiagnosticEntry, "seq" | "at" | "iso">
 
-/** سقف نگه‌داری — یک ring buffer کوچک تا هرگز حافظه/storage را پر نکند. */
+/** سقف نگه‌داری — یک ring buffer کوچک تا هرگز حافظه/storage راپر نکند. */
 export const MAX_NATIVE_DIAGNOSTIC_ENTRIES = 100
 
 /** کلید ذخیره‌ی محلی — جدا از کلیدهای یادآور، فقط شواهد. */
@@ -284,7 +284,7 @@ export function clearNativeDiagnostics(): void {
  * `getDeliveredNotifications()` است، و نتیجه را در گزارش تشخیصی ثابت می‌کند.
  *
  * از آنجا که `getDeliveredNotifications()` روی مرورگر در/plugin-level returns empty
- * یا可能 thrown/catched، همه چیز محافظت‌شده در `try/catch` است و هرگز throw نمی‌کند.
+ * یا 가능한 thrown/catched، همه چیز محافظت‌شده در `try/catch` است و هرگز throw نمی‌کند.
  */
 export async function recordDeliverySnapshot(
     plugin: LocalNotificationsPlugin,
@@ -397,9 +397,7 @@ export async function readExactAlarmDiagnostic(
             exactAlarmSetting: "unknown",
             manifestDeclarativeOnly: false,
         }
-    }
-
-    /*
+    }    /*
      * `window.Capacitor` عمداً با cast خوانده می‌شود: این ماژول هیچ import ای از
      * `@capacitor/core` ندارد (تا pure بماند)، پس augmentation گلوبالش هم اینجا
      * بارگذاری نشده است. همان الگوی `isNativeLocalNotificationPlatform`.
@@ -480,7 +478,7 @@ export function captureDiagnosticStack(): string {
     if (!stack) return ""
 
     return stack
-        .split("\n")
+        .split("\\n")
         .slice(1, NATIVE_DIAGNOSTIC_STACK_FRAMES + 1)
         .map((line) => line.trim())
         .join(" | ")

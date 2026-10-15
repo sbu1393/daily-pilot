@@ -14,6 +14,7 @@ import {
 } from "@/app/lib/native/local-notifications"
 import {
     clearNativeDiagnostics,
+    describeDiagnosticError,
     getNativeDiagnostics,
     recordDeliverySnapshot,
     subscribeNativeDiagnostics,
@@ -292,50 +293,63 @@ export default function NativePocPage() {
 
     const readPending = useCallback(async () => {
         setBusy(true)
-        const result = await listPendingLocalReminders()
-        setBusy(false)
 
-        if (!result.ok) {
-            logLine("error", `خواندن اعلان‌های در انتظار ناموفق بود (${result.reason}): ${result.message}`)
-            return
+        try {
+            const result = await listPendingLocalReminders()
+
+            if (!result.ok) {
+                logLine("error", `خواندن اعلان‌های در انتظار ناموفق بود (${result.reason}): ${result.message}`)
+                return
+            }
+
+            setPending({ now: result.now, items: result.notifications })
+            logLine(
+                result.notifications.length === 0 ? "warn" : "ok",
+                `اعلان‌های در انتظارِ سیستم‌عامل: ${result.notifications.length} مورد (${result.now.toLocaleString("fa-IR")})`,
+            )
+        } catch (err) {            logLine("error", `خواندن pending ناگهانی شکست خورد: ${describeDiagnosticError(err)}`)
+        } finally {
+            setBusy(false)
         }
-
-        setPending({ now: result.now, items: result.notifications })
-        logLine(
-            result.notifications.length === 0 ? "warn" : "ok",
-            `اعلان‌های در انتظارِ سیستم‌عامل: ${result.notifications.length} مورد (${result.now.toLocaleString("fa-IR")})`,
-        )
     }, [logLine])
+
+
 
     const readDeliverySnapshot = useCallback(async () => {
         setBusy(true)
-        const pluginRes = await getLocalNotificationsPluginForDiagnostics()
-        setBusy(false)
 
-        if (!pluginRes.ok) {
-            logLine("error", `پلاگین تشخیصی در دسترس نیست (${pluginRes.reason}): ${pluginRes.message}`)
-            return
+        try {
+            const pluginRes = await getLocalNotificationsPluginForDiagnostics()
+
+            if (!pluginRes.ok) {
+                logLine("error", `پلاگین تشخیصی در دسترس نیست (${pluginRes.reason}): ${pluginRes.message}`)
+                return
+            }
+
+            const latestScheduled = scheduled[0]
+            if (!latestScheduled) {
+                logLine("warn", `برای بررسی وضعیت تحویل، önce یک یادآور زمان‌بندی کنید.`)
+                return
+            }
+
+            await recordDeliverySnapshot(pluginRes.plugin, latestScheduled.id, "TASK", "روزساز — یادآور آزمایشی")
+
+            const after = getNativeDiagnostics()
+            const last = after.slice().reverse().find((e) => e.event === "DELIVERY_SNAPSHOT")
+            if (last) {
+                setPendingDeliverySnapshot({
+                    pendingCount: last.pending?.length ?? 0,
+                    deliveredCount: last.delivered?.length ?? 0,
+                    deliveryFocusFound: last.deliveryFocusFound,
+                })
+            }
+
+            logLine("ok", `وضعیت تحویل ثبت شد (id=${latestScheduled.id})`)
+        } catch (err) {
+            logLine("error", `ثبت وضعیت تحویل ناگهانی شکست خورد: ${describeDiagnosticError(err)}`)
+        } finally {
+            setBusy(false)
         }
-
-        const latestScheduled = scheduled[0]
-        if (!latestScheduled) {
-            logLine("warn", `분석할 알림이 없습니다 — 먼저 알림을 예약하세요.`)
-            return
-        }
-
-        await recordDeliverySnapshot(pluginRes.plugin, latestScheduled.id, "TASK", "روزساز — یادآور آزمایشی")
-
-        const after = getNativeDiagnostics()
-        const last = after.slice().reverse().find((e) => e.event === "DELIVERY_SNAPSHOT")
-        if (last) {
-            setPendingDeliverySnapshot({
-                pendingCount: last.pending?.length ?? 0,
-                deliveredCount: last.delivered?.length ?? 0,
-                deliveryFocusFound: last.deliveryFocusFound,
-            })
-        }
-
-        logLine("ok", `وضعیت تحویل ثبت شد (id=${latestScheduled.id})`)
     }, [logLine, scheduled])
 
     return (

@@ -174,11 +174,22 @@ const monoStyle: React.CSSProperties = {
     wordBreak: "break-word",
 }
 
+/**
+ * دکمه‌ی پایه‌ی PoC.
+ *
+ * ⚠️ `color` **الزامی** است: زمینه سفید است و اگر رنگ متن تعیین نشود، متن از
+ * والد ارث می‌برد؛ در تم تاریک (`--ink: #eef3fa`) یعنی متنِ روشن روی زمینه‌ی
+ * سفید ⇒ **برچسب دکمه نامرئی می‌شود**. این دقیقاً باعث شد در تست دستگاه، دکمه‌ی
+ * «آلارم ۱ دقیقه» با «لغو آلارم آزمایشی» اشتباه گرفته شود و تست آلارم بی‌نتیجه
+ * بماند. پس رنگ متن صریح و همیشه خوانا نگه داشته می‌شود.
+ */
 const btnBase: React.CSSProperties = {
     padding: "0.6rem 1rem",
     borderRadius: 8,
     border: "1px solid #ccc",
     background: "#fff",
+    color: "#0f172a",
+    fontWeight: 600,
     cursor: "pointer",
     fontFamily: "inherit",
 }

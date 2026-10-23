@@ -68,7 +68,25 @@ public class TaskAlarmActivity extends AppCompatActivity {
          * مهلت خودکار)، با باز شدن این صفحه دوباره شنیده می‌شود. اگر صدا در حال
          * پخش باشد، این فراخوانی بی‌اثر است.
          */
-        TaskAlarmController.startRinger(this);
+        TaskAlarmController.startRinger(this, id);
+    }
+
+    /**
+     * بستن صفحه با Home یا swipe از Recents هم باید زنگ را خاموش کند.
+     *
+     * <p>بدون این، صدا تا مهلت خودکار (۵ دقیقه) ادامه می‌داد و state سراسری
+     * Controller آزاد نمی‌شد؛ همان چیزی که آلارم بعدی را بی‌صدا می‌کرد.
+     *
+     * <p>اگر صفحه فقط بازسازی می‌شود ({@code recreate()} در onNewIntent)، کاری
+     * نمی‌کنیم تا زنگِ آلارم تازه خاموش نشود.
+     */
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+
+        if (isChangingConfigurations()) return;
+
+        TaskAlarmController.silence(this, getIntent().getIntExtra(TaskAlarmReceiver.EXTRA_ALARM_ID, -1));
     }
 
     @Override

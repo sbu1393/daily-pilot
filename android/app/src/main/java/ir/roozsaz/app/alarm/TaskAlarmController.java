@@ -52,13 +52,41 @@ public final class TaskAlarmController {
     private static MediaPlayer player;
     private static PowerManager.WakeLock wakeLock;
 
+    /**
+     * شناسهٔ آلارمی که همین حالا در حال زنگ است ({@code -1} یعنی هیچ).
+     *
+     * <p>چرا لازم است: {@link #player} در سطح process است و پروسه هم بین دو
+     * آلارم زنده می‌ماند (سرویس پیش‌زمینه). بدون این شناسه، اگر state آلارم
+     * قبلی آزاد نشده باشد، آلارم بعدی در {@link #startRinger} بی‌صدا رد
+     * می‌شد — یعنی «آلارم اول زنگ می‌زند، آلارم‌های بعدی نه».
+     */
+    private static int ringingAlarmId = -1;
+
+    /** فقط application context — برای پاک‌سازیِ خودکارِ مهلت زنگ لازم است. */
+    private static Context appContext;
+
     private static final Handler handler = new Handler(Looper.getMainLooper());
     private static final Runnable autoStop = new Runnable() {
         @Override
         public void run() {
-            /* بدون context هم می‌شود صدا و اعلان را جمع کرد. */
+            /*
+             * مهلت زنگ: صدا، قفل بیداری، اعلان و سرویس پیش‌زمینه همه جمع
+             * می‌شوند. اگر سرویس رها بماند، پروسه بی‌نهایت زنده می‌ماند و
+             * state آلارم‌های بعدی را آلوده می‌کند.
+             */
+            int alarmId = ringingAlarmId;
             stopRinger();
             releaseWakeLock();
+
+            Context context = appContext;
+            if (context == null || alarmId < 0) return;
+
+            cancelNotification(context, alarmId);
+            stopService(context);
+            /*
+             * رکورد ذخیره عمداً حذف نمی‌شود: «تعویق» بعد از مهلت باید همچنان
+             * کار کند و برای زمان‌بندی به همان رکورد نیاز دارد.
+             */
         }
     };
 
@@ -187,8 +215,19 @@ public final class TaskAlarmController {
      * <p>اگر دستگاه صدای آلارم پیش‌فرض نداشته باشد یا پخش ممکن نباشد، بی‌صدا
      * رد می‌شود — ولی اعلان و صفحه‌ی آلارم سرِ جای خود می‌مانند.
      */
-    public static synchronized void startRinger(Context context) {
-        if (player != null) return;
+    public static synchronized void startRinger(Context context, int alarmId) {
+        /*
+         * هر آلارم lifecycle مستقل دارد:
+         *  - همان آلارم دوباره درخواست شود ⇒ idempotent (صفحهٔ آلارم هم صدا
+         *    می‌زند و نباید صدای دومی روی صدای اول بیفتد).
+         *  - آلارم دیگری برسد و state آلارم قبلی مانده باشد ⇒ اول state قبلی
+         *    آزاد می‌شود، بعد آلارم جدید شروع. بدون این، آلارم دوم بی‌صدا
+         *    رد می‌شد.
+         */
+        if (player != null) {
+            if (ringingAlarmId == alarmId) return;
+            stopRinger();
+        }
 
         try {
             Uri uri = alarmSoundUri(context);
@@ -226,6 +265,8 @@ public final class TaskAlarmController {
             /* prepare غیرمسدودکننده: رشته‌ی اصلی (گیرنده) نباید بلاک شود. */
             mp.prepareAsync();
             player = mp;
+            ringingAlarmId = alarmId;
+            appContext = context.getApplicationContext();
         } catch (Exception e) {
             Log.w(TAG, "ساخت پخش‌کننده‌ی صدا شکست خورد", e);
             player = null;
@@ -235,6 +276,7 @@ public final class TaskAlarmController {
     public static synchronized void stopRinger() {
         MediaPlayer mp = player;
         player = null;
+        ringingAlarmId = -1;
 
         if (mp == null) return;
 
@@ -295,7 +337,7 @@ public final class TaskAlarmController {
 
         postNotification(app, alarm);
         acquireWakeLock(app);
-        startRinger(app);
+        startRinger(app, alarm.id);
 
         /* سرویس پیش‌زمینه پروسه را زنده و اعلان را پایدار نگه می‌دارد. */
         if (!startService(app, alarm)) {
@@ -347,6 +389,29 @@ public final class TaskAlarmController {
         cancelNotification(app, alarmId);
         stopService(app);
         TaskAlarmStore.delete(app, alarmId);
+    }
+
+    /**
+     * خاموش‌کردن قطعیِ زنگِ همین آلارم، بدون دست‌زدن به رکورد ذخیره.
+     *
+     * <p>برای مسیرهایی که «پایانِ نمایش» هستند ولی «توقف» نیستند: بستن صفحهٔ
+     * آلارم با Home یا swipe از Recents، یا از بین رفتن سرویس پیش‌زمینه.
+     * رکورد عمداً حذف نمی‌شود چون «تعویق» به آن نیاز دارد؛ حذف رکورد اینجا
+     * باعث می‌شد آلارم تعویق‌خورده هرگز زنگ نزند.
+     *
+     * <p>اگر آلارمِ دیگری در حال زنگ باشد، هیچ کاری نمی‌کند — زنگِ آن آلارم
+     * نباید با بسته‌شدن صفحهٔ آلارمِ قبلی خاموش شود.
+     */
+    public static void silence(Context context, int alarmId) {
+        if (alarmId < 0 || ringingAlarmId != alarmId) return;
+
+        Context app = context.getApplicationContext();
+
+        handler.removeCallbacks(autoStop);
+        stopRinger();
+        releaseWakeLock();
+        cancelNotification(app, alarmId);
+        stopService(app);
     }
 
     /**

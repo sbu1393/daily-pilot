@@ -28,6 +28,9 @@ public class TaskAlarmService extends Service {
     public static final String ACTION_START = "ir.roozsaz.app.alarm.SERVICE_START";
     public static final String ACTION_STOP = "ir.roozsaz.app.alarm.SERVICE_STOP";
 
+    /** آلارمی که همین نمونه از سرویس برایش زنده نگه داشته شده ({@code -1} = هیچ). */
+    private int activeAlarmId = -1;
+
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
@@ -51,13 +54,15 @@ public class TaskAlarmService extends Service {
             return START_NOT_STICKY;
         }
 
+        activeAlarmId = alarm.id;
+
         if (!goForeground(alarm)) {
             /* اعلانِ پیش‌زمینه ممکن نشد؛ سرویس را نگه نمی‌داریم ولی صدا ادامه دارد. */
             stopSelf();
             return START_NOT_STICKY;
         }
 
-        TaskAlarmController.startRinger(this);
+        TaskAlarmController.startRinger(this, alarm.id);
 
         return START_NOT_STICKY;
     }
@@ -81,9 +86,21 @@ public class TaskAlarmService extends Service {
         }
     }
 
-    /*
-     * توجه: عمداً در onDestroy صدا را قطع نمی‌کنیم. توقف صدا فقط با اقدام صریح
-     * کاربر (توقف/تعویق) یا مهلت خودکارِ TaskAlarmController انجام می‌شود؛
-     * وگرنه ممکن بود سرویس به هر دلیلی بازراه‌اندازی شود و آلارم بی‌صدا بماند.
+    /**
+     * اگر سرویس به هر دلیلی از بین برود، صدای همان آلارمی که این سرویس برایش
+     * زنده بود خاموش می‌شود.
+     *
+     * <p>قبلاً اینجا عمداً هیچ کاری نمی‌شد و دلیلش هم منطقی بود: نمی‌خواستیم
+     * بازراه‌اندازی سرویس باعث بی‌صدا شدن آلارم شود. اما نتیجه‌اش این بود که
+     * اگر سرویس رها می‌شد، صدا در پروسه‌ی زنده‌ی باقی‌مانده حلقه می‌زد و state
+     * سراسری Controller برای آلارم بعدی باقی می‌ماند. اکنون
+     * {@link TaskAlarmController#silence} فقط وقتی کاری می‌کند که همین آلارم
+     * هنوز در حال زنگ باشد؛ بازراه‌اندازی برای آلارم بعدی، صدا را دوباره شروع
+     * می‌کند و این فراخوانی برای آن بی‌اثر است.
      */
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        TaskAlarmController.silence(this, activeAlarmId);
+    }
 }

@@ -47,6 +47,14 @@ export type NativeTaskAlarmStatus = {
     fullScreenIntent: boolean
     /** آیا نمایش اعلان برای این اپ مجاز است؟ */
     notifications: boolean
+    /**
+     * مجوز ویژهی MIUI «نمایش در قفل صفحه» (op 10020) — فقط شیائومی ملموس است:
+     *
+     * - `granted`     → صفحهی آلارم روی قفل صفحه ظاهر میشود.
+     * - `denied`      → زنگ میزند ولی پشت قفل صفحه پنهان میماند.
+     * - `unsupported` → غیرشیائومی؛ هیچ حرفی نباید زده شود.
+     */
+    lockScreenPermission?: "granted" | "denied" | "unsupported"
     /** سطح API اندروید — فقط برای گزارش. */
     sdk: number
 }
@@ -65,6 +73,11 @@ type TaskAlarmBridge = {
     requestNotificationPermission: () => Promise<{ granted: boolean }>
     requestExactAlarmPermission: () => Promise<{ opened: boolean; granted: boolean }>
     requestFullScreenIntentPermission: () => Promise<{ opened: boolean; granted: boolean }>
+    requestLockScreenPermission?: () => Promise<{
+        opened: boolean
+        granted: boolean
+        state: string
+    }>
     schedule: (options: { id: number; taskId: number; title: string; at: number }) => Promise<
         NativeTaskAlarmStatus & { id: number; at: number; exact: boolean }
     >
@@ -185,7 +198,7 @@ export async function getTaskAlarmNativeStatus(): Promise<TaskAlarmStatusOutcome
             event: "EXACT_CAPABILITY",
             kind: "ALARM",
             isExact: status.exactAlarm,
-            message: `fullScreen=${status.fullScreenIntent} notifications=${status.notifications} sdk=${status.sdk}`,
+            message: `fullScreen=${status.fullScreenIntent} notifications=${status.notifications} lockScreen=${status.lockScreenPermission ?? "unknown"} sdk=${status.sdk}`,
         })
 
         return {
@@ -193,6 +206,8 @@ export async function getTaskAlarmNativeStatus(): Promise<TaskAlarmStatusOutcome
             exactAlarm: status.exactAlarm,
             fullScreenIntent: status.fullScreenIntent,
             notifications: status.notifications,
+            /* اپ‌های قدیمی‌تر این فیلد را برنمی‌گردانند ⇒ همواره «unsupported». */
+            lockScreenPermission: status.lockScreenPermission ?? "unsupported",
             sdk: status.sdk,
         }
     } catch (error) {
@@ -239,6 +254,37 @@ export async function requestTaskAlarmExactPermission(): Promise<TaskAlarmPermis
         })
 
         return { ok: true, granted: result.granted, opened: result.opened }
+    } catch (error) {
+        return { ok: false, reason: "CALL_FAILED", message: describeError(error) }
+    }
+}
+
+export type LockScreenPermissionOutcome =
+    | { ok: true; granted: boolean; state: string }
+    | TaskAlarmFailure
+
+/**
+ * باز کردن صفحهی مجوز ویژهی MIUI «نمایش در قفل صفحه» — فقط در صورتی که روی
+ * MIUI باشیم و op 10020 رد باشد. اگر پلاگین این متد را نداشته باشد یا اپ غیرشیائومی
+ * باشد، «unsupported» برمیگردد و هیچ صفحهای باز نمیشود.
+ */
+export async function requestTaskAlarmLockScreenPermission(): Promise<LockScreenPermissionOutcome> {
+    const resolved = resolveBridge()
+    if (!resolved.ok) return resolved
+
+    try {
+        const fn = resolved.bridge.requestLockScreenPermission
+        if (!fn) return { ok: true, granted: false, state: "unsupported" }
+
+        const result = await fn()
+
+        log({
+            event: "PERMISSION_RESULT",
+            kind: "ALARM",
+            message: `lock-screen granted=${result.granted} state=${result.state}`,
+        })
+
+        return { ok: true, granted: result.granted, state: result.state }
     } catch (error) {
         return { ok: false, reason: "CALL_FAILED", message: describeError(error) }
     }

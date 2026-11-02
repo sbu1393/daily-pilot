@@ -19,10 +19,12 @@ import {
     listNativeTaskAlarms,
     requestTaskAlarmExactPermission,
     requestTaskAlarmFullScreenPermission,
+    requestTaskAlarmLockScreenPermission,
     requestTaskAlarmNotificationPermission,
     scheduleNativeTaskAlarm,
     type NativeTaskAlarmStatus,
     type TaskAlarmPermissionOutcome,
+    type LockScreenPermissionOutcome,
 } from "@/app/lib/native/task-alarm"
 import {
     findTaskAlarm,
@@ -79,6 +81,7 @@ type TaskAlarmContextType = {
     requestExactPermission: () => Promise<TaskAlarmPermissionOutcome>
     requestFullScreenPermission: () => Promise<TaskAlarmPermissionOutcome>
     requestNotificationPermission: () => Promise<TaskAlarmPermissionOutcome>
+    requestLockScreenPermission: () => Promise<LockScreenPermissionOutcome>
 }
 
 const TaskAlarmContext = createContext<TaskAlarmContextType | null>(null)
@@ -203,6 +206,7 @@ export function TaskAlarmProvider({ children }: { children: React.ReactNode }) {
                 exactAlarm: status.exactAlarm,
                 fullScreenIntent: status.fullScreenIntent,
                 notifications: status.notifications,
+                lockScreenPermission: status.lockScreenPermission,
                 sdk: status.sdk,
             })
         }
@@ -309,6 +313,12 @@ export function TaskAlarmProvider({ children }: { children: React.ReactNode }) {
         await refreshNativeStatus()
         return outcome
     }, [refreshNativeStatus])
+    const requestLockScreenPermission = useCallback(async () => {
+        const outcome = await requestTaskAlarmLockScreenPermission()
+        await refreshNativeStatus()
+        return outcome
+    }, [refreshNativeStatus])
+
 
     const value = useMemo<TaskAlarmContextType>(
         () => ({
@@ -324,6 +334,7 @@ export function TaskAlarmProvider({ children }: { children: React.ReactNode }) {
             requestExactPermission,
             requestFullScreenPermission,
             requestNotificationPermission,
+            requestLockScreenPermission,
         }),
         [
             ready,
@@ -338,6 +349,7 @@ export function TaskAlarmProvider({ children }: { children: React.ReactNode }) {
             requestExactPermission,
             requestFullScreenPermission,
             requestNotificationPermission,
+            requestLockScreenPermission,
         ],
     )
 

@@ -3,6 +3,7 @@ package ir.roozsaz.app.alarm;
 import android.app.KeyguardManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.TextView;
@@ -27,6 +28,8 @@ import java.util.Locale;
  */
 public class TaskAlarmActivity extends AppCompatActivity {
 
+    private static final String TAG = "TaskAlarm";
+
     private static final char[] PERSIAN_DIGITS = {'۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'};
 
     @Override
@@ -37,6 +40,11 @@ public class TaskAlarmActivity extends AppCompatActivity {
         TaskAlarmController.ensureChannel(this);
 
         int alarmId = getIntent().getIntExtra(TaskAlarmReceiver.EXTRA_ALARM_ID, -1);
+        final String sessionToken = getIntent().getStringExtra(TaskAlarmReceiver.EXTRA_SESSION_TOKEN);
+        Log.i(TAG, "ACTIVITY_CREATED alarmId=" + alarmId
+                + " token=" + shortToken(sessionToken)
+                + " " + TaskAlarmProcess.describe(this));
+
         if (alarmId < 0) {
             finish();
             return;
@@ -53,22 +61,43 @@ public class TaskAlarmActivity extends AppCompatActivity {
 
         Button stop = findViewById(R.id.alarm_stop);
         stop.setOnClickListener(view -> {
-            TaskAlarmController.stop(this, id);
+            TaskAlarmController.stop(this, id, sessionToken);
             finishAndRemoveTask();
         });
 
         Button snooze = findViewById(R.id.alarm_snooze);
         snooze.setOnClickListener(view -> {
-            TaskAlarmController.snooze(this, id, TaskAlarmController.DEFAULT_SNOOZE_MINUTES);
+            TaskAlarmController.snooze(this, id, TaskAlarmController.DEFAULT_SNOOZE_MINUTES, sessionToken);
             finishAndRemoveTask();
         });
 
         /*
-         * اگر کاربر روی اعلان تپ کرده و صدا قبلاً خاموش شده بود (مثلاً بعد از
-         * مهلت خودکار)، با باز شدن این صفحه دوباره شنیده می‌شود. اگر صدا در حال
-         * پخش باشد، این فراخوانی بی‌اثر است.
+         * عمداً هیچ startRinger اینجا نیست. باز شدن این صفحه — از اعلان، از
+         * صفحهٔ قفل، یا به هر دلیل دیگری — نباید صدا را شروع کند. مالک صدا
+         * فقط مسیر FIRE است؛ این Activity فقط نمایش و دکمه‌های توقف/تعویق است.
          */
-        TaskAlarmController.startRinger(this);
+        Log.i(TAG, "ACTIVITY_READY alarmId=" + alarmId
+                + " ringing=" + TaskAlarmController.isRinging()
+                + " " + TaskAlarmProcess.describe(this));
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        Log.i(TAG, "ACTIVITY_STARTED alarmId=" + getIntent().getIntExtra(TaskAlarmReceiver.EXTRA_ALARM_ID, -1));
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        Log.i(TAG, "ACTIVITY_RESUMED alarmId=" + getIntent().getIntExtra(TaskAlarmReceiver.EXTRA_ALARM_ID, -1));
+    }
+
+    @Override
+    protected void onDestroy() {
+        Log.i(TAG, "ACTIVITY_DESTROYED alarmId=" + getIntent().getIntExtra(TaskAlarmReceiver.EXTRA_ALARM_ID, -1)
+                + " isFinishing=" + isFinishing());
+        super.onDestroy();
     }
 
     @Override
@@ -83,7 +112,8 @@ public class TaskAlarmActivity extends AppCompatActivity {
     @Override
     public void onBackPressed() {
         int alarmId = getIntent().getIntExtra(TaskAlarmReceiver.EXTRA_ALARM_ID, -1);
-        if (alarmId >= 0) TaskAlarmController.stop(this, alarmId);
+        String token = getIntent().getStringExtra(TaskAlarmReceiver.EXTRA_SESSION_TOKEN);
+        if (alarmId >= 0) TaskAlarmController.stop(this, alarmId, token);
         finishAndRemoveTask();
     }
 
@@ -119,5 +149,10 @@ public class TaskAlarmActivity extends AppCompatActivity {
             out.append(c >= '0' && c <= '9' ? PERSIAN_DIGITS[c - '0'] : c);
         }
         return out.toString();
+    }
+
+    private static String shortToken(String token) {
+        if (token == null) return "null";
+        return token.length() <= 8 ? token : token.substring(0, 8);
     }
 }

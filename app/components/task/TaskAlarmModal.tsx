@@ -59,6 +59,7 @@ export default function TaskAlarmModal({ task, open, onClose }: Props) {
         nativeStatus,
         requestExactPermission,
         requestFullScreenPermission,
+        requestLockScreenPermission,
         requestNotificationPermission,
     } = useTaskAlarms()
 
@@ -235,6 +236,34 @@ export default function TaskAlarmModal({ task, open, onClose }: Props) {
                     </button>
                 </div>
             )}
+
+            {isNative &&
+                nativeStatus != null &&
+                nativeStatus.lockScreenPermission === "denied" && (
+                    <div className={reminderStyles.activeBox}>
+                        <div className={reminderStyles.activeText}>
+                            <b>نمایش آلارم روی قفل صفحه مسدود شده</b>
+                            <span>
+                                روی گوشیهای شیائومی این مجوز پیشفرض رد است؛ بدون آن
+                                آلارم زنگ میزند ولی صفحهٔ آن روی قفل صفحه نمایش
+                                داده نمیشود. فقط یک بار «نمایش در قفل صفحه» را
+                                فعال کنید.
+                            </span>
+                        </div>
+                        <button
+                            type="button"
+                            className={reminderStyles.quickChip}
+                            onClick={() =>
+                                void grant(
+                                    requestLockScreenPermission,
+                                    "صفحهٔ مجوزهای شیائومی باز شد؛ «نمایش در قفل صفحه» را فعال کنید"
+                                )
+                            }
+                        >
+                            فعالسازی
+                        </button>
+                    </div>
+                )}
 
             {/* ── انتخاب زمان ─────────────────────────────────────────── */}
             <label className={reminderStyles.fieldLabel} htmlFor="dp-alarm-at">

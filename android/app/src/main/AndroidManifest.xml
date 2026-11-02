@@ -33,12 +33,20 @@
             - launchMode=singleInstance + taskAffinity خالی: صفحه‌ی آلارم کارِ
               خودش را دارد و با WebView قاطی نمی‌شود.
         -->
+        <!--
+            زنجیرهٔ زنگ در پروسهٔ مستقل :alarm اجرا می‌شود تا شروع آن به
+            زنده‌بودن پروسهٔ اصلی (که WebView/Capacitor دارد) وابسته نباشد.
+            این یک «کاهش ریسک» است، نه تضمین عبور از گیت MIUI؛ MIUI می‌تواند
+            همین پروسه را هم به‌خاطر مرگ‌های خودش محدود کند. شاهد و لاگ PROC
+            برای تشخیص همین حالت نگه داشته شده است.
+        -->
         <activity
             android:name=".alarm.TaskAlarmActivity"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:excludeFromRecents="true"
             android:exported="false"
             android:launchMode="singleInstance"
+            android:process=":alarm"
             android:showWhenLocked="true"
             android:taskAffinity=""
             android:theme="@style/AppTheme.NoActionBar"
@@ -47,7 +55,8 @@
         <!-- گیرنده‌ی آلارم؛ فقط AlarmManager آن را صدا می‌زند. -->
         <receiver
             android:name=".alarm.TaskAlarmReceiver"
-            android:exported="false" />
+            android:exported="false"
+            android:process=":alarm" />
 
         <!--
             بازیابی پس از reboot / به‌روزرسانی اپ / تغییر زمان.
@@ -64,11 +73,16 @@
             </intent-filter>
         </receiver>
 
-        <!-- سرویس پیش‌زمینه‌ی زنگ‌زدن: پروسه را زنده و اعلان را پایدار نگه می‌دارد. -->
+        <!--
+            سرویس پیش‌زمینه‌ی زنگ‌زدن: پروسه را زنده و اعلان را پایدار نگه
+            می‌دارد. عمداً همان پروسهٔ :alarm است تا player/WakeLock و سرویس
+            در یک پروسه باشند؛ stopService از پروسهٔ دیگر به player دست نمی‌زند.
+        -->
         <service
             android:name=".alarm.TaskAlarmService"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
+            android:foregroundServiceType="mediaPlayback"
+            android:process=":alarm" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

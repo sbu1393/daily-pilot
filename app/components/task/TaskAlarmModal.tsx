@@ -12,7 +12,7 @@ import {
     formatReminderTime,
     fromDateTimeLocalValue,
     toDateTimeLocalValue,
-} from "@/app/lib/taskReminder"
+} from "@/app/lib/taskTime"
 import {
     TASK_ALARM_DEFAULT_LEAD_MS,
     TASK_ALARM_QUICK_CHOICES,
@@ -25,8 +25,8 @@ import reminderStyles from "./reminder.module.css"
 /*
  * مودال «آلارم تسک» (Feature B).
  *
- * این مودال از مودال یادآوری **جدا** است: یادآوری یک اعلان می‌سازد، آلارم یک
- * زنگ واقعی با صفحه‌ی تمام‌عرض. همین‌جا هم صادقانه گفته می‌شود که آلارم فقط
+ * این مودال فقط آلارم تسک است: یک زنگ واقعی با صفحه‌ی تمام‌عرض.
+ * همین‌جا هم صادقانه گفته می‌شود که آلارم فقط
  * داخل اپ اندروید ثبت می‌شود و اگر مجوزهای لازم داده نشده باشند، دقیقاً کدام
  * مجوز کم است و چطور داده می‌شود.
  */
@@ -162,7 +162,7 @@ export default function TaskAlarmModal({ task, open, onClose }: Props) {
                         <b>آلارم واقعی در مرورگر ممکن نیست</b>
                         <span>
                             آلارم با صدای بلند و صفحه‌ی تمام‌عرض فقط داخل اپ اندروید ثبت می‌شود. برای
-                            یادآوری در مرورگر از «تنظیم زمان» استفاده کن.
+                            یادآوری روزانه از تنظیمات «یادآور روزانه» استفاده کن.
                         </span>
                     </div>
                 </div>

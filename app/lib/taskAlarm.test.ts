@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 
-import { taskReminderNotificationId } from "@/app/lib/native/task-reminder"
 import {
     findTaskAlarm,
     pruneTaskAlarms,
@@ -53,16 +52,6 @@ describe("taskAlarmId", () => {
     it("شناسه‌ی مثبت است (برای PendingIntent و NotificationManager)", () => {
         expect(taskAlarmId(7)).toBeGreaterThan(0)
         expect(Number.isInteger(taskAlarmId(7))).toBe(true)
-    })
-
-    /*
-     * آلارم و یادآور دو قابلیت مستقل‌اند و نباید اعلان همدیگر را بازنویسی کنند:
-     * فضاهای کلید عمداً جدا هستند (`task-alarm:` در برابر `task-reminder:`).
-     */
-    it("با شناسه‌ی اعلانِ یادآور همان تسک یکی نیست", () => {
-        for (const taskId of [1, 2, 42, 999, 123456]) {
-            expect(taskAlarmId(taskId)).not.toBe(taskReminderNotificationId(taskId))
-        }
     })
 })
 

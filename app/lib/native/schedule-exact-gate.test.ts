@@ -108,7 +108,7 @@ describe("scheduleLocalReminder — دروازه‌ی آلارم دقیق", () =
         mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: "denied" })
 
         const result = await scheduleLocalReminder({
-            title: "🔔 تست",
+            title: "اعلان تست",
             body: "بدنه",
             delayMs: 1_000,
             id: 11,
@@ -130,7 +130,7 @@ describe("scheduleLocalReminder — دروازه‌ی آلارم دقیق", () =
         mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: "granted" })
 
         const result = await scheduleLocalReminder({
-            title: "🔔 تست",
+            title: "اعلان تست",
             body: "بدنه",
             delayMs: 1_000,
             id: 12,
@@ -156,7 +156,7 @@ describe("scheduleLocalReminder — دروازه‌ی آلارم دقیق", () =
 
     it("`exact: false` صریح هیچ‌وقت وضعیت را نمی‌خواند", async () => {
         const result = await scheduleLocalReminder({
-            title: "🔔 تست",
+            title: "اعلان تست",
             body: "بدنه",
             delayMs: 1_000,
             id: 14,
@@ -186,7 +186,7 @@ describe("scheduleLocalReminder — دروازه‌ی آلارم دقیق", () =
             mocks.schedule.mockRejectedValueOnce(new Error("boom"))
 
             const result = await scheduleLocalReminder({
-                title: "🔔 تست",
+                title: "اعلان تست",
                 body: "بدنه",
                 delayMs: 1_000,
                 id: 21,
@@ -218,7 +218,7 @@ describe("scheduleLocalReminder — دروازه‌ی آلارم دقیق", () =
      */
     it("سه schedule پشت‌سرهم: هر سه اجرا و هر سه با شناسهٔ درست ثبت می‌شوند", async () => {
         const result1 = await scheduleLocalReminder({
-            title: "🔔 تست",
+            title: "اعلان تست",
             body: "بدنه",
             delayMs: 1_000,
             id: 31,
@@ -226,7 +226,7 @@ describe("scheduleLocalReminder — دروازه‌ی آلارم دقیق", () =
         expect(result1.ok).toBe(true)
 
         const result2 = await scheduleLocalReminder({
-            title: "🔔 تست",
+            title: "اعلان تست",
             body: "بدنه",
             delayMs: 1_000,
             id: 32,
@@ -234,7 +234,7 @@ describe("scheduleLocalReminder — دروازه‌ی آلارم دقیق", () =
         expect(result2.ok).toBe(true)
 
         const result3 = await scheduleLocalReminder({
-            title: "🔔 تست",
+            title: "اعلان تست",
             body: "بدنه",
             delayMs: 1_000,
             id: 33,
@@ -304,7 +304,7 @@ describe("scheduleLocalReminder — دروازه‌ی آلارم دقیق", () =
 
         for (const id of [41, 42, 43]) {
             const result = await scheduleLocalReminder({
-                title: "🔔 تست",
+                title: "اعلان تست",
                 body: "بدنه",
                 delayMs: 1_000,
                 id,
@@ -350,7 +350,7 @@ describe("scheduleLocalReminder — دروازه‌ی آلارم دقیق", () =
         mocks.schedule.mockRejectedValueOnce(new Error("native boom"))
 
         const first = await scheduleLocalReminder({
-            title: "🔔 تست",
+            title: "اعلان تست",
             body: "بدنه",
             delayMs: 1_000,
             id: 51,
@@ -361,13 +361,13 @@ describe("scheduleLocalReminder — دروازه‌ی آلارم دقیق", () =
         expect(first.reason).toBe("SCHEDULE_FAILED")
 
         const second = await scheduleLocalReminder({
-            title: "🔔 تست",
+            title: "اعلان تست",
             body: "بدنه",
             delayMs: 1_000,
             id: 52,
         })
         const third = await scheduleLocalReminder({
-            title: "🔔 تست",
+            title: "اعلان تست",
             body: "بدنه",
             delayMs: 1_000,
             id: 53,

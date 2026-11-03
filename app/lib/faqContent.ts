@@ -6,7 +6,7 @@
 // می‌کند — دقیقاً همان الگوی `planProposalView.ts` و `createTaskForm.ts`.
 //
 // محتوا از روی رفتارِ واقعیِ کد نوشته شده (CreateTaskModal، EditTaskModal،
-// TaskCard، ReminderModal، RolloverDialog، `offline.ts` و `categories.ts`)؛
+// TaskCard، TaskAlarmModal، RolloverDialog، `offline.ts` و `categories.ts`)؛
 // نه از حدس. هر پاسخ به یک قابلیتِ موجود در کد اشاره می‌کند.
 
 export type FaqItem = {
@@ -125,10 +125,11 @@ export const FAQ_ITEMS: readonly FaqItem[] = [
     },
     {
         id: "reminders",
-        question: "یادآوری‌ها چگونه کار می‌کنند؟",
+        question: "یادآوری و آلارم چگونه کار می‌کنند؟",
         answer:
-            "برای هر کار می‌توانی یادآوری بگذاری و زمان دلخواه انتخاب کنی. یادآوری‌ها روی همین دستگاه " +
-            "ذخیره می‌شوند و در زمان سررسید همان‌جا به تو یادآوری می‌کنند.",
+            "برای هر کار می‌توانی «آلارم» بگذاری و زمان دلخواه انتخاب کنی. آلارم فقط در اپ اندروید " +
+            "ثبت می‌شود و با رسیدن زمان، حتی اگر اپ بسته باشد، با صدا و صفحهٔ تمام‌عرض هشدار می‌دهد. " +
+            "برای یادآوری روزانه هم در تنظیمات، «یادآور روزانه» را روشن کن.",
     },
     {
         id: "offline",

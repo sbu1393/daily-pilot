@@ -26,12 +26,6 @@ import {
  */
 
 describe("classifyReminderKind", () => {
-    it("یادآور تسک را از پیشوند عنوان تشخیص می‌دهد", () => {
-        // `scheduleTaskReminder` عنوان را همیشه با همین پیشوند می‌سازد.
-        expect(classifyReminderKind("🔔 خرید نان")).toBe("TASK")
-        expect(classifyReminderKind("🔔")).toBe("TASK")
-    })
-
     it("یادآور روزانه را از عنوان ثابتش تشخیص می‌دهد", () => {
         expect(classifyReminderKind("یادآور روزساز")).toBe("DAILY")
     })
@@ -52,9 +46,9 @@ describe("recordNativeDiagnostic", () => {
     it("ورودی را با seq صعودی و زمان ثبت می‌کند", () => {
         const first = recordNativeDiagnostic({
             event: "SCHEDULE_REQUESTED",
-            kind: "TASK",
+            kind: "ALARM",
             id: 42,
-            title: "🔔 تست",
+            title: "آلارم تست",
             requestedAt: 1_700_000_000_000,
             requestedAtIso: "2023-11-14T22:13:20.000Z",
             delayMs: 120_000,
@@ -62,7 +56,7 @@ describe("recordNativeDiagnostic", () => {
             allowWhileIdle: true,
             channelId: "roozsaz_reminders",
         })
-        const second = recordNativeDiagnostic({ event: "SCHEDULE_RESOLVED", kind: "TASK", id: 42 })
+        const second = recordNativeDiagnostic({ event: "SCHEDULE_RESOLVED", kind: "ALARM", id: 42 })
 
         expect(first).not.toBeNull()
         expect(second).not.toBeNull()
@@ -92,10 +86,10 @@ describe("recordNativeDiagnostic", () => {
     it("snapshot فهرست pending را همان‌طور که بود نگه می‌دارد", () => {
         recordNativeDiagnostic({
             event: "PENDING_SNAPSHOT",
-            kind: "TASK",
+            kind: "ALARM",
             id: 7,
             focusFound: true,
-            pending: [{ id: 7, title: "🔔 تست", atIso: "2023-11-14T22:15:20.000Z" }],
+            pending: [{ id: 7, title: "آلارم تست", atIso: "2023-11-14T22:15:20.000Z" }],
         })
 
         const snapshot = getNativeDiagnostics()[0]
@@ -157,11 +151,11 @@ describe("subscribeNativeDiagnostics", () => {
 
 describe("clearNativeDiagnostics", () => {
     it("حلقه را خالی می‌کند و شماره‌ی ترتیبی دیگر لازم نیست صفر شود", () => {
-        recordNativeDiagnostic({ event: "SCHEDULE_REQUESTED", kind: "TASK", id: 1 })
+        recordNativeDiagnostic({ event: "SCHEDULE_REQUESTED", kind: "ALARM", id: 1 })
         clearNativeDiagnostics()
         expect(getNativeDiagnostics()).toHaveLength(0)
 
-        const after = recordNativeDiagnostic({ event: "SCHEDULE_REQUESTED", kind: "TASK", id: 2 })
+        const after = recordNativeDiagnostic({ event: "SCHEDULE_REQUESTED", kind: "ALARM", id: 2 })
         expect(after).not.toBeNull()
     })
 })
@@ -174,9 +168,9 @@ describe("formatNativeDiagnostic", () => {
     it("همه‌ی فیلدهای مهمِ یک زمان‌بندی را در یک خط می‌آورد", () => {
         const entry = recordNativeDiagnostic({
             event: "SCHEDULE_RESOLVED",
-            kind: "TASK",
+            kind: "ALARM",
             id: 42,
-            title: "🔔 تست",
+            title: "آلارم تست",
             requestedAtIso: "2023-11-14T22:15:20.000Z",
             delayMs: 120_000,
             isExact: true,
@@ -186,7 +180,7 @@ describe("formatNativeDiagnostic", () => {
         const line = formatNativeDiagnostic(entry!)
 
         expect(line).toContain("SCHEDULE_RESOLVED")
-        expect(line).toContain("kind=TASK")
+        expect(line).toContain("kind=ALARM")
         expect(line).toContain("id=42")
         expect(line).toContain("at=2023-11-14T22:15:20.000Z")
         expect(line).toContain("in=120s")

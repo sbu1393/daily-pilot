@@ -8,12 +8,10 @@ import { getCanonicalToday } from "@/app/lib/canonicalDay"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import { categoryInfo, priorityMeta, priorityMissingMeta, type TaskItem } from "./taskTypes"
 import styles from "./task.module.css"
-import { AlarmClock, BellRing, ChevronDown, Pencil } from "lucide-react"
-// «تنظیم زمان» — فقط خواندن یادآوری از context و یک دکمه/نشان اضافه؛ هیچ منطق موجودی تغییر نکرده
-import { useTaskReminders } from "@/app/hooks/useTaskReminder"
-// آلارم واقعی تسک (Feature B) — context جدا و مستقل از یادآور
+import { BellRing, ChevronDown, Pencil } from "lucide-react"
+// آلارم واقعی تسک (Feature B)
 import { useTaskAlarms } from "@/app/hooks/useTaskAlarm"
-import { formatReminderTime } from "@/app/lib/taskReminder"
+import { formatReminderTime } from "@/app/lib/taskTime"
 import reminderStyles from "./reminder.module.css"
 
 /* انیمیشن ورود کارت (لیست با stagger هماهنگ می‌شود) */
@@ -36,9 +34,7 @@ type Props = {
     onComplete: (t: TaskItem) => void
     onDelete: (t: TaskItem) => void
     onReanalyze?: (task: TaskItem) => void
-    /** اختیاری — باز کردن مودال «تنظیم زمان» (additive؛ بدون آن کارت مثل قبل کار می‌کند) */
-    onRemind?: (task: TaskItem) => void
-    /** اختیاری — باز کردن مودال «آلارم واقعی» (additive؛ مستقل از یادآور) */
+    /** اختیاری — باز کردن مودال «آلارم واقعی» (additive) */
     onAlarm?: (task: TaskItem) => void
     /** اختیاری — باز کردن مودال ویرایش (additive؛ بدون آن کارت مثل قبل کار می‌کند) */
     onEdit?: (task: TaskItem) => void
@@ -57,13 +53,10 @@ type Props = {
  * به همین دلیل پنل همیشه در DOM می‌ماند و با `visibility` از ناظر پنهان می‌شود.
  * کارتِ DONE خودش جمع می‌شود؛ کارتِ DONE بدون دلیل، چیزی برای باز‌کردن ندارد.
  */
-function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind, onAlarm, onEdit }: Props) {
+function TaskCard({ task, onComplete, onDelete, onReanalyze, onAlarm, onEdit }: Props) {
     const { timezone } = useCalendar()
     const [open, setOpen] = useState(false)
-    // یادآوری فقط بعد از خواندن localStorage معنا دارد (ready) → رندر سرور و کلاینت یکسان می‌ماند
-    const { ready: remindersReady, getReminder } = useTaskReminders()
-    const reminder = remindersReady ? getReminder(task.id) : undefined
-    // آلارم هم مثل یادآوری فقط بعد از خواندن ذخیره‌ی محلی نمایش داده می‌شود
+    // آلارم فقط بعد از خواندن ذخیره‌ی محلی نمایش داده می‌شود
     const { ready: alarmsReady, getAlarm } = useTaskAlarms()
     const alarm = alarmsReady ? getAlarm(task.id) : undefined
     const uid = useId()
@@ -92,18 +85,6 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind, onAlarm, 
 
     // کارِ انجام‌شده‌ی بدون دلیل، محتوای بازشدنی ندارد → سربرگ فقط نمایشی است
     const canExpand = !done || Boolean(task.reason)
-
-    // نشان یادآوری کنار عنوان — با زمانِ زمان‌بندی‌شده (فقط پس از خواندن localStorage)
-    const reminderBadge = reminder ? (
-        <span
-            className={`${reminderStyles.badge} ${
-                reminder.firedAt !== null ? reminderStyles.badgePast : ""
-            }`}
-            title="یادآوری برای این تسک تنظیم شده است"
-        >
-            🔔 {formatReminderTime(reminder.dueAt, timezone)}
-        </span>
-    ) : null
 
     // نشان آلارم کنار عنوان — آلارم واقعی (صدای بلند + صفحه‌ی تمام‌عرض)
     const alarmBadge = alarm ? (
@@ -151,7 +132,6 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind, onAlarm, 
                         aria-controls={panelId}
                     >
                         <span className={styles.text}>{task.title}</span>
-                        {reminderBadge}
                         {alarmBadge}
                         {done && <span className={styles.doneTag}>✓ انجام شد</span>}
                         <span
@@ -164,7 +144,6 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind, onAlarm, 
                 ) : (
                     <div className={styles.cardStatic}>
                         <span className={styles.text}>{task.title}</span>
-                        {reminderBadge}
                         {alarmBadge}
                         {done && <span className={styles.doneTag}>✓ انجام شد</span>}
                     </div>
@@ -257,13 +236,6 @@ function TaskCard({ task, onComplete, onDelete, onReanalyze, onRemind, onAlarm, 
                                         <Pencil size={15} aria-hidden="true" /> ویرایش
                                     </button>
                                 )}
-                                <button
-                                    className={`${styles.btnGhost} ${reminderStyles.iconBtn}`}
-                                    onClick={() => onRemind?.(task)}
-                                    title="تنظیم زمان یادآوری با زنگ هشدار"
-                                >
-                                    <AlarmClock size={15} aria-hidden="true" /> تنظیم زمان
-                                </button>
                                 <button
                                     className={`${styles.btnGhost} ${reminderStyles.iconBtn}`}
                                     onClick={() => onAlarm?.(task)}

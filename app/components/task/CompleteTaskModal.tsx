@@ -4,7 +4,6 @@ import { useEffect, useState } from "react"
 import { fmtMinutes, parseSpentMinutes } from "@/app/lib/time"
 import { toast } from "react-toastify"
 import { useSettings } from "@/app/contexts/SettingsContext"
-import { useTaskReminders } from "@/app/hooks/useTaskReminder"
 import { api } from "@/app/lib/api/client"
 import AnimatedModal from "../motion/AnimatedModal" // مودال با انیمیشن فر머-موشن
 import { type TaskItem } from "./taskTypes"
@@ -24,7 +23,6 @@ export default function CompleteTaskModal({ task, onClose, onCompleted }: Props)
     const [loading, setLoading] = useState(false)
     const [result, setResult] = useState<Result | null>(null)
     const { playBeep } = useSettings()
-    const { removeTaskReminder } = useTaskReminders()
 
     useEffect(() => {
         if (task) {
@@ -75,8 +73,6 @@ export default function CompleteTaskModal({ task, onClose, onCompleted }: Props)
             const overspent = body.result?.overspentMinutes ?? 0
 
             setResult({ saved, overspent, spent: value })
-            // کار انجام‌شده ⇒ یادآورش بی‌معنی است؛ اعلان نیتیو هم لغو می‌شود.
-            void removeTaskReminder(task.id)
             playBeep()
         } catch (e) {
             toast.error(e instanceof Error ? e.message : "خطا در ثبت اتمام")

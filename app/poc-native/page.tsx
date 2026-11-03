@@ -86,7 +86,6 @@ const LOG_COLOR: Record<LogLevel, string> = {
 
 /** برچسب خوانای نوع یادآور در گزارش تشخیصی. */
 const KIND_LABEL: Record<ReminderKind, string> = {
-    TASK: "تسک",
     DAILY: "روزانه",
     ALARM: "آلارم",
     UNKNOWN: "نامعلوم",
@@ -571,7 +570,7 @@ export default function NativePocPage() {
                 return
             }
 
-            await recordDeliverySnapshot(pluginRes.plugin, latestScheduled.id, "TASK", "روزساز — یادآور آزمایشی")
+            await recordDeliverySnapshot(pluginRes.plugin, latestScheduled.id, "UNKNOWN", "روزساز — یادآور آزمایشی")
 
             logLine("info", `دستور وضعیت تحویل ثبت شد — خواندن گزارش تشخیصی.`)
 

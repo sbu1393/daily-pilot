@@ -18,15 +18,15 @@ import type { LocalNotificationsPlugin } from "@capacitor/local-notifications"
  * آخرین زمان‌بندیِ موفق چه بوده و آیا لغوی بعدش آمده یا نه.
  *
  * قواعد:
- * - هیچ import ای از `daily-reminder`/`task-reminder`/Context/UI ندارد (نه وابستگی
- *   حلقوی، نه دستکاری رفتار). نوع یادآور از **خودِ عنوانی که به نیتیو داده
+ * - هیچ import ای از `daily-reminder`/Context/UI ندارد (نه وابستگی
+ *   حلقوی، نه دستکاری رفتار). نوع اعلان از **خودِ عنوانی که به نیتیو داده
  *   می‌شود** استنتاج می‌شود و همین عنوان خام هم در گزارش می‌ماند.
  * - دسترسی به `localStorage` همیشه در `try/catch` و فقط سمت کلاینت است.
  * - نوشتن هرگز throw نمی‌کند (هم‌خانواده‌ی بقیه‌ی لایه‌ی نیتیو).
  */
 
-/** نوع یادآور — `UNKNOWN` یعنی عنوان با هیچ‌کدام از مسیرها جور نیست. */
-export type ReminderKind = "TASK" | "DAILY" | "ALARM" | "UNKNOWN"
+/** نوع اعلان — `UNKNOWN` یعنی عنوان با هیچ‌کدام از مسیرها جور نیست. */
+export type ReminderKind = "DAILY" | "ALARM" | "UNKNOWN"
 
 /** چه چیزی ثبت شده — رویدادها عمداً ریز هستند تا ترتیب وقایع قابل بازسازی باشد. */
 export type NativeDiagnosticEvent =
@@ -136,9 +136,6 @@ export const MAX_NATIVE_DIAGNOSTIC_ENTRIES = 100
 /** کلید ذخیره‌ی محلی — جدا از کلیدهای یادآور، فقط شواهد. */
 export const NATIVE_DIAGNOSTICS_STORAGE_KEY = "dp:native-diagnostics"
 
-/** پیشوند عنوان یادآور تسک — از `scheduleTaskReminder` می‌آید. */
-const TASK_TITLE_PREFIX = "🔔"
-
 /** عنوان ثابت یادآور روزانه — از `scheduleDailyReminder` می‌آید. */
 const DAILY_TITLE = "یادآور روزساز"
 
@@ -148,15 +145,14 @@ let loaded = false
 const listeners = new Set<(entries: NativeDiagnosticEntry[]) => void>()
 
 /**
- * استنتاج نوع یادآور از عنوانی که به نیتیو داده می‌شود.
+ * استنتاج نوع اعلان از عنوانی که به نیتیو داده می‌شود.
  *
  * چرا از شناسه استنتاج نمی‌کنیم؟ چون شناسه یک hash است و معکوس‌کردنش یعنی
- * وابستگی به هر دو wrapper. عنوان اما در همان لحظه ساخته شده و قطعی است:
- * یادآور تسک همیشه با `🔔 ` و یادآور روزانه همیشه با عنوان ثابت می‌آید.
+ * وابستگی به wrapperها. عنوان اما در همان لحظه ساخته شده و قطعی است:
+ * یادآور روزانه همیشه با عنوان ثابت می‌آید.
  */
 export function classifyReminderKind(title: string | undefined): ReminderKind {
     if (typeof title !== "string") return "UNKNOWN"
-    if (title.startsWith(TASK_TITLE_PREFIX)) return "TASK"
     if (title === DAILY_TITLE) return "DAILY"
     return "UNKNOWN"
 }

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { useCalendar } from "@/app/contexts/CalenderContext"
-import { useTaskReminders } from "@/app/hooks/useTaskReminder"
 import { useTaskAlarms } from "@/app/hooks/useTaskAlarm"
 import { useDaySummary, type DaySummary } from "../../hooks/useDaySummary"
 import { getCanonicalToday, shiftCanonicalKey } from "../../lib/canonicalDay"
@@ -30,9 +29,7 @@ import RolloverDialog from "./RolloverDialog"
 import styles from "./task.module.css"
 import ReanalyzeModal from "./ReanalyzeModal"
 import EditTaskModal from "./EditTaskModal"
-// «تنظیم زمان» — مودال یادآوری (additive؛ هیچ جریان موجودی را تغییر نمی‌دهد)
-import ReminderModal from "./ReminderModal"
-// آلارم واقعی تسک (Feature B) — مودال جدا و مستقل از یادآور
+// آلارم واقعی تسک (Feature B)
 import TaskAlarmModal from "./TaskAlarmModal"
 import SuggestionModal from "./SuggestionModal"
 import AdvisorCard from "./AdvisorCard"
@@ -49,7 +46,6 @@ const priorityWeight: Record<TaskPriority, number> = { HIGH: 3, MEDIUM: 2, LOW: 
 export default function DailyTaskList() {
     const { selectedDate, timezone } = useCalendar()
     const { summary, refresh: refreshSummary } = useDaySummary()
-    const { removeTaskReminder } = useTaskReminders()
     const { removeAlarm } = useTaskAlarms()
 
     // Phase 2 — روزِ کانونیکالِ امروز: کارت مشاور و «چیدمان هوشمند» فقط برای همین روز معنا دارند
@@ -90,9 +86,7 @@ export default function DailyTaskList() {
     const [reanalyzeTask, setReanalyzeTask] = useState<TaskItem | null>(null)
     // ویرایش کار: تنها state نمایشی مودال (خود مودال روی PATCH می‌زند)
     const [editTask, setEditTask] = useState<TaskItem | null>(null)
-    // «تنظیم زمان»: تنها یک state نمایشی برای مودال یادآوری
-    const [remindTask, setRemindTask] = useState<TaskItem | null>(null)
-    // آلارم واقعی تسک: state نمایشی مستقل (Feature B)
+    // آلارم واقعی تسک: state نمایشی (Feature B)
     const [alarmTask, setAlarmTask] = useState<TaskItem | null>(null)
 
     // استیت‌های مربوط به هوش مصنوعی
@@ -259,9 +253,7 @@ export default function DailyTaskList() {
         setBusy(true)
         try {
             await api(`/api/tasks/${deleteTask.id}`, { method: "DELETE" })
-            // کار حذف شد ⇒ یادآورش هم باید برود (و اعلان نیتیو لغو شود).
-            void removeTaskReminder(deleteTask.id)
-            // … و آلارم نیتیوش هم (وگرنه برای کاری که وجود ندارد زنگ می‌زند).
+            // کار حذف شد ⇒ آلارم نیتیوش هم باید برود (وگرنه برای کاری که وجود ندارد زنگ می‌زند).
             void removeAlarm(deleteTask.id)
             setDeleteTask(null)
             await afterMutation("کار حذف شد؛ زمانش به استخر روز برگشت 🕊")
@@ -431,7 +423,6 @@ export default function DailyTaskList() {
                                 onComplete={setCompleteTask}
                                 onDelete={setDeleteTask}
                                 onReanalyze={setReanalyzeTask}
-                                onRemind={setRemindTask}
                                 onAlarm={setAlarmTask}
                                 onEdit={setEditTask}
                             />
@@ -552,14 +543,7 @@ export default function DailyTaskList() {
                 onClose={() => setEditTask(null)}
                 onSaved={() => afterMutation()}
             />
-            {/* مودال «تنظیم زمان» — کارِ یادآوری کاملاً محلی است و هیچ درخواستی به سرور نمی‌زند */}
-            <ReminderModal
-                task={remindTask}
-                open={remindTask !== null}
-                onClose={() => setRemindTask(null)}
-            />
-
-            {/* Feature B — آلارم واقعی تسک (مستقل از یادآور) */}
+            {/* Feature B — آلارم واقعی تسک */}
             <TaskAlarmModal
                 task={alarmTask}
                 open={alarmTask !== null}

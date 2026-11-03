@@ -4,17 +4,17 @@ import { scopeToken } from "./reminder"
 /**
  * آلارم تسک — منطق خالص (بدون React و بدون DOM).
  *
- * ── چرا این ماژول جدا از `taskReminder.ts` است؟ ──────────────────────
+ * ── چرا این ماژول مستقل از یادآور روزانه است؟ ───────────────────────
  * این دو قابلیتِ متفاوت‌اند و باید مستقل بمانند:
  *
- *   یادآور (Feature A) → اعلان در نوار اعلان، از سوی پلاگین
- *                        `@capacitor/local-notifications`.
- *   آلارم  (Feature B) → صدای واقعی + صفحه‌ی تمام‌عرض با «توقف/تعویق»، از سوی
- *                        پلاگین محلی خودِ اپ (`TaskAlarm`).
+ *   یادآور روزانه (تنظیمات) → اعلان در نوار اعلان، از سوی پلاگین
+ *                             `@capacitor/local-notifications`.
+ *   آلارم تسک               → صدای واقعی + صفحه‌ی تمام‌عرض با «توقف/تعویق»،
+ *                             از سوی پلاگین محلی خودِ اپ (`TaskAlarm`).
  *
  * حذف یکی نباید دیگری را بشکند و شکست یکی نباید در گزارش دیگری گم شود. تنها
- * اشتراکشان دو تابع نمایشیِ خالص (`formatReminderTime`/`formatReminderRelative`)
- * است که ریاضیات زمانِ جلالی در آن‌ها دوباره اختراع نشود.
+ * اشتراکشان توابع نمایشیِ خالص در `taskTime.ts` است تا ریاضیات زمانِ جلالی
+ * دوباره اختراع نشود.
  *
  * ── منبع حقیقت ──────────────────────────────────────────────────────
  * این ماژول فقط «آینه‌ی UI» است. حقیقتِ زمان‌بندی در SharedPreferences خودِ
@@ -32,7 +32,7 @@ export type TaskAlarm = {
     createdAt: number
 }
 
-/** کلید localStorage — user-scoped، مثل یادآورها (روی دستگاه مشترک نشتی نمی‌کند). */
+/** کلید localStorage — user-scoped، مثل تنظیمات یادآور روزانه (روی دستگاه مشترک نشتی نمی‌کند). */
 const ALARMS_PREFIX = "dp:task-alarms"
 
 export function taskAlarmsStorageKey(userId: number | null): string {
@@ -45,7 +45,7 @@ export function taskAlarmsStorageKey(userId: number | null): string {
  * فقط به `taskId` وابسته است: تغییر زمان ⇒ همان شناسه ⇒ همان `PendingIntent`
  * و همان اعلان **جایگزین** می‌شود؛ حذف ⇒ همان شناسه لغو می‌شود؛ باز شدن دوباره‌ی
  * اپ ⇒ همان شناسه بازیابی می‌شود. فضای کلید (`task-alarm:`) از فضای کلیدِ
- * یادآورها (`task-reminder:`) جداست.
+ * یادآور روزانه (`daily-reminder:`) جداست.
  */
 export function taskAlarmId(taskId: number): number {
     return stableNotificationId(`task-alarm:${taskId}`)

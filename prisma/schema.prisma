@@ -144,6 +144,7 @@ model User {
   // DB تنها منبع حقیقت است؛ JWT می‌تواند آن را حمل کند ولی مرجع نیست.
   mustChangePassword Boolean @default(false)
   pushSubscriptions PushSubscription[] // یادآورها — اشتراک‌های Web Push این کاربر
+  sentNotifications SentNotification[] // اعلان‌های زمان‌بندی‌شده — لاگ ضدتکرار روزانه
   aiQuotaBuckets   AiQuotaBucket[] // AI Quota v2 — ledger مصرف BASE/PROMO (بدون تغییر رفتار)
   promoRedemptions PromoRedemption[] // AI Quota v2 — ریدیمپشن‌های کد هدیه (هر کد یک‌بار)
   passwordResetTokens PasswordResetToken[] // رمز عبور موقت — lifecycle جدا از User.password
@@ -509,6 +510,22 @@ model PushSubscription {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// اعلان‌های زمان‌بندی‌شده — لاگ ضدتکرار (idempotency)
+// هر ردیف = یک اعلانِ {userId, type, dayKey}. کلید یکتای ترکیبی تضمین می‌کند
+// حتی اگر cron دو بار در یک روز اجرا شود، برای هر کاربر/نوع فقط یک ارسال انجام شود.
+// `dayKey` کلید روز محلی کاربر است (نه UTC) تا مرز روز با timezone خودش هم‌خوان باشد.
+model SentNotification {
+  id        String   @id @default(cuid())
+  userId    Int
+  type      String // morning | night | overdue
+  dayKey    String // YYYY-MM-DD به وقت محلی کاربر
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type, dayKey])
+  @@index([userId, createdAt])
 }
 
 // فاز ۵ — Entitlement: source of truth «دوره‌ی دسترسی فعلی پرداخت‌شده» (سند §2/§3.5)

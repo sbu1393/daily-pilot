@@ -84,10 +84,10 @@ export function hasNotificationPermission(): boolean {
 /**
  * درخواست مجوز اعلان به نکوی پلتفرمی.
  * - پلتفرم نیتیو (Capacitor APK):  `LocalNotifications.checkPermissions()`
- *   و `LocalNotifications.requestPermissions()` صدا زده می‌شود؛gesture نمی‑لزم.
- * - مرورگر / PWA:  وضعیت `Notification.permission` برمی‌گرداند.
- *   تماس مستقیم با `Notification.requestPermission()` خارج از این تابع
- *   باقی می‑ماند (پrompt روی کلیک/button نشان داده شود).
+ *   و `LocalNotifications.requestPermissions()` صدا زده می‌شود؛ gesture لازم نیست.
+ * - مرورگر / PWA:  فقط وضعیت `Notification.permission` را می‌خواند.
+ *   درخواست واقعیِ مجوز باید از یک تعامل کاربر بیاید و در
+ *   `ensurePushSubscription({ requestPermission: true })` انجام می‌شود.
  */
 export async function requestNotificationPermission(): Promise<{
     ok: boolean
@@ -113,7 +113,12 @@ export async function requestNotificationPermission(): Promise<{
     }
 
     // ──web────────────────────────────────────────────────────────────────
-    const perm = Notification.permission
+    const notification = environment()?.notification
+    if (!notification) {
+        return { ok: false, reason: "UNSUPPORTED", platform: "web" }
+    }
+
+    const perm = notification.permission
     if (perm === "granted") {
         return { ok: true, platform: "web", permission: "granted" }
     }
@@ -127,9 +132,10 @@ export async function requestNotificationPermission(): Promise<{
 /**
  * encompass وجود اشتراک Push برای این دستگاه (idempotent).
  * - `requestPermission: true` فقط در پاسخ به یک تعامل کاربر (کلیک) استفاده شود；
- *   مرورگرها درخواست مجوز بدون gesture را رد/بی‌صدا می‌اند .
+ *   در آن حالت اگر مجوز وب هنوز `default` باشد، همان‌جا
+ *   `Notification.requestPermission()` صدا زده می‌شود (پیش از subscribe).
  * - روی پی‌اچ‌وی/android (Capacitor) مجوز از طریق `requestNotificationPermission()`
- *   programma‑matic درخواست می‌شود ؛ روی وب هم فقط بازبینی می‌شود .
+ *   programmatic درخواست می‌شود؛ روی وب بدون کلیک فقط بازبینی می‌شود.
  * - اگر Already granted ، Subscription کاملاً بدون prompt recreated می‌شود .
  */
 export async function ensurePushSubscription(
@@ -144,16 +150,22 @@ export async function ensurePushSubscription(
     const permStatus = await requestNotificationPermission()
 
     if (!permStatus.ok) {
-        // User has denied or permission not granted yet
-        if (permStatus.reason === "PERMISSION_DENIED") {
+        // Explicit denial (or native denial) — a prompt cannot help.
+        if (permStatus.reason === "PERMISSION_DENIED" || permStatus.permission === "denied") {
             return { ok: false, reason: "PERMISSION_DENIED" }
         }
-        if (permStatus.permission === "denied") {
-            return { ok: false, reason: "PERMISSION_DENIED" }
+
+        // Web, permission still "default": prompt only from an explicit user
+        // gesture. Without it, report the current state and let the UI decide.
+        if (permStatus.platform === "web" && permStatus.permission === "default") {
+            if (!options.requestPermission) {
+                return { ok: false, reason: "PERMISSION_DENIED" }
+            }
+            const granted = await promptPermission()
+            if (!granted) return { ok: false, reason: "PERMISSION_DENIED" }
+        } else {
+            return { ok: false, reason: permStatus.reason ?? "PERMISSION_DENIED" }
         }
-        // default or prompt-not-yet-granted → caller (UI) will show soft‑prompt
-        // pending; don't auto-prompt here.
-        return { ok: false, reason: "PERMISSION_DENIED" }
     }
 
     // permission granted — now proceed with registration

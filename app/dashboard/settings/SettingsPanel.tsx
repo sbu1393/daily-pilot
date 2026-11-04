@@ -18,7 +18,6 @@ import {
     ensurePushSubscription,
     hasNotificationPermission,
     removePushSubscription,
-    sendTestNotification,
     syncReminderSchedule,
     type PushFailureReason,
 } from "@/app/lib/pushSubscription"
@@ -138,8 +137,7 @@ export default function SettingsPanel({ user }: { user: UserData }) {
             ? jalaliDaysInMonth(birthJalali.jy, birthJalali.jm)
             : 31
     const reminder = parseReminderTime(settings.reminderTime)
-    // Web Push — وضعیت دکمه‌ی «تست اعلان» + گارد هم‌گام‌سازی یک‌باره
-    const [pushBusy, setPushBusy] = useState(false)
+    // گارد هم‌گام‌سازی یک‌بارهٔ اشتراک Push
     const pushSyncedRef = useRef(false)
     // بخش تغییر رمز عبور
     const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" })
@@ -314,29 +312,6 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                 ? "یادآور فعال شد؛ حتی وقتی برنامه بسته است هم برایت اعلان می‌فرستیم"
                 : PUSH_REASON_LABEL[result.reason],
         )
-    }
-
-    /* ارسال اعلان آزمایشی — تنها راه تأیید اینکه Push در حالت بسته هم می‌رسد */
-    const onSendTestPush = async () => {
-        setPushBusy(true)
-        try {
-            const result = await sendTestNotification()
-            if (!result.ok) {
-                toast.error(PUSH_REASON_LABEL[result.reason])
-                return
-            }
-            if (result.sent > 0) {
-                toast.success(`اعلان آزمایشی برای ${faDigits(result.sent)} دستگاه ارسال شد`)
-                return
-            }
-            if (result.failed > 0) {
-                toast.error("ارسال اعلان ناموفق بود؛ چند دقیقه بعد دوباره تلاش کن")
-                return
-            }
-            toast.info("این دستگاه اشتراک فعال ندارد؛ یادآور را خاموش و دوباره روشن کن")
-        } finally {
-            setPushBusy(false)
-        }
     }
 
     const changePassword = async (e: React.FormEvent) => {
@@ -670,14 +645,6 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                                             <option value="pm">شب</option>
                                         </select>
                                     </div>
-                                    <button
-                                        type="button"
-                                        className="dp-btn dp-btn-ghost"
-                                        disabled={pushBusy}
-                                        onClick={onSendTestPush}
-                                    >
-                                        {pushBusy ? "در حال ارسال..." : "🔔 ارسال اعلان آزمایشی"}
-                                    </button>
                                 </div>
                             )}
                         </div>

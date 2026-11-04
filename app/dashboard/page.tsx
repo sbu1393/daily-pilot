@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {toast} from "react-toastify" 
 
+import { NotificationBanner } from "@/app/components/NotificationBanner"
 import JalaliCalendar from "@/app/components/calender/jalili"
 import DayHeader from "./DayHeader"
 import DayStatsBar from "./DayStarBar"
@@ -47,6 +48,7 @@ export default function Dashboard() {
 
     return (
         <div className="container">
+            <NotificationBanner />
             <JalaliCalendar />
 
             <DayHeader onEdit={() => setModal({ open: true, isEdit: true })} />

@@ -1,20 +1,30 @@
 "use client"
 
 /*
- * یادآورها — لایه‌ی کلاینت ثبت اشتراک Web Push
+ * یادآора — لایه‌ی کلاینت ثبت اشتراک Web Push
  * ---------------------------------------------------------------
- * مسئولیت: تبدیل کلید عمومی VAPID، گرفتن مجوز اعلان، ثبت در
+ * مسئولیت: تبدیل کلید pública VAPID، گرفتن مجوز اعلان، ثبت در
  * `registration.pushManager.subscribe` و هم‌گام‌سازی اشتراک با سرور.
  *
  * همه‌ی توابع این ماژول «شکست‌ناپذیر» هستند: خروجی ساختاریافته با دلیل
- * (`reason`) برمی‌گردانند و هرگز throw نمی‌کنند — چون یادآور داخلی (تایمر
+ * (`reason`) برمی‌گردانند و هرگز throw نمی‌کند — چون یادآور داخلی (تایمر
  * صفحه) باید در هر شرایطی کار کند، حتی اگر Push در دسترس نباشد.
  *
  * نکته‌ی امنیتی: کلید خصوصی VAPID هرگز سمت کلاینت نمی‌آید؛ فقط
  * NEXT_PUBLIC_VAPID_PUBLIC_KEY خوانده می‌شود.
+ *-------------------------------------------------------------------
+ * distinct permission-flow for two platforms:
+ *   • Capacitor (APK):  programmatic permission via LocalNotifications
+ *     — no user gesture required; initial mount is fine.
+ *   • Web / PWA:       soft‑prompt banner; request only on explicit click.
  */
 
 import { ApiClientError, api } from "@/app/lib/api/client"
+import { isNativeLocalNotificationPlatform } from "@/app/lib/native/local-notifications"
+import {
+    requestLocalNotificationPermission,
+    LocalNotificationPermissionOutcome,
+} from "@/app/lib/native/local-notifications"
 
 export type PushFailureReason =
     | "UNSUPPORTED" // مرورگر/PWA از Push پشتیبانی نمی‌کند
@@ -72,57 +82,89 @@ export function hasNotificationPermission(): boolean {
 }
 
 /**
- * Base64URL → Uint8Array (ورودی `applicationServerKey`).
- * padding و کاراکترهای `-`/`_` مطابق استاندارد Base64URL نرمال می‌شوند.
+ * درخواست مجوز اعلان به نکوی پلتفرمی.
+ * - پلتفرم نیتیو (Capacitor APK):  `LocalNotifications.checkPermissions()`
+ *   و `LocalNotifications.requestPermissions()` صدا زده می‌شود؛gesture نمی‑لزم.
+ * - مرورگر / PWA:  وضعیت `Notification.permission` برمی‌گرداند.
+ *   تماس مستقیم با `Notification.requestPermission()` خارج از این تابع
+ *   باقی می‑ماند (پrompt روی کلیک/button نشان داده شود).
  */
-export function urlBase64ToUint8Array(base64String: string): Uint8Array {
-    const padding = "=".repeat((4 - (base64String.length % 4)) % 4)
-    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/")
-    const raw = atob(base64)
-    const output = new Uint8Array(raw.length)
+export async function requestNotificationPermission(): Promise<{
+    ok: boolean
+    reason?: PushFailureReason
+    platform: "native" | "web"
+    permission?: "granted" | "denied" | "default"
+}> {
+    const native = isNativeLocalNotificationPlatform()
 
-    for (let i = 0; i < raw.length; i += 1) {
-        output[i] = raw.charCodeAt(i)
+    if (native) {
+        // ──native──────────────────────────────────────────────────────────
+        const outcome = await requestLocalNotificationPermission()
+        if (outcome.ok) {
+            return { ok: true, platform: "native", permission: "granted" }
+        }
+        const reason =
+            outcome.reason === "PERMISSION_DENIED"
+                ? "PERMISSION_DENIED"
+                : outcome.reason === "PERMISSION_PROMPT"
+                ? "PERMISSION_DENIED"
+                : "UNSUPPORTED"
+        return { ok: false, reason, platform: "native", permission: "denied" }
     }
 
-    return output
+    // ──web────────────────────────────────────────────────────────────────
+    const perm = Notification.permission
+    if (perm === "granted") {
+        return { ok: true, platform: "web", permission: "granted" }
+    }
+    if (perm === "denied") {
+        return { ok: false, reason: "PERMISSION_DENIED", platform: "web", permission: "denied" }
+    }
+    // default (not yet requested)
+    return { ok: false, reason: undefined, platform: "web", permission: "default" }
 }
 
 /**
- * `applicationServerKey` در lib.dom از نوع BufferSource است، ولی Uint8Array ساخته‌شده
- * از atob با ArrayBufferLike تعریف می‌شود (TS ≥5.7) — این cast فقط همان مرز نوع است.
+ * encompass وجود اشتراک Push برای این دستگاه (idempotent).
+ * - `requestPermission: true` فقط در پاسخ به یک تعامل کاربر (کلیک) استفاده شود；
+ *   مرورگرها درخواست مجوز بدون gesture را رد/بی‌صدا می‌اند .
+ * - روی پی‌اچ‌وی/android (Capacitor) مجوز از طریق `requestNotificationPermission()`
+ *   programma‑matic درخواست می‌شود ؛ روی وب هم فقط بازبینی می‌شود .
+ * - اگر Already granted ، Subscription کاملاً بدون prompt recreated می‌شود .
  */
-function toApplicationServerKey(base64: string): BufferSource {
-    return urlBase64ToUint8Array(base64) as unknown as BufferSource
-}
+export async function ensurePushSubscription(
+    options: { requestPermission?: boolean } = {},
+): Promise<PushSubscribeOutcome> {
+    if (!isPushSupported()) return { ok: false, reason: "UNSUPPORTED" }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
-    return new Promise((resolve) => {
-        const timer = setTimeout(() => resolve(null), ms)
-        promise.then(
-            (value) => {
-                clearTimeout(timer)
-                resolve(value)
-            },
-            () => {
-                clearTimeout(timer)
-                resolve(null)
-            },
-        )
-    })
-}
+    const publicKey = getVapidPublicKey()
+    if (!publicKey) return { ok: false, reason: "NOT_CONFIGURED" }
 
-async function getReadyRegistration(): Promise<ServiceWorkerRegistration | null> {
-    const serviceWorker = environment()?.serviceWorker
-    if (!serviceWorker) return null
+    // ── platform‑aware permission check ──
+    const permStatus = await requestNotificationPermission()
 
-    try {
-        const existing = await serviceWorker.getRegistration()
-        if (existing) return existing
-        return await withTimeout(serviceWorker.ready, SW_READY_TIMEOUT_MS)
-    } catch {
-        return null
+    if (!permStatus.ok) {
+        // User has denied or permission not granted yet
+        if (permStatus.reason === "PERMISSION_DENIED") {
+            return { ok: false, reason: "PERMISSION_DENIED" }
+        }
+        if (permStatus.permission === "denied") {
+            return { ok: false, reason: "PERMISSION_DENIED" }
+        }
+        // default or prompt-not-yet-granted → caller (UI) will show soft‑prompt
+        // pending; don't auto-prompt here.
+        return { ok: false, reason: "PERMISSION_DENIED" }
     }
+
+    // permission granted — now proceed with registration
+    if (!isPushSupported()) return { ok: false, reason: "UNSUPPORTED" }
+
+    const registration = await getReadyRegistration()
+    if (!registration) return { ok: false, reason: "NO_REGISTRATION" }
+
+    const existing = await registration.pushManager.getSubscription().catch(() => null)
+
+    return registerWithServer(registration, publicKey, existing)
 }
 
 /** فقط وقتی صدا زده می‌شود که کاربر با کلیک/تعامل، اجازه‌ی درخواست داده باشد. */
@@ -152,31 +194,6 @@ function subscriptionPayload(subscription: PushSubscription): {
 }
 
 /** ثبت اشتراک در مرورگر + اطلاع به سرور. خطاها به `reason` نگاشت می‌شوند. */
-/**
- * آیا اشتراک موجود با کلید عمومی فعلی ساخته شده است؟
- * اگر کلید VAPID عوض شده باشد، اشتراک قدیمی دیگر قابل استفاده نیست و باید
- * لغو/تازه شود (وگرنه ارسال‌ها بی‌صدا رد می‌شوند).
- * اگر مرورگر `applicationServerKey` ندهد، محافظه‌کارانه «مطابق» فرض می‌شود.
- */
-export function subscriptionMatchesKey(
-    subscription: { options?: { applicationServerKey?: BufferSource | null } },
-    publicKey: string,
-): boolean {
-    const current = subscription.options?.applicationServerKey
-    if (!current) return true
-
-    const expected = urlBase64ToUint8Array(publicKey)
-    const actual = current instanceof Uint8Array ? current : new Uint8Array(current as ArrayBuffer)
-
-    if (actual.length !== expected.length) return false
-
-    for (let i = 0; i < expected.length; i += 1) {
-        if (actual[i] !== expected[i]) return false
-    }
-
-    return true
-}
-
 async function registerWithServer(
     registration: ServiceWorkerRegistration,
     publicKey: string,
@@ -221,34 +238,76 @@ async function registerWithServer(
     return { ok: true, alreadySubscribed: existing != null }
 }
 
-/**
- * تضمین وجود اشتراک Push برای این دستگاه (idempotent).
- * - `requestPermission: true` فقط در پاسخ به یک تعامل کاربر (کلیک) استفاده شود؛
- *   مرورگرها درخواست مجوز بدون gesture را رد/بی‌صدا می‌کنند.
- */
-export async function ensurePushSubscription(
-    options: { requestPermission?: boolean } = {},
-): Promise<PushSubscribeOutcome> {
-    if (!isPushSupported()) return { ok: false, reason: "UNSUPPORTED" }
+export function urlBase64ToUint8Array(base64String: string): Uint8Array {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4)
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/")
+    const raw = atob(base64)
+    const output = new Uint8Array(raw.length)
 
-    const publicKey = getVapidPublicKey()
-    if (!publicKey) return { ok: false, reason: "NOT_CONFIGURED" }
-
-    if (!hasNotificationPermission()) {
-        // بدون تعامل کاربر (sync خودکار) هرگز prompt نمایش نمی‌دهیم
-        if (options.requestPermission !== true) return { ok: false, reason: "PERMISSION_DENIED" }
-        if (!(await promptPermission())) return { ok: false, reason: "PERMISSION_DENIED" }
+    for (let i = 0; i < raw.length; i += 1) {
+        output[i] = raw.charCodeAt(i)
     }
 
-    const registration = await getReadyRegistration()
-    if (!registration) return { ok: false, reason: "NO_REGISTRATION" }
-
-    const existing = await registration.pushManager.getSubscription().catch(() => null)
-
-    return registerWithServer(registration, publicKey, existing)
+    return output
 }
 
-/** لغو اشتراک این دستگاه: اول سمت مرورگر، بعد اطلاع به سرور (best-effort). */
+/** `applicationServerKey` در lib.dom از نوع BufferSource است، ولی Uint8Array ساخته‌شده
+ *  از atob با ArrayBufferLike تعریف می‌شود (TS ≥5.7) — این cast فقط همان مرز نوع است.
+ */
+function toApplicationServerKey(base64: string): BufferSource {
+    return urlBase64ToUint8Array(base64) as unknown as BufferSource
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(null), ms)
+        promise.then(
+            (value) => {
+                clearTimeout(timer)
+                resolve(value)
+            },
+            () => {
+                clearTimeout(timer)
+                resolve(null)
+            },
+        )
+    })
+}
+
+async function getReadyRegistration(): Promise<ServiceWorkerRegistration | null> {
+    const serviceWorker = environment()?.serviceWorker
+    if (!serviceWorker) return null
+
+    try {
+        const existing = await serviceWorker.getRegistration()
+        if (existing) return existing
+        return await withTimeout(serviceWorker.ready, SW_READY_TIMEOUT_MS)
+    } catch {
+        return null
+    }
+}
+
+/** encompass اشتراک — کاربر جاری. */
+export function subscriptionMatchesKey(
+    subscription: { options?: { applicationServerKey?: BufferSource | null } },
+    publicKey: string,
+): boolean {
+    const current = subscription.options?.applicationServerKey
+    if (!current) return true
+
+    const expected = urlBase64ToUint8Array(publicKey)
+    const actual = current instanceof Uint8Array ? current : new Uint8Array(current as ArrayBuffer)
+
+    if (actual.length !== expected.length) return false
+
+    for (let i = 0; i < expected.length; i += 1) {
+        if (actual[i] !== expected[i]) return false
+    }
+
+    return true
+}
+
+/** لغو مشترک این دستگاه: اول سمت مرورگر، بعد اطلاع به سرور (best-effort). */
 export async function removePushSubscription(): Promise<{ ok: boolean; reason?: PushFailureReason }> {
     if (!isPushSupported()) return { ok: false, reason: "UNSUPPORTED" }
 
@@ -277,12 +336,7 @@ export async function removePushSubscription(): Promise<{ ok: boolean; reason?: 
     return { ok: true }
 }
 
-/**
- * آینه‌کردن برنامه‌ی یادآور روی سرور (`reminderEnabled` + `reminderTime`).
- * بدون این کار، تریگر زمان‌بندی‌شده‌ی سرور نمی‌داند چه ساعتی برای کاربر Push
- * بفرستد (تنظیمات UI در localStorage است). خطاها بی‌صدا نادیده گرفته می‌شوند:
- * نبودِ آینه فقط یعنی «اعلان در حالت بسته» کار نمی‌کند، نه شکست یادآور داخلی.
- */
+/** آینه‌کردم برنامه‌ی یادآور روی سرور (`reminderEnabled` + `reminderTime`). */
 export async function syncReminderSchedule(input: {
     enabled: boolean
     time: string

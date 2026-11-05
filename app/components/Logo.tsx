@@ -14,8 +14,12 @@ export default function Logo({ size = 32, className = "", pill = true }: LogoPro
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                height: pill ? size + 14 : size, // کمی فضا برای پدینگ کپسول
-                padding: pill ? "6px 14px" : "0",
+                // اندازه از CSS قابل بازتعریف است (مثلاً هدر در موبایل کوچک‌تر).
+                // fallback همان مقدار prop است تا بقیه‌ی کاربردها بدون تغییر بمانند.
+                height: pill ? `calc(var(--dp-logo-size, ${size}px) + 14px)` : `var(--dp-logo-size, ${size}px)`,
+                padding: pill
+                    ? "var(--dp-logo-pad-y, 6px) var(--dp-logo-pad-x, 14px)"
+                    : "0",
                 borderRadius: pill ? 9999 : 0,   // شکل کاملاً کپسولی (Pill)
                 // استایل متناسب با تم روشن و تاریک
                 backgroundColor: pill ? "rgba(255, 255, 255, 0.92)" : "transparent",
@@ -35,7 +39,7 @@ export default function Logo({ size = 32, className = "", pill = true }: LogoPro
                 src="/logo.webp"
                 alt="روزساز"
                 style={{
-                    height: `${size}px`,
+                    height: `var(--dp-logo-size, ${size}px)`,
                     width: "auto",
                     objectFit: "contain",
                     display: "block",

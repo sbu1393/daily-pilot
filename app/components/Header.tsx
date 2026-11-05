@@ -62,19 +62,29 @@ export default function Header({ user }: { user: AvatarUser | null }) {
     return (
         <header className="app-header">
             <div className="header-inner">
-                <Link href="/" className="dp-link-reset flex items-center">
-                    <Logo size={37} /> 
+                <Link href="/" className="dp-link-reset" aria-label="روزساز">
+                    <Logo size={37} className="header-logo" />
                 </Link>
 
                 <div className="header-actions">
-                    <Link href="/dashboard" className="dp-header-link">
-                        <span style={{margin:"3px"}}>برنامه امروز </span> <CalendarDays />
+                    <Link
+                        href="/dashboard"
+                        className="dp-header-link"
+                        aria-label="برنامه امروز"
+                    >
+                        <span className="header-link-text">برنامه امروز</span>
+                        <CalendarDays aria-hidden />
                     </Link>
 
                     {/* لینک پنل مدیریت — فقط نمایشی برای نقش ADMIN؛ امنیت واقعی server-side است. */}
                     {user?.role === "ADMIN" && (
-                        <Link href="/admin" className="dp-header-link">
-                            <span style={{margin:"3px"}}>پنل مدیریت </span> <Shield />
+                        <Link
+                            href="/admin"
+                            className="dp-header-link"
+                            aria-label="پنل مدیریت"
+                        >
+                            <span className="header-link-text">پنل مدیریت</span>
+                            <Shield aria-hidden />
                         </Link>
                     )}
 

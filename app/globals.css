@@ -314,11 +314,13 @@ samp {
 .dp-form {
   display: grid;
   gap: var(--space-5);
+  min-width: 0;
 }
 
 .dp-field {
   display: grid;
   gap: var(--space-2);
+  min-width: 0;
 }
 
 .dp-field-label {
@@ -448,15 +450,16 @@ samp {
   text-decoration: none;
   color: inherit;
   display: flex;
-  width: 4rem;
-
+  align-items: center;
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 .app-header {
   position: relative;
   z-index: 50;
   margin: 22px auto;
-  width: min(1040px, 92%);
+  width: min(1040px, calc(100% - 32px));
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -469,21 +472,29 @@ samp {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  flex-wrap: nowrap;
 }
 
 .dp-header-link {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   padding: 9px 16px;
   border-radius: var(--radius-full);
   font-size: .82rem;
   font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
   color: var(--ink-2);
   background: var(--primary-soft);
   transition: var(--transition);
@@ -492,6 +503,76 @@ samp {
 .dp-header-link:hover {
   color: var(--primary-dark);
   background: #e0e7ff;
+}
+
+/* ====== هدر در موبایل ======
+   لوگو و دکمه‌ها با هم کوچک می‌شوند تا هیچ‌کدام روی دیگری نیفتد یا به لبه نچسبد.
+   اندازه‌ی لوگو از طریق CSS variable به Logo داده می‌شود (بدون تغییر منطق کامپوننت). */
+@media (max-width: 560px) {
+  .app-header {
+    margin: 12px auto;
+    width: calc(100% - 24px);
+  }
+
+  .header-inner {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .header-actions {
+    gap: 8px;
+  }
+
+  .dp-header-link {
+    padding: 8px 12px;
+    font-size: .76rem;
+  }
+
+  .dp-header-link svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .header-logo {
+    --dp-logo-size: 30px;
+    --dp-logo-pad-x: 10px;
+    --dp-logo-pad-y: 5px;
+  }
+}
+
+@media (max-width: 380px) {
+  .app-header {
+    margin: 8px auto;
+    width: calc(100% - 16px);
+  }
+
+  .header-inner {
+    padding: 8px 10px;
+    gap: 6px;
+  }
+
+  .header-actions {
+    gap: 6px;
+  }
+
+  .dp-header-link {
+    padding: 7px 10px;
+    font-size: .72rem;
+    gap: 4px;
+  }
+
+  .header-logo {
+    --dp-logo-size: 26px;
+    --dp-logo-pad-x: 8px;
+  }
+}
+
+/* در عرض‌های خیلی کم متن دکمه‌ها پنهان می‌شود و فقط آیکون می‌ماند.
+   aria-label روی Link، نام دسترس‌پذیر را حفظ می‌کند. */
+@media (max-width: 330px) {
+  .header-link-text {
+    display: none;
+  }
 }
 
 .header-user {
@@ -718,24 +799,73 @@ samp {
    ============================================================ */
 .dp-shell {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: var(--space-6);
+  min-height: 100dvh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6) var(--space-4);
   background:
     radial-gradient(46rem 24rem at 88% -10%, rgba(139, 92, 246, .14), transparent 60%),
     radial-gradient(40rem 22rem at -8% 4%, rgba(99, 102, 241, .12), transparent 60%),
     var(--bg);
 }
 
+/* هر صفحه‌ی auth (ورود/ثبت‌نام/...) در یک ستون تمام‌عرض و دقیقاً وسط قرار می‌گیرد.
+   width:100% + margin-inline:auto از چسبیدن کارت به یک سمت (خصوصاً در RTL و
+   وقتی محتوای داخلی مثل ویجت Turnstile عرض ثابت دارد) جلوگیری می‌کند. */
+.dp-shell > * {
+  width: 100%;
+  max-width: 440px;
+  min-width: 0;
+  margin-inline: auto;
+}
+
 .dp-auth-card {
   width: 100%;
   max-width: 440px;
+  min-width: 0;
   background: var(--surface-solid);
   border: 1px solid var(--border);
   border-radius: 30px;
   padding: 40px 34px;
   box-shadow: var(--shadow-lg);
   animation: dp-pop .26s ease;
+}
+
+/* ویجت کپچا نباید با عرض ثابتش کارت را از وسط بیرون بزند.
+   کتابخانه Turnstile روی wrapper خودش inline مقدار min-width:300px می‌گذارد؛
+   در موبایل همان مقدار باعث سرریز افقی و جابه‌جایی کارت به یک سمت می‌شود. */
+.dp-auth-card .dp-field {
+  min-width: 0;
+}
+
+.dp-auth-card .dp-field > div {
+  min-width: 0 !important;
+  max-width: 100%;
+}
+
+.dp-auth-card iframe {
+  max-width: 100%;
+}
+
+@media (max-width: 480px) {
+  .dp-shell {
+    padding: 16px 12px;
+  }
+
+  .dp-auth-card {
+    padding: 32px 20px;
+    border-radius: 24px;
+  }
+}
+
+@media (max-width: 360px) {
+  .dp-auth-card {
+    padding: 28px 16px;
+    border-radius: 22px;
+  }
 }
 
 @keyframes dp-pop {

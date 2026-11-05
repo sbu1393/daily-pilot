@@ -59,8 +59,10 @@ export default function DayStartModal({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ dayKey: selectedDate, availableMinutes: minutes }),
             })
+            // فقط onSaved؛ فراخوانی onClose بعد از ذخیره، در والد وضعیت کهنه‌ی
+            // isRequired را می‌دید و توست قرمز «زمان آزاد را وارد کنید» را
+            // اشتباهاً نشان می‌داد. بستن مودال در handleSaved انجام می‌شود.
             onSaved(null)
-            onClose()
         } catch (err) {
             setError(err instanceof Error ? err.message : "خطای ناشناخته")
         } finally {

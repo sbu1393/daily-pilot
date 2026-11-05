@@ -1027,6 +1027,10 @@ samp {
 }
 
 .app-bg {
+  /* BFC مستقل: جلوگیری از margin-collapse مارژین بالای هدر با این کانتینر.
+     بدون این خط، ۲۲px بالای صفحه با پس‌زمینه‌ی ساده‌ی body پر می‌شد و یک
+     نوار روشن/سفید بالای گرادیان داشبورد دیده می‌شد. */
+  display: flow-root;
   min-height: 100vh;
   background:
     radial-gradient(circle at top left, rgba(124, 58, 237, .12), transparent 34%),

@@ -40,11 +40,13 @@ export default function Dashboard() {
 
     const handleSaved = useCallback(async () => {
         setModal({ open: false, isEdit: false })
+        // بازخورد موفقیت با پیام سبز — امروز و روزهای دیگر پیام متناسب دارند.
+        toast.success(isToday ? "زمان امروز شما ثبت شد" : "زمان این روز ثبت شد")
         await refresh(true)
         // Phase 4.4 (Step 4/Scenario E) — تغییر ظرفیت یک mutationِ برنامه است: با همان رویداد
         // سراسری موجود، proposal باز discard و پیشنهاد/چیدمان تازه می‌شود (بدون سیستم event دوم).
         window.dispatchEvent(new Event("planner:mutated"))
-    }, [refresh])
+    }, [refresh, isToday])
 
     return (
         <div className="container">

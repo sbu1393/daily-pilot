@@ -12,18 +12,19 @@ import { Coffee, HourglassCog, ShelvingUnit, Sprout, TimerReset, TriangleAlert }
 /* AdvisorCard — کارتِ مشاور روی نمای روز.                             */
 /*                                                                    */
 /* دو منبع داده، یک کارت:                                             */
-/* ۱) «کار بعدی» — از GET /api/tasks (data.advisor): با کدام کار       */
-/*    شروع کنم؟ (مشاور شروع)                                          */
-/* ۲) «وضعیت برنامه‌ی امروز» — از useDaySuggestion                     */
+/* ۱) «وضعیت برنامه‌ی امروز» — از useDaySuggestion                     */
 /*    (GET /api/planner/suggestion): متعادل / سرریز / بدون ظرفیت +     */
 /*    نشانِ کهنگی برنامه (§6.3.2) + کلید «چیدمان هوشمند».              */
+/* ۲) پیامِ پایانِ کارها — از GET /api/tasks (data.advisor).           */
+/*    کارت «کار بعدی» از این نمای روز حذف شده است، اما buildAdvisorCardView */
+/*    و دادهٔ advisor برای پیام «همه انجام شده» و تست‌های pure باقی می‌مانند. */
 /*                                                                    */
 /* - فقط نمایش + یک کنترلِ نمایشی (چیدمان هوشمند). این کامپوننت هیچ    */
 /*   mutation نمی‌نویسد؛ انتقال کارها فقط از دکمه‌ی «دیدن پیشنهاد» و با  */
 /*   تأیید صریح کاربر در SuggestionModal انجام می‌شود (ADR-006 §3).     */
 /* - advisor/suggestion نداشته باشد یا فقط-خواندنی خطا بدهد → بی‌صدا    */
 /*   حذف می‌شود؛ نمای روز هرگز نمی‌شکند.                                */
-/* - منطقِ «کار بعدی» به‌صورت buildAdvisorCardView خالص و تست‌پذیر       */
+/* - منطقِ ویومدل به‌صورت buildAdvisorCardView خالص و تست‌پذیر          */
 /*   استخراج شده — همان الگوی SettingsContext (محیط node بدون DOM).     */
 /* ------------------------------------------------------------------ */
 
@@ -167,35 +168,7 @@ export default function AdvisorCard({
             role="group"
             aria-label="مشاور برنامه‌ی روز"
         >
-            {/* ۱) مشاور شروع — کارِ بعدی (برجسته) */}
-            {view.kind === "ready" && (
-                <div className={styles.nextBox}>
-                    <span className={styles.nextLabel}>کار بعدی</span>
-                    <div className={styles.nextRow}>
-                        <span className={styles.emoji} aria-hidden="true">
-                            {view.next.emoji}
-                        </span>
-                        <span className={styles.nextTitle}>{view.next.title}</span>
-                        <span className={styles.est} dir="rtl">
-                            ≈ {fmtMinutes(view.next.estimatedMinutes)}
-                        </span>
-                    </div>
-                    <div className={styles.nextMeta}>
-                        <span className={styles.reason}>{view.next.reason}</span>
-                        {/* نسبت فوکوس/استراحت با نشانِ aria برای صفحه‌خوان‌ها */}
-                        <span
-                            className={styles.paceChip}
-                            aria-label={`پیشنهاد زمان‌بندی: ${fmtMinutes(
-                                view.next.focusMinutes,
-                            )} تمرکز و سپس ${fmtMinutes(view.next.pauseAfterMinutes)} استراحت`}
-                        >
-                            🎯 {view.focusNote}
-                        </span>
-                    </div>
-                </div>
-            )}
-
-            {/* ۲) وضعیت برنامه‌ی امروز */}
+            {/* وضعیت برنامه‌ی امروز */}
             {status === "empty" ? (
                 <p className={styles.status} role="status">
                     <Sprout /> امروز هنوز کاری ثبت نشده — اولین کارت را بساز تا با هم برنامه‌ی متعادلی برای

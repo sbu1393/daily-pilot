@@ -1,7 +1,9 @@
 "use client"
 
 import Link from "next/link"
+import { useId, useRef, useState } from "react"
 import { motion } from "framer-motion"
+import { ChevronDown } from "lucide-react"
 
 import { useAiQuota } from "@/app/hooks/useAiQuota"
 import {
@@ -25,6 +27,21 @@ import styles from "./dashboard.module.css"
  */
 export default function AiQuotaStatusBar() {
     const { status } = useAiQuota()
+    // آکاردئون سهمیه — پیش‌فرض بسته؛ state فقط نمایشی است و به داده/هوک کاری ندارد.
+    const [quotaExpanded, setQuotaExpanded] = useState(false)
+    const quotaPanelId = useId()
+    const quotaButtonId = `${quotaPanelId}-button`
+    const quotaPanelRef = useRef<HTMLDivElement>(null)
+    const quotaButtonRef = useRef<HTMLButtonElement>(null)
+
+    // فوکوسِ داخلِ پنل هنگام بستن به هدر برمی‌گردد؛ پنلِ بسته هم با visibility:hidden
+    // از tab order خارج است، پس فوکوس روی کنترلِ مخفی جا نمی‌ماند.
+    const toggleQuota = () => {
+        if (quotaExpanded && quotaPanelRef.current?.contains(document.activeElement)) {
+            quotaButtonRef.current?.focus()
+        }
+        setQuotaExpanded((v) => !v)
+    }
 
     // وضعیت نامعلوم (بارگذاری اولیه یا خطای endpoint) → چیزی نشان نمی‌دهیم.
     // بهتر است هیچ چیز نباشد تا عددِ گمراه‌کننده.
@@ -40,36 +57,67 @@ export default function AiQuotaStatusBar() {
     const anyPromo = views.some((v) => v.hasPromo)
 
     return (
-        <motion.section
-            className={styles.quotaPanel}
-            // تغییر عدد بعد از هر عملیات AI باید بی‌صدا اعلام شود، نه اینکه
-            // کاربر متوجه نشود و عدد کهنه را مبنا بگیرد.
-            role="status"
-            aria-live="polite"
-            aria-label="وضعیت سهمیهٔ هوش مصنوعی این دوره"
-        >
-            <div className={styles.quotaPanelHead}>سهمیهٔ هوش مصنوعی این دوره</div>
+        <motion.section className={styles.quotaPanel} aria-label="سهمیهٔ هوش مصنوعی این دوره">
+            <button
+                type="button"
+                id={quotaButtonId}
+                ref={quotaButtonRef}
+                className={styles.quotaPanelToggle}
+                aria-expanded={quotaExpanded}
+                aria-controls={quotaPanelId}
+                onClick={toggleQuota}
+            >
+                <span className={styles.quotaPanelHead}>سهمیهٔ هوش مصنوعی این دوره</span>
+                <ChevronDown
+                    size={16}
+                    aria-hidden="true"
+                    className={`${styles.quotaPanelChevron} ${
+                        quotaExpanded ? styles.quotaPanelChevronOpen : ""
+                    }`}
+                />
+            </button>
 
-            <ul className={styles.quotaList}>
-                {views.map((view) => (
-                    <li key={view.key} className={styles.quotaItem} data-tone={view.tone}>
-                        {/* متن کامل، مستقل از رنگ — screen reader همین را می‌خواند. */}
-                        <span className={styles.quotaText} aria-label={view.ariaLabel}>
-                            {view.text}
-                        </span>
-                    </li>
-                ))}
-            </ul>
+            <div
+                id={quotaPanelId}
+                ref={quotaPanelRef}
+                role="region"
+                aria-labelledby={quotaButtonId}
+                aria-hidden={!quotaExpanded}
+                className={`${styles.quotaPanelBody} ${
+                    quotaExpanded ? styles.quotaPanelBodyOpen : ""
+                }`}
+            >
+                <div className={styles.quotaPanelInner}>
+                    {/* تغییر عدد بعد از هر عملیات AI باید بی‌صدا اعلام شود، نه اینکه
+                        کاربر متوجه نشود و عدد کهنه را مبنا بگیرد. */}
+                    <div
+                        role="status"
+                        aria-live="polite"
+                        aria-label="وضعیت سهمیهٔ هوش مصنوعی این دوره"
+                    >
+                        <ul className={styles.quotaList}>
+                            {views.map((view) => (
+                                <li key={view.key} className={styles.quotaItem} data-tone={view.tone}>
+                                    {/* متن کامل، مستقل از رنگ — screen reader همین را می‌خواند. */}
+                                    <span className={styles.quotaText} aria-label={view.ariaLabel}>
+                                        {view.text}
+                                    </span>
+                                </li>
+                            ))}
+                        </ul>
 
-            {/* توضیح ثانویه و بدون عدد: منبعِ بخشی از سهمیه. عمداً بعد از فهرست و
-                جدا از هر عدد می‌نشیند تا با «باقی‌مانده» جمع زده نشود. */}
-            {anyPromo && <p className={styles.quotaPromo}>{QUOTA_PROMO_SOURCE_NOTE}</p>}
+                        {/* توضیح ثانویه و بدون عدد: منبعِ بخشی از سهمیه. عمداً بعد از فهرست و
+                            جدا از هر عدد می‌نشیند تا با «باقی‌مانده» جمع زده نشود. */}
+                        {anyPromo && <p className={styles.quotaPromo}>{QUOTA_PROMO_SOURCE_NOTE}</p>}
 
-            {anyExhausted && (
-                <Link href="/subscription" className={styles.quotaLink}>
-                    مشاهدهٔ اشتراک
-                </Link>
-            )}
+                        {anyExhausted && (
+                            <Link href="/subscription" className={styles.quotaLink}>
+                                مشاهدهٔ اشتراک
+                            </Link>
+                        )}
+                    </div>
+                </div>
+            </div>
         </motion.section>
     )
 }

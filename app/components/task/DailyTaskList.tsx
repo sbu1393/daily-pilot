@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import { useTaskAlarms } from "@/app/hooks/useTaskAlarm"
@@ -39,7 +39,7 @@ import PlanProposalModal from "./PlanProposalModal"
 import QuotaExceededModal from "./QuotaExceededModal"
 import { orderTasksByAdvisor } from "@/app/lib/planner/advisorOrder"
 import { type AdvisorResult } from "@/app/lib/planner/advisor"
-import { LayersPlus, Megaphone, RotateCwFadingClock, Sparkles } from "lucide-react"
+import { ChevronDown, LayersPlus, Megaphone, RotateCwFadingClock, Sparkles } from "lucide-react"
 
 const priorityWeight: Record<TaskPriority, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 }
 
@@ -95,6 +95,22 @@ export default function DailyTaskList() {
     const [quotaExceededOpen, setQuotaExceededOpen] = useState(false)
     // Phase 2 — «چیدمان هوشمند»: فقط یک کلیدِ نمایشیِ محلی (هیچ داده‌ای را تغییر نمی‌دهد)
     const [isAdvisorOrderActive, setIsAdvisorOrderActive] = useState(false)
+    // آکاردئون «وضعیت برنامه و چیدمان هوشمند» — فقط نمایش؛ پیش‌فرض بسته.
+    // state در همین والد می‌ماند تا باز/بسته کردن، انتخاب چیدمان را از بین نبرد.
+    const [advisorExpanded, setAdvisorExpanded] = useState(false)
+    const advisorPanelId = useId()
+    const advisorButtonId = `${advisorPanelId}-button`
+    const advisorPanelRef = useRef<HTMLDivElement>(null)
+    const advisorButtonRef = useRef<HTMLButtonElement>(null)
+
+    // بستنِ پنل وقتی فوکوس داخل آن است نباید فوکوس را روی کنترلِ مخفی جا بگذارد.
+    // فوکوس به خودِ هدر برمی‌گردد؛ پنل بسته هم با visibility:hidden از tab order خارج است.
+    const toggleAdvisor = () => {
+        if (advisorExpanded && advisorPanelRef.current?.contains(document.activeElement)) {
+            advisorButtonRef.current?.focus()
+        }
+        setAdvisorExpanded((v) => !v)
+    }
 
     const [queuedTasks, setQueuedTasks] = useState<QueuedTask[]>([])
 
@@ -228,6 +244,8 @@ export default function DailyTaskList() {
     // Phase 2 — کلیدِ چیدمان با تغییر روز ریست می‌شود
     useEffect(() => {
         setIsAdvisorOrderActive(false)
+        // آکاردئون هم برای هر روز از حالت بسته شروع می‌شود (رفتار پیش‌فرض).
+        setAdvisorExpanded(false)
     }, [selectedDate])
 
     // Phase 4.4 (Step 12) — تعویض روز: proposalِ روزِ قبلی باید discard شود تا هرگز در روزِ
@@ -378,19 +396,58 @@ export default function DailyTaskList() {
                 </div>
             )}
 
-            {/* Phase 2 — کارت مشاور روز: «کار بعدی» + وضعیت برنامه + کلید چیدمان هوشمند.
-                فقط نمایش/کنترلِ نمایشی است؛ هیچ جهشی از اینجا نوشته نمی‌شود. */}
-            <AdvisorCard
-                enabled={isToday}
-                suggestion={suggestion}
-                loading={suggestionLoading}
-                error={suggestionError}
-                tasks={tasks}
-                advisor={advisor}
-                isAdvisorOrderActive={isAdvisorOrderActive}
-                onToggleOrder={() => setIsAdvisorOrderActive((v) => !v)}
-                onOpenModal={() => setSuggestionOpen(true)}
-            />
+            {/* Phase 2 — کارت مشاور روز، فقط بخش «وضعیت برنامه» و کلید چیدمان.
+                «کار بعدی» حذف شده و کل این بخش زیر یک آکاردئونِ پیش‌فرض-بسته
+                قرار گرفته است. لیست تسک‌ها و دکمه‌های پایین بیرون از آن می‌مانند. */}
+            {isToday && (suggestionLoading || suggestion) && (
+                <div className={styles.advisorAccordion}>
+                    <button
+                        type="button"
+                        id={advisorButtonId}
+                        ref={advisorButtonRef}
+                        className={styles.advisorAccordionToggle}
+                        aria-expanded={advisorExpanded}
+                        aria-controls={advisorPanelId}
+                        onClick={toggleAdvisor}
+                    >
+                        <span className={styles.advisorAccordionTitle}>
+                            وضعیت برنامه و چیدمان هوشمند
+                        </span>
+                        <ChevronDown
+                            size={18}
+                            aria-hidden="true"
+                            className={`${styles.advisorAccordionChevron} ${
+                                advisorExpanded ? styles.advisorAccordionChevronOpen : ""
+                            }`}
+                        />
+                    </button>
+
+                    <div
+                        id={advisorPanelId}
+                        ref={advisorPanelRef}
+                        role="region"
+                        aria-labelledby={advisorButtonId}
+                        aria-hidden={!advisorExpanded}
+                        className={`${styles.advisorAccordionPanel} ${
+                            advisorExpanded ? styles.advisorAccordionPanelOpen : ""
+                        }`}
+                    >
+                        <div className={styles.advisorAccordionInner}>
+                            <AdvisorCard
+                                enabled={isToday}
+                                suggestion={suggestion}
+                                loading={suggestionLoading}
+                                error={suggestionError}
+                                tasks={tasks}
+                                advisor={advisor}
+                                isAdvisorOrderActive={isAdvisorOrderActive}
+                                onToggleOrder={() => setIsAdvisorOrderActive((v) => !v)}
+                                onOpenModal={() => setSuggestionOpen(true)}
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {overdue.length > 0 && (
                 <div className={styles.banner}>

@@ -7,8 +7,8 @@
 //   گزارش منبع در پاسخ استفاده می‌شود.
 // - نبودِ `CRON_SECRET` → 503 (fail-closed)، نه اجرای آزاد.
 //
-// نوع اجرا از `?type=morning|night|overdue` خوانده می‌شود. اگر query param
-// موجود نباشد (مثلاً زمانی که چند cron هم‌مسیر باشند)، از هدر
+// نوع اجرا از `?type=morning|night|overdue|inactivity` خوانده می‌شود. اگر
+// query param موجود نباشد (مثلاً زمانی که چند cron هم‌مسیر باشند)، از هدر
 // `x-vercel-cron-schedule` نگاشت می‌شود.
 //
 // این مسیر هیچ ورودی‌ای از کلاینت نمی‌پذیرد: کاربران، تسک‌ها و متن پیام‌ها
@@ -32,6 +32,7 @@ import {
     runTaskDigestCron,
     type TaskDigestKind,
 } from "@/app/lib/services/taskDigestCron.service"
+import { runInactivityReminderCron } from "@/app/lib/services/inactivityReminder.service"
 import { createObservabilityContext } from "@/src/lib/observability/context"
 import { recordError } from "@/src/lib/observability/recordError"
 
@@ -39,16 +40,24 @@ import { recordError } from "@/src/lib/observability/recordError"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
+/** نوع‌های مجاز این route؛ `inactivity` سرویس جداگانه دارد. */
+type CronKind = TaskDigestKind | "inactivity"
+
+function isCronKind(value: string | null | undefined): value is CronKind {
+    return isTaskDigestKind(value) || value === "inactivity"
+}
+
 /** نگاشت زمان‌بندی‌های vercel.json → نوع اعلان (fallback وقتی query param نیست). */
-const KIND_BY_SCHEDULE: Record<string, TaskDigestKind> = {
-    // 08:00 / 22:00 / 09:00 تهران (UTC+3:30)
+const KIND_BY_SCHEDULE: Record<string, CronKind> = {
+    // 08:00 / 22:00 / 09:00 / 10:00 تهران (UTC+3:30)
     "30 4 * * *": "morning",
-    "30 18 * * *": "night",
     "30 5 * * *": "overdue",
+    "30 6 * * *": "inactivity",
+    "30 18 * * *": "night",
     // مقادیر قبلی (UTC) — برای سازگاری در طول rollout
     "0 8 * * *": "morning",
-    "0 22 * * *": "night",
     "0 9 * * *": "overdue",
+    "0 22 * * *": "night",
 }
 
 /** مقایسه‌ی constant-time روی هش (طول ثابت) — بدون نشت زمان. */
@@ -76,9 +85,9 @@ function bearerToken(req: NextRequest): string | null {
     return token
 }
 
-function resolveKind(req: NextRequest): TaskDigestKind | null {
+function resolveKind(req: NextRequest): CronKind | null {
     const fromQuery = req.nextUrl.searchParams.get("type")
-    if (isTaskDigestKind(fromQuery)) return fromQuery
+    if (isCronKind(fromQuery)) return fromQuery
     if (fromQuery !== null) return null
 
     const schedule = req.headers.get("x-vercel-cron-schedule")?.trim()
@@ -100,13 +109,18 @@ async function handle(req: NextRequest) {
         const kind = resolveKind(req)
         if (!kind) {
             return validationErrorResponse(
-                { type: "expected one of: morning, night, overdue" },
+                { type: "expected one of: morning, night, overdue, inactivity" },
                 "نوع اعلان نامعتبر است",
                 context.requestId,
             )
         }
 
-        const summary = await runTaskDigestCron(kind, new Date())
+        // `inactivity` یک سرویس مستقل است (منطق تشخیص/cooldown آن با digest تسک‌ها
+        // متفاوت است)؛ بقیهٔ نوع‌ها همان مسیر task digest را می‌روند.
+        const summary =
+            kind === "inactivity"
+                ? await runInactivityReminderCron(new Date())
+                : await runTaskDigestCron(kind, new Date())
 
         return okResponse(
             {

@@ -11,8 +11,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PUSH_ENV } from "@/app/lib/push/config"
 import type { PushPayload } from "@/app/lib/push/adapter"
 import type { PushSendSummary } from "./push.service"
+import { inactivityCutoff } from "./inactivityPolicy"
 import {
     MAX_USERS_PER_RUN,
+    buildTaskDigestCandidateWhere,
     buildTaskDigestFilter,
     buildTaskDigestPayload,
     runTaskDigestCron,
@@ -119,6 +121,24 @@ describe("buildTaskDigestFilter", () => {
     })
 })
 
+describe("buildTaskDigestCandidateWhere", () => {
+    it("صبح/شب هیچ فیلتر فعالیتی اضافه نمی‌کنند", () => {
+        expect(buildTaskDigestCandidateWhere("morning", NOW)).toEqual({
+            pushSubscriptions: { some: {} },
+        })
+        expect(buildTaskDigestCandidateWhere("night", NOW)).toEqual({
+            pushSubscriptions: { some: {} },
+        })
+    })
+
+    it("overdue کاربران خواب‌آلود (lastSeenAt قدیمی یا null) را حذف می‌کند", () => {
+        expect(buildTaskDigestCandidateWhere("overdue", NOW)).toEqual({
+            pushSubscriptions: { some: {} },
+            lastSeenAt: { gte: inactivityCutoff(NOW) },
+        })
+    })
+})
+
 describe("runTaskDigestCron", () => {
     it("بدون پیکربندی VAPID → هیچ کوئری و ارسالی انجام نمی‌شود", async () => {
         const prisma = prismaMock([candidate()], [3])
@@ -143,6 +163,25 @@ describe("runTaskDigestCron", () => {
 
         expect(prisma.user.findMany).toHaveBeenCalledWith({
             where: { pushSubscriptions: { some: {} } },
+            take: MAX_USERS_PER_RUN,
+            select: { id: true, timezone: true },
+        })
+    })
+
+    it("overdue فقط کاربران فعال را واکشی می‌کند (خواب‌آلودها به کانال بازگشت می‌روند)", async () => {
+        const prisma = prismaMock([])
+
+        await runTaskDigestCron("overdue", NOW, {
+            prisma,
+            env: TEST_ENV,
+            send: vi.fn(async () => sent()),
+        })
+
+        expect(prisma.user.findMany).toHaveBeenCalledWith({
+            where: {
+                pushSubscriptions: { some: {} },
+                lastSeenAt: { gte: inactivityCutoff(NOW) },
+            },
             take: MAX_USERS_PER_RUN,
             select: { id: true, timezone: true },
         })

@@ -14,6 +14,9 @@
  * - idempotency: پیش از ارسال، ردیف {userId, type, dayKey} به‌صورت اتمیک در
  *   `SentNotification` claim می‌شود؛ اجرای دوباره در همان روز ارسال نمی‌کند.
  * - fail-open: خطای یک کاربر بقیه‌ی حلقه را متوقف نمی‌کند.
+ * - هماهنگی با inactivity: برای `overdue` فقط کاربران فعال (lastSeenAt داخل
+ *   آستانهٔ ۳ روزه) کاندید می‌شوند؛ کاربر خواب‌آلود به کانال بازگشت با cool-down
+ *   هفتگی سپرده می‌شود تا پیام روزانهٔ معوقه آن را بی‌اثر نکند.
  */
 
 import { getPrisma } from "@/app/lib/getPrisma"
@@ -24,6 +27,7 @@ import {
     sendPushToUser,
     type PushSendSummary,
 } from "@/app/lib/services/push.service"
+import { inactivityCutoff } from "./inactivityPolicy"
 import { faDigits } from "@/app/lib/time"
 
 export const TASK_DIGEST_URL = "/dashboard"
@@ -98,6 +102,25 @@ export function buildTaskDigestFilter(
     }
 
     return { userId, status: { not: "DONE" }, dayKey: todayKey }
+}
+
+/**
+ * فیلتر کاندیدهای هر نوع اعلان.
+ * فقط `overdue` محدود می‌شود؛ morning/night و کاربران فعال بدون تغییر می‌مانند.
+ * `lastSeenAt: { gte: cutoff }` هم کاربر null (هرگز فعالیت ثبت‌نشده) و هم
+ * کاربر قدیمی‌تر از آستانه را حذف می‌کند — همان‌ها در سرویس بازگشت واجد شرایط‌اند.
+ */
+export function buildTaskDigestCandidateWhere(
+    kind: TaskDigestKind,
+    now: Date,
+): Record<string, unknown> {
+    const base = { pushSubscriptions: { some: {} } }
+    if (kind !== "overdue") return base
+
+    return {
+        ...base,
+        lastSeenAt: { gte: inactivityCutoff(now) },
+    }
 }
 
 export function buildTaskDigestPayload(
@@ -195,7 +218,7 @@ export async function runTaskDigestCron(
     // عمداً هیچ فیلتر platform/native اینجا نیست: هر کاربری که حداقل یک ردیف
     // اشتراک Web Push دارد کاندید است — Desktop، Mobile Web یا Capacitor WebView.
     const candidates = await prisma.user.findMany({
-        where: { pushSubscriptions: { some: {} } },
+        where: buildTaskDigestCandidateWhere(kind, now),
         take: limit,
         select: { id: true, timezone: true },
     })

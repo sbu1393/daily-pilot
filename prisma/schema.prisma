@@ -519,7 +519,7 @@ model PushSubscription {
 model SentNotification {
   id        String   @id @default(cuid())
   userId    Int
-  type      String // morning | night | overdue
+  type      String // morning | night | overdue | inactivity
   dayKey    String // YYYY-MM-DD به وقت محلی کاربر
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

@@ -9,6 +9,7 @@ import { NextRequest } from "next/server"
 const mocks = vi.hoisted(() => ({
     readCronSecret: vi.fn<() => string | null>(() => "super-secret-cron-value"),
     runTaskDigestCron: vi.fn(),
+    runInactivityReminderCron: vi.fn(),
     recordError: vi.fn(),
 }))
 
@@ -21,6 +22,9 @@ vi.mock("@/app/lib/services/taskDigestCron.service", () => ({
     isTaskDigestKind: (value: string | null) =>
         value === "morning" || value === "night" || value === "overdue",
     runTaskDigestCron: mocks.runTaskDigestCron,
+}))
+vi.mock("@/app/lib/services/inactivityReminder.service", () => ({
+    runInactivityReminderCron: mocks.runInactivityReminderCron,
 }))
 vi.mock("@/src/lib/observability/recordError", () => ({ recordError: mocks.recordError }))
 
@@ -35,6 +39,19 @@ const SUMMARY = {
     skipped: 0,
     tasks: 7,
     sent: 2,
+    failed: 1,
+    removed: 0,
+    errored: 0,
+    truncated: false,
+}
+
+const INACTIVITY_SUMMARY = {
+    configured: true,
+    kind: "inactivity",
+    scanned: 5,
+    matched: 2,
+    skipped: 1,
+    sent: 3,
     failed: 1,
     removed: 0,
     errored: 0,
@@ -64,6 +81,7 @@ function request(options: {
 beforeEach(() => {
     mocks.readCronSecret.mockReset().mockReturnValue(SECRET)
     mocks.runTaskDigestCron.mockReset().mockResolvedValue(SUMMARY)
+    mocks.runInactivityReminderCron.mockReset().mockResolvedValue(INACTIVITY_SUMMARY)
     mocks.recordError.mockReset()
 })
 
@@ -141,6 +159,18 @@ describe("GET /api/notifications/cron — نوع اجرا", () => {
         expect(mocks.runTaskDigestCron).toHaveBeenLastCalledWith("overdue", expect.any(Date))
     })
 
+    it("type=inactivity → سرویس اختصاصی بازگشت اجرا می‌شود (نه task digest)", async () => {
+        const res = await GET(request({ type: "inactivity", bearer: SECRET }))
+
+        expect(res.status).toBe(200)
+        expect(mocks.runInactivityReminderCron).toHaveBeenCalledWith(expect.any(Date))
+        expect(mocks.runTaskDigestCron).not.toHaveBeenCalled()
+        expect(await res.json()).toMatchObject({
+            ok: true,
+            data: { ...INACTIVITY_SUMMARY, trigger: "external" },
+        })
+    })
+
     it("بدون type → از هدر x-vercel-cron-schedule نگاشت می‌شود", async () => {
         const res = await GET(
             request({ bearer: SECRET, scheduleHeader: "30 18 * * *", vercelHeader: true }),
@@ -148,6 +178,17 @@ describe("GET /api/notifications/cron — نوع اجرا", () => {
 
         expect(res.status).toBe(200)
         expect(mocks.runTaskDigestCron).toHaveBeenCalledWith("night", expect.any(Date))
+        expect(await res.json()).toMatchObject({ data: { trigger: "vercel-cron" } })
+    })
+
+    it("schedule جدید 30 6 * * * به inactivity نگاشت می‌شود", async () => {
+        const res = await GET(
+            request({ bearer: SECRET, scheduleHeader: "30 6 * * *", vercelHeader: true }),
+        )
+
+        expect(res.status).toBe(200)
+        expect(mocks.runInactivityReminderCron).toHaveBeenCalledWith(expect.any(Date))
+        expect(mocks.runTaskDigestCron).not.toHaveBeenCalled()
         expect(await res.json()).toMatchObject({ data: { trigger: "vercel-cron" } })
     })
 
@@ -170,6 +211,16 @@ describe("GET /api/notifications/cron — نوع اجرا", () => {
         mocks.runTaskDigestCron.mockRejectedValue(new Error("db down"))
 
         const res = await GET(request({ type: "morning", bearer: SECRET }))
+
+        expect(res.status).toBe(500)
+        expect(await res.json()).toMatchObject({ ok: false, error: { code: "INTERNAL" } })
+        expect(mocks.recordError).toHaveBeenCalledTimes(1)
+    })
+
+    it("خطای سرویس inactivity هم 500 و recordError می‌دهد", async () => {
+        mocks.runInactivityReminderCron.mockRejectedValue(new Error("db down"))
+
+        const res = await GET(request({ type: "inactivity", bearer: SECRET }))
 
         expect(res.status).toBe(500)
         expect(await res.json()).toMatchObject({ ok: false, error: { code: "INTERNAL" } })

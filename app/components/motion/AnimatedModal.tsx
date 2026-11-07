@@ -3,6 +3,7 @@
 import { useEffect } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import styles from "@/app/components/task/task.module.css"
+import { useBackButtonClose } from "@/app/lib/backButton"
 
 type Props = {
     open: boolean
@@ -15,6 +16,9 @@ type Props = {
  * در task.module.css تا ظاهر همه مودال‌ها یکسان بماند.
  */
 export default function AnimatedModal({ open, onClose, children }: Props) {
+    // دکمهٔ بازگشت اندروید: در صورت باز بودن این مودال، اول همین بسته می‌شود.
+    useBackButtonClose(open, onClose)
+
     // بستن با Escape
     useEffect(() => {
         if (!open) return

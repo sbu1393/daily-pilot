@@ -9,6 +9,7 @@ import { CalendarDays, DoorOpen, LifeBuoy, Settings, Shield } from "lucide-react
 import Avatar, { type AvatarUser } from "./Avatar"
 import { clearOfflineForLogout } from "@/app/lib/offline"
 import { faDigits } from "@/app/lib/time"
+import { useBackButtonClose } from "@/app/lib/backButton"
 import Logo from "./Logo"
 
 export default function Header({ user }: { user: AvatarUser | null }) {
@@ -16,6 +17,9 @@ export default function Header({ user }: { user: AvatarUser | null }) {
     const [busy, setBusy] = useState(false)
     const [menuOpen, setMenuOpen] = useState(false)
     const menuRef = useRef<HTMLDivElement | null>(null)
+
+    // دکمهٔ بازگشت اندروید: اگر منوی کاربر باز است، اول منو بسته شود.
+    useBackButtonClose(menuOpen, () => setMenuOpen(false))
 
     // بستن منو با کلیک بیرون از آن
     useEffect(() => {

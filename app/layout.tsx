@@ -6,6 +6,7 @@ import { CalendarProvider } from "./contexts/CalenderContext"
 import { SettingsProvider } from "./contexts/SettingsContext"
 import PwaRegister from "./components/PwaRegister"
 import OfflineIndicator from "./components/OfflineIndicator"
+import BackButtonHandler from "./components/BackButtonHandler"
 // آلارم واقعی تسک (Feature B) — با پلاگین نیتیو مستقل
 import { TaskAlarmProvider } from "./hooks/useTaskAlarm"
 import Splash from "./components/Splash"
@@ -79,6 +80,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <OfflineIndicator />
               <ToastContainer position="bottom-left" rtl closeOnClick pauseOnHover />
               <PwaRegister />
+              <BackButtonHandler />
             </TaskAlarmProvider>
           </SettingsProvider>
         </CalendarProvider>

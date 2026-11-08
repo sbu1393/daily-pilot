@@ -21,6 +21,8 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        /* Poolakey کافه‌بازار از JitPack توزیع می‌شود. */
+        maven { url 'https://jitpack.io' }
     }
 }
 

@@ -84,31 +84,67 @@
     margin-bottom: -6px;
 }
 
-/* ورودی native تاریخ/ساعت — عمداً LTR است (ترتیب قطعه‌ها استاندارد مرورگر) */
-.dateInput {
+/* ---------- مودال: انتخاب‌گر تاریخ شمسی + ساعت ۲۴ساعته ---------- */
+.picker {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    direction: rtl;
+}
+
+.pickerDate {
+    display: grid;
+    grid-template-columns: minmax(3.4rem, 0.8fr) minmax(5.6rem, 1.4fr) minmax(4rem, 1fr);
+    gap: 6px;
+    flex: 1 1 16rem;
+    min-width: 0;
+}
+
+.pickerTime {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.pickerSelect {
     width: 100%;
-    direction: ltr;
-    text-align: center;
-    padding: 11px 12px;
+    min-width: 0;
+    padding: 10px 6px;
     border-radius: var(--radius-sm);
     border: 1.5px solid var(--border);
     background: var(--input-bg);
     color: var(--ink);
     font-family: inherit;
-    font-size: 0.9rem;
+    font-size: 0.88rem;
     font-variant-numeric: tabular-nums;
+    text-align: center;
+    text-align-last: center;
+    cursor: pointer;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.dateInput:focus {
+.pickerTime .pickerSelect {
+    flex: 0 0 auto;
+    width: 4.2rem;
+}
+
+.pickerSelect:focus {
     outline: none;
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
-.dateInput:disabled {
+.pickerSelect:disabled {
     opacity: 0.55;
     cursor: not-allowed;
+}
+
+.pickerColon {
+    font-weight: 700;
+    color: var(--muted);
 }
 
 /* ---------- مودال: انتخاب‌های سریع ---------- */
@@ -172,6 +208,15 @@
    ریسپانسیو
    ============================================================ */
 @media (max-width: 620px) {
+    .picker {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .pickerTime {
+        justify-content: center;
+    }
+
     .quickRow {
         width: 100%;
     }

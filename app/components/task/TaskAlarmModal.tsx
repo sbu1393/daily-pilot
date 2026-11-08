@@ -5,6 +5,7 @@ import { toast } from "react-toastify"
 import { AlarmClock, CalendarClock, Trash2 } from "lucide-react"
 
 import AnimatedModal from "../motion/AnimatedModal"
+import JalaliDateTimePicker from "./JalaliDateTimePicker"
 import { useCalendar } from "@/app/contexts/CalenderContext"
 import { useTaskAlarms } from "@/app/hooks/useTaskAlarm"
 import {
@@ -266,16 +267,14 @@ export default function TaskAlarmModal({ task, open, onClose }: Props) {
                 )}
 
             {/* ── انتخاب زمان ─────────────────────────────────────────── */}
-            <label className={reminderStyles.fieldLabel} htmlFor="dp-alarm-at">
+            <div className={reminderStyles.fieldLabel} id="dp-alarm-at-label">
                 <CalendarClock size={16} aria-hidden="true" /> زمان و تاریخ آلارم
-            </label>
-            <input
-                id="dp-alarm-at"
-                className={reminderStyles.dateInput}
-                type="datetime-local"
+            </div>
+            <JalaliDateTimePicker
                 value={value}
-                onChange={(e) => setValue(e.target.value)}
+                onChange={setValue}
                 disabled={!ready}
+                labelledBy="dp-alarm-at-label"
             />
 
             <div className={reminderStyles.quickRow}>

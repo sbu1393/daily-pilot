@@ -84,66 +84,165 @@
     margin-bottom: -6px;
 }
 
-/* ---------- مودال: انتخاب‌گر تاریخ شمسی + ساعت ۲۴ساعته ---------- */
-.picker {
+/* ---------- مودال: چرخ‌های لمسی تاریخ شمسی + ساعت ۲۴ساعته ---------- */
+.pickerWheels {
+    --wheel-item: 40px;
+    --wheel-visible: 5;
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 10px;
     direction: rtl;
 }
 
-.pickerDate {
+.pickerDateWheels {
     display: grid;
-    grid-template-columns: minmax(3.4rem, 0.8fr) minmax(5.6rem, 1.4fr) minmax(4rem, 1fr);
+    grid-template-columns: minmax(3.2rem, 0.9fr) minmax(5rem, 1.35fr) minmax(3.8rem, 1fr);
     gap: 6px;
-    flex: 1 1 16rem;
+    flex: 1 1 17rem;
     min-width: 0;
 }
 
-.pickerTime {
+.pickerTimeWheels {
     display: flex;
     flex: 0 0 auto;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
+    align-items: flex-end;
+    gap: 2px;
 }
 
-.pickerSelect {
-    width: 100%;
+.pickerTimeWheels .wheelColumn {
+    flex: 0 0 4.25rem;
+}
+
+.wheelColumn {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
     min-width: 0;
-    padding: 10px 6px;
+}
+
+.wheelLabel {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--muted);
+    text-align: center;
+}
+
+.wheelBox {
+    position: relative;
+    height: calc(var(--wheel-item) * var(--wheel-visible));
     border-radius: var(--radius-sm);
     border: 1.5px solid var(--border);
     background: var(--input-bg);
-    color: var(--ink);
-    font-family: inherit;
-    font-size: 0.88rem;
-    font-variant-numeric: tabular-nums;
-    text-align: center;
-    text-align-last: center;
-    cursor: pointer;
+    overflow: hidden;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.pickerTime .pickerSelect {
-    flex: 0 0 auto;
-    width: 4.2rem;
-}
-
-.pickerSelect:focus {
-    outline: none;
+.wheelBox:focus-within {
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
-.pickerSelect:disabled {
+/* محو شدن آیتم‌های دور از مرکز، بدون پوشاندن آیتم انتخاب‌شده */
+.wheelBox::before,
+.wheelBox::after {
+    content: "";
+    position: absolute;
+    z-index: 2;
+    left: 0;
+    right: 0;
+    height: calc(var(--wheel-item) * 1.1);
+    pointer-events: none;
+}
+
+.wheelBox::before {
+    top: 0;
+    background: linear-gradient(var(--input-bg), transparent);
+}
+
+.wheelBox::after {
+    bottom: 0;
+    background: linear-gradient(transparent, var(--input-bg));
+}
+
+.wheelHighlight {
+    position: absolute;
+    z-index: 0;
+    top: 50%;
+    left: 3px;
+    right: 3px;
+    height: var(--wheel-item);
+    transform: translateY(-50%);
+    border-radius: calc(var(--radius-sm) - 3px);
+    background: var(--primary-soft);
+    pointer-events: none;
+}
+
+.wheel {
+    position: relative;
+    z-index: 1;
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding-block: calc((var(--wheel-item) * var(--wheel-visible) - var(--wheel-item)) / 2);
+    scroll-snap-type: y mandatory;
+    scrollbar-width: none;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    outline: none;
+}
+
+.wheel::-webkit-scrollbar {
+    display: none;
+}
+
+.wheelItem {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: var(--wheel-item);
+    padding: 0 3px;
+    scroll-snap-align: center;
+    font-size: 0.92rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    opacity: 0.45;
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+    transition: opacity 0.12s ease, color 0.12s ease, transform 0.12s ease;
+}
+
+.wheelItem:hover {
+    opacity: 0.8;
+}
+
+.wheelItem[aria-selected="true"] {
+    opacity: 1;
+    color: var(--primary-dark);
+    font-weight: 800;
+    transform: scale(1.06);
+}
+
+.wheelItem[aria-selected="true"]:hover {
+    opacity: 1;
+}
+
+.wheelDisabled {
     opacity: 0.55;
-    cursor: not-allowed;
+}
+
+.wheelDisabled .wheel {
+    pointer-events: none;
 }
 
 .pickerColon {
-    font-weight: 700;
+    flex: 0 0 auto;
+    align-self: flex-end;
+    margin-bottom: calc(var(--wheel-item) * var(--wheel-visible) / 2 - 0.65rem);
+    font-weight: 800;
     color: var(--muted);
 }
 
@@ -208,12 +307,13 @@
    ریسپانسیو
    ============================================================ */
 @media (max-width: 620px) {
-    .picker {
+    .pickerWheels {
+        --wheel-visible: 3;
         flex-direction: column;
         align-items: stretch;
     }
 
-    .pickerTime {
+    .pickerTimeWheels {
         justify-content: center;
     }
 

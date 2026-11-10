@@ -311,7 +311,17 @@
         --wheel-visible: 3;
         flex-direction: column;
         align-items: stretch;
-        gap: 6px;
+        gap: 10px;
+    }
+
+    /*
+     * در چیدمان ستونی، `flex-basis` روی محور عمودی اعمال می‌شود؛ بنابراین
+     * `flex: 1 1 14rem` (که برای عرض در حالت ردیفی نوشته شده) ارتفاع بلوک
+     * تاریخ را ۱۴rem می‌کند و زیر چرخ‌های تاریخ فضای خالی بزرگی می‌سازد.
+     * اینجا خنثی می‌شود تا ارتفاع برابر محتوای واقعی باشد.
+     */
+    .pickerDateWheels {
+        flex: 0 0 auto;
     }
 
     .pickerTimeWheels {

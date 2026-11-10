@@ -224,10 +224,15 @@ describe("POST /api/auth/set-new-password — صدور نشست عادی", () =>
     it("عمر نشست تازه پیش‌فرضِ عادی است، نه عمر باقی‌ماندهٔ توکن", async () => {
         await POST(req(body))
 
-        // الگوی verify-otp: دو آرگومان ⇒ بدون سقف کوتاه‌عمر.
-        // سه‌آرگومه‌ای (مثل مسیر رمز موقتِ login که maxAgeSeconds می‌دهد) نشده باشد.
-        expect(mocks.createSession.mock.calls[0]).toHaveLength(2)
-        expect(mocks.createSession.mock.calls[0][2]).toBeUndefined()
+        // الگوی verify-otp: بدون `maxAgeSeconds` ⇒ عمر ۷ روزهٔ پیش‌فرض.
+        // آرگومان سوم فقط `passwordHash` برای claim `sv` است.
+        expect(mocks.createSession.mock.calls[0]).toHaveLength(3)
+        const options = mocks.createSession.mock.calls[0][2] as {
+            maxAgeSeconds?: number
+            passwordHash?: string
+        }
+        expect(options.maxAgeSeconds).toBeUndefined()
+        expect(options.passwordHash).toEqual(expect.any(String))
     })
 
     it("نشست روی همان response پیام موفق ساخته می‌شود و سپس cookie می‌گیرد", async () => {

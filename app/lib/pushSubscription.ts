@@ -368,6 +368,24 @@ export async function syncReminderSchedule(input: {
     }
 }
 
+export type ReminderScheduleSnapshot = { enabled: boolean; time: string }
+
+/**
+ * خواندن اسنپ‌شات یادآور از سرور (منبع حقیقت) هنگام mount.
+ * `null` یعنی «سرور در دسترس/معتبر نیست» → کلاینت همان localStorage را نگه می‌دارد.
+ */
+export async function fetchReminderSchedule(): Promise<ReminderScheduleSnapshot | null> {
+    try {
+        const data = await api<ReminderScheduleSnapshot>("/api/notifications/reminder")
+        if (typeof data?.enabled !== "boolean") return null
+        if (typeof data?.time !== "string") return null
+        if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(data.time)) return null
+        return { enabled: data.enabled, time: data.time }
+    } catch {
+        return null
+    }
+}
+
 /** ارسال اعلان آزمایشی به دستگاه‌های همین کاربر (دکمه‌ی «تست اعلان»). */
 export async function sendTestNotification(): Promise<PushSendOutcome> {
     try {

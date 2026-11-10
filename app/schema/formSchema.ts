@@ -1,11 +1,28 @@
 import { z } from "zod"
 
+/**
+ * نام کاربری — **یک** قرارداد مشترک برای ثبت‌نام و ویرایش پروفایل.
+ *
+ * قبلاً ثبت‌نام فقط `min(3)` داشت و پروفایل سقف ۳۰؛ نتیجه اینکه کاربری که با
+ * نام ۳۱+ کاراکتری ثبت‌نام کرده بود هرگز نمی‌توانست فرم پروفایل را ذخیره کند.
+ * الگو یونیکد-آگاه است (`\p{L}`) تا نام‌های فارسی/عربی رد نشوند، ولی فاصله،
+ * اسلش و کاراکترهای کنترلی را می‌بندد. عمداً `toLowerCase` اعمال نمی‌شود تا
+ * نام‌های کاربری موجود (و حساسیت حروف در DB) دست‌نخورده بمانند.
+ */
+export const usernameSchema = z
+    .string()
+    .trim()
+    .min(3, "نام کاربری حداقل ۳ کاراکتر باشد")
+    .max(30, "نام کاربری حداکثر ۳۰ کاراکتر باشد")
+    .regex(
+        /^[\p{L}\p{N}_.-]+$/u,
+        "نام کاربری فقط می‌تواند شامل حروف، اعداد، نقطه، خط تیره و زیرخط باشد",
+    )
+
 
 export const registerSchema = z.object({
 
-    username: z
-        .string()
-        .min(3,"نام کاربری حداقل ۳ کاراکتر باشد"),
+    username: usernameSchema,
 
 
     email: z
@@ -53,10 +70,12 @@ export const loginSchema = z.object({
 
 export const profileSchema = z.object({
 
-    username: z
-        .string()
-        .min(3, "نام کاربری حداقل ۳ کاراکتر باشد")
-        .max(30, "نام کاربری حداکثر ۳۰ کاراکتر باشد"),
+    /*
+     * اختیاری است تا PATCH واقعاً partial باشد: اگر کلاینت فقط `phone` بفرستد،
+     * همین یک فیلد بررسی/به‌روزرسانی می‌شود و بقیه دست‌نخورده می‌مانند.
+     * وقتی فرستاده شود، دقیقاً همان قرارداد ثبت‌نام را دارد.
+     */
+    username: usernameSchema.optional(),
 
 
     firstName: z
@@ -88,9 +107,6 @@ export const profileSchema = z.object({
         .or(z.literal(""))
 
 }).refine(
-    data => (data.username ?? "").trim().length >= 3,
-    { message: "نام کاربری حداقل ۳ کاراکتر باشد", path: ["username"] }
-).refine(
     (data) =>
         data.birthDate == null ||
         data.birthDate === "" ||

@@ -13,9 +13,11 @@ import AvatarUpload from "@/app/components/AvatarUpload"
 import FormInput from "@/app/components/FormInput"
 import { profileSchema } from "@/app/schema/formSchema"
 import { useSettings } from "@/app/contexts/SettingsContext"
+import { ensureOfflineScope } from "@/app/lib/offline"
 import { api } from "@/app/lib/api/client"
 import {
     ensurePushSubscription,
+    fetchReminderSchedule,
     hasNotificationPermission,
     removePushSubscription,
     syncReminderSchedule,
@@ -139,6 +141,18 @@ export default function SettingsPanel({ user }: { user: UserData }) {
     const reminder = parseReminderTime(settings.reminderTime)
     // گارد هم‌گام‌سازی یک‌بارهٔ اشتراک Push
     const pushSyncedRef = useRef(false)
+    /*
+     * سرور منبع حقیقت یادآور است:
+     * - `reminderHydratedRef` تا وقتی اسنپ‌شات سرور نرسیده، همگام‌سازی را متوقف
+     *   می‌کند تا با مقدار localStorage (که فقط cache است) سرور را بازنویسی نکنیم.
+     * - `serverReminderSnapshotRef` آخرین وضعیت شناخته‌شدهٔ سرور است؛ اگر بعد از
+     *   hydration مقدار تغییر نکرده باشد، POST تکراری فرستاده نمی‌شود.
+     * - `reminderUserEditedRef` جلوی بازنویسیِ انتخاب کاربر را می‌گیرد اگر او
+     *   قبل از رسیدن پاسخ GET سوییچ را عوض کرده باشد.
+     */
+    const reminderHydratedRef = useRef(false)
+    const reminderUserEditedRef = useRef(false)
+    const serverReminderSnapshotRef = useRef<string | null>(null)
     // بخش تغییر رمز عبور
     const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" })
     const [passwordLoading, setPasswordLoading] = useState(false)
@@ -202,6 +216,7 @@ export default function SettingsPanel({ user }: { user: UserData }) {
 
     /* صبح/شب → HH:MM (ذخیرهسازی بدون تغییر) */
     const setReminderPart = (part: "h12" | "minute" | "period", value: number | DayPeriod) => {
+        reminderUserEditedRef.current = true
         const next = { ...reminder, [part]: value } as typeof reminder
         update({ reminderTime: reminderTimeToHHMM(next.h12, next.minute, next.period) })
     }
@@ -228,19 +243,71 @@ export default function SettingsPanel({ user }: { user: UserData }) {
     }, [settings.reminderEnabled])
 
     /*
+     * Hydration از سرور (منبع حقیقت) — فقط یک‌بار هنگام mount.
+     *
+     * localStorage قبلاً تنها منبع بود؛ نتیجه: سوییچ روی دستگاه دوم با واقعیت
+     * سرور (که cron بر اساسش Push می‌فرستد) یکی نبود. اکنون ابتدا اسنپ‌شات سرور
+     * خوانده و روی state اعمال می‌شود. اگر سرور در دسترس نباشد (`null`)، همان
+     * مقدار cache باقی می‌ماند و اولین تغییر کاربر آن را برای سرور می‌فرستد.
+     */
+    useEffect(() => {
+        let cancelled = false
+
+        void (async () => {
+            /*
+             * اول scope نشست را قطعی می‌کنیم. `SettingsContext` تنظیمات را با
+             * کلید user-scoped می‌خواند؛ اگر اسنپ‌شات سرور پیش از مشخص‌شدن scope
+             * اعمال شود، effect بعدی ممکن است مقدار localStorage (anon/حساب قبلی)
+             * را روی آن بنویسد. `ensureOfflineScope` با سایر فراخوانی‌ها dedupe
+             * می‌شود، پس درخواست اضافی نمی‌سازد.
+             */
+            await ensureOfflineScope()
+            if (cancelled) return
+
+            const snapshot = await fetchReminderSchedule()
+            if (cancelled) return
+
+            reminderHydratedRef.current = true
+            if (!snapshot) return
+
+            serverReminderSnapshotRef.current = `${snapshot.enabled}|${snapshot.time}`
+
+            // اگر کاربر پیش از رسیدن پاسخ چیزی را عوض کرده، انتخاب او را نمی‌بلعیم.
+            if (reminderUserEditedRef.current) return
+
+            update({ reminderEnabled: snapshot.enabled, reminderTime: snapshot.time })
+        })()
+
+        return () => {
+            cancelled = true
+        }
+    }, [update])
+
+    /*
      * آینه‌کردن برنامه‌ی یادآور روی سرور با یک تأخیر کوچک (debounce):
      * تریگر cron سرور از همین مقدار استفاده می‌کند. تغییر سریع دقیقه‌ها
      * (اسکرول select) بنابراین یک درخواست می‌فرستد، نه ده‌تا.
      *
-     * این آینه روی Android native هم نگه داشته می‌شود: دستگاه‌های دیگرِ همان
-     * حساب (مرورگر) باید همچنان از مسیر Web Push یادآور بگیرند.
+     * عمداً دیگر به مجوز اعلان وابسته نیست: «انتخاب ساعت» و «اجازهٔ نمایش اعلان»
+     * دو موضوع جدا هستند. اگر مجوز نبود، Push ارسال نمی‌شود ولی سرور باید بداند
+     * کاربر چه ساعتی را می‌خواهد تا روی دستگاه دیگری که مجوز دارد کار کند.
+     *
+     * روی Android native هم نگه داشته می‌شود: دستگاه‌های دیگرِ همان حساب
+     * (مرورگر) باید همچنان از مسیر Web Push یادآور بگیرند.
      */
     useEffect(() => {
-        if (!settings.reminderEnabled) return
-        if (!isNativeLocalNotificationPlatform() && !hasNotificationPermission()) return
+        // تا اسنپ‌شات سرور نرسیده، مقدار localStorage را به‌عنوان حقیقت نفرست.
+        if (!reminderHydratedRef.current) return
 
-        const timer = setTimeout(() => {
-            void syncReminderSchedule({ enabled: true, time: settings.reminderTime })
+        const current = `${settings.reminderEnabled}|${settings.reminderTime}`
+        if (current === serverReminderSnapshotRef.current) return
+
+        const timer = setTimeout(async () => {
+            const result = await syncReminderSchedule({
+                enabled: settings.reminderEnabled,
+                time: settings.reminderTime,
+            })
+            if (result.ok) serverReminderSnapshotRef.current = current
         }, 800)
 
         return () => clearTimeout(timer)
@@ -258,6 +325,7 @@ export default function SettingsPanel({ user }: { user: UserData }) {
      * مسیر مرورگر و ترتیبش دست‌نخورده می‌ماند.
      */
     const onToggleReminder = async (enabled: boolean) => {
+        reminderUserEditedRef.current = true
         const isNative = isNativeLocalNotificationPlatform()
 
         if (!enabled) {
@@ -265,10 +333,10 @@ export default function SettingsPanel({ user }: { user: UserData }) {
             // پایدار) + لغو اشتراک Push این دستگاه + آینه‌ی سرور.
             // `removePushSubscription` روی دستگاهی که Push ندارد خودش no-op است و
             // اگر اشتراکی از قبل در DB مانده باشد پاکش می‌کند، پس فراخوانی‌اش
-            // در هر دو حالت بی‌خطر و مفید است.
+            // در هر دو حالت بی‌خطر و مفید است. آینه‌ی سرور را effect debounce‌شده
+            // انجام می‌دهد (برای روشن/خاموش یکسان).
             update({ reminderEnabled: false })
             void removePushSubscription()
-            void syncReminderSchedule({ enabled: false, time: settings.reminderTime })
             return
         }
 

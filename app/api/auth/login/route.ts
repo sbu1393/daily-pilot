@@ -192,7 +192,8 @@ export async function POST(req: NextRequest) {
                     resetTokenId: auth.resetTokenId,
                 },
                 restrictedResponse,
-                { maxAgeSeconds: restrictedMaxAge },
+                // هش فعلی داخل `sv` می‌رود؛ با تعیین رمز جدید، همین نشست هم باطل می‌شود.
+                { maxAgeSeconds: restrictedMaxAge, passwordHash: user.password },
             )
         }
 

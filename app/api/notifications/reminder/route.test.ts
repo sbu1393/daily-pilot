@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     isRateLimited: vi.fn(() => false),
     recordError: vi.fn(),
     update: vi.fn(),
+    findUnique: vi.fn(),
 }))
 
 vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: mocks.getCurrentUser }))
@@ -19,7 +20,7 @@ vi.mock("@/app/lib/getPrisma", () => ({ getPrisma: mocks.getPrisma }))
 vi.mock("@/app/lib/rateLimit", () => ({ isRateLimited: mocks.isRateLimited }))
 vi.mock("@/src/lib/observability/recordError", () => ({ recordError: mocks.recordError }))
 
-import { POST } from "./route"
+import { GET, POST } from "./route"
 
 const USER = { id: 7, email: "user@example.com" }
 
@@ -35,10 +36,11 @@ function post(body: unknown) {
 
 beforeEach(() => {
     mocks.getCurrentUser.mockReset().mockResolvedValue(USER)
-    mocks.getPrisma.mockReset().mockReturnValue({ user: { update: mocks.update } })
+    mocks.getPrisma.mockReset().mockReturnValue({ user: { update: mocks.update, findUnique: mocks.findUnique } })
     mocks.isRateLimited.mockReset().mockReturnValue(false)
     mocks.recordError.mockReset()
     mocks.update.mockReset().mockResolvedValue({ reminderEnabled: true, reminderTime: "09:00" })
+    mocks.findUnique.mockReset().mockResolvedValue({ reminderEnabled: true, reminderTime: "07:30" })
 })
 
 describe("POST /api/notifications/reminder", () => {
@@ -119,6 +121,49 @@ describe("POST /api/notifications/reminder", () => {
         mocks.update.mockRejectedValue(new Error("db down"))
 
         const res = await post({ enabled: true, time: "09:00" })
+
+        expect(res.status).toBe(500)
+        expect(mocks.recordError).toHaveBeenCalledTimes(1)
+    })
+})
+
+describe("GET /api/notifications/reminder", () => {
+    it("بدون نشست → 401 و هیچ خواندنی", async () => {
+        mocks.getCurrentUser.mockResolvedValue(null)
+
+        const res = await GET()
+
+        expect(res.status).toBe(401)
+        expect(mocks.findUnique).not.toHaveBeenCalled()
+    })
+
+    it("اسنپ‌شات سرور را به شکل { enabled, time } برمی‌گرداند", async () => {
+        const res = await GET()
+
+        expect(res.status).toBe(200)
+        await expect(res.json()).resolves.toMatchObject({
+            ok: true,
+            data: { enabled: true, time: "07:30" },
+        })
+        expect(mocks.findUnique).toHaveBeenCalledWith({
+            where: { id: USER.id },
+            select: { reminderEnabled: true, reminderTime: true },
+        })
+    })
+
+    it("کاربرِ حذف‌شده/ناموجود → 401 و بدون نوشتن", async () => {
+        mocks.findUnique.mockResolvedValue(null)
+
+        const res = await GET()
+
+        expect(res.status).toBe(401)
+        expect(mocks.update).not.toHaveBeenCalled()
+    })
+
+    it("خطای غیرمنتظره → 500 و recordError", async () => {
+        mocks.findUnique.mockRejectedValue(new Error("db down"))
+
+        const res = await GET()
 
         expect(res.status).toBe(500)
         expect(mocks.recordError).toHaveBeenCalledTimes(1)

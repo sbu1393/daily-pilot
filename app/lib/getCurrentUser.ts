@@ -1,6 +1,7 @@
 import { cookies } from "next/headers"
 import jwt from "jsonwebtoken"
 import { getPrisma } from "./getPrisma"
+import { isSessionVersionValid } from "./sessionVersion"
 // فاز ۵ — گام ۱۳: resolve پلن مؤثر فقط از entitlement.service (مالک lazy expiration و effective plan)
 // می‌آید؛ هیچ منطق انقضا/تمدیدی این‌جا تکرار نمی‌شود (سند §17/§27).
 import { resolveEffectivePlan } from "./services/entitlement.service"
@@ -33,7 +34,7 @@ export async function getCurrentUser() {
         throw new Error("JWT_SECRET is not defined")
     }
 
-    let decoded: { id: number; email: string; resetTokenId?: string | null }
+    let decoded: { id: number; email: string; resetTokenId?: string | null; sv?: string | null }
 
     // M1 — انتظاری: توکن نامعتبر/منقضی/دستکاری‌شده → کاربر ناشناس، بدون لاگ نویز.
     try {
@@ -41,6 +42,7 @@ export async function getCurrentUser() {
             id: number
             email: string
             resetTokenId?: string | null
+            sv?: string | null
         }
     } catch {
         return null
@@ -76,6 +78,12 @@ export async function getCurrentUser() {
 
                 timezone: true,
 
+                /*
+                 * فقط برای اعتبارسنجیِ claim `sv` (نسخهٔ نشست) خوانده می‌شود و
+                 * بلافاصله از شیء برگشتی حذف می‌شود؛ هرگز به مصرف‌کننده نمی‌رسد.
+                 */
+                password: true,
+
                 // فاز ۴ — role از DB در هر request خوانده می‌شود؛ هرگز داخل JWT نمی‌رود
                 // (revocation فوری در request بعدی؛ سند Phase 4 «Role Model»)
                 role: true,
@@ -93,6 +101,24 @@ export async function getCurrentUser() {
             return null
         }
 
+        /*
+         * نسخهٔ نشست: اگر توکن claim `sv` داشته باشد (توکن‌های تازه)، باید با
+         * HMAC هش رمز فعلی DB یکی باشد. تغییر رمز ⇒ هش عوض ⇒ همهٔ توکن‌های
+         * قبلی همین‌جا باطل می‌شوند (بدون ستون/مigration جدید).
+         * توکن‌های legacy (بدون `sv`) برای سازگاری عقب‌رو پذیرفته می‌شوند؛
+         * همهٔ توکن‌های تازه حداکثر ۷ روز عمر دارند، پس پنجره بسته می‌شود.
+         */
+        const sessionVersion = decoded.sv
+        if (sessionVersion != null && sessionVersion !== "") {
+            if (!isSessionVersionValid(sessionVersion, user.password, secret)) {
+                return null
+            }
+        }
+
+        // هش رمز هرگز از این تابع بیرون نمی‌رود.
+        const { password, ...safeUser } = user
+        void password
+
         // فاز ۵ — گام ۱۳: پلن مؤثر سرور-محور (lazy expiration + resolve plan داخل entitlement.service).
         // هیچ mutation دیگری این‌جا رخ نمی‌دهد؛ تنها نوشتن ممکن همان materialize شدن انقضا است (§17).
         const plan = await resolveEffectivePlan(prisma, user.id)
@@ -106,7 +132,7 @@ export async function getCurrentUser() {
                 ? decoded.resetTokenId
                 : null
 
-        return { ...user, plan, resetTokenId }
+        return { ...safeUser, plan, resetTokenId }
     } catch (error) {
         // فاز صفر §26 — لاگ خام حذف شد. در این نقطه identity قطعی نیست (ممکن است پیش از
         // احراز هویت کامل اجرا شود) → context فقط requestId/endpoint دارد و هیچ userId ندارد.

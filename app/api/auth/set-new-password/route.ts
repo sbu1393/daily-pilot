@@ -91,6 +91,9 @@ export async function POST(req: NextRequest) {
 
         const prisma = getPrisma()
 
+        // هش رمز جدید از داخل تراکنش بیرون می‌آید تا claim `sv` نشست تازه بسازد.
+        let passwordHash = ""
+
         await prisma.$transaction(async (tx: unknown) => {
             const client = tx as PasswordResetClient
 
@@ -109,7 +112,7 @@ export async function POST(req: NextRequest) {
             // حذف اتمیک + نوشتن رمز دائمی + صفر کردن فلگ، همه در یک تراکنش.
             // `deleteMany` با `count === 0` تضمین می‌کند دو درخواست همزمان دقیقاً
             // یکی برنده شود (race/replay) — بدون نیاز به قفل.
-            await consumeTokenAndSetPassword(client, {
+            passwordHash = await consumeTokenAndSetPassword(client, {
                 userId: user.id,
                 tokenId: resetTokenId,
                 newPassword,
@@ -150,6 +153,7 @@ export async function POST(req: NextRequest) {
                 resetTokenId: null,
             },
             response,
+            { passwordHash },
         )
     } catch (error) {
         await recordError(error, context)

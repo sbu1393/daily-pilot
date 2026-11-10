@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server"
 import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
+import { isRateLimited } from "@/app/lib/rateLimit"
 import { profileSchema } from "@/app/schema/formSchema"
 import { updateProfile } from "@/app/lib/services/auth.service"
 import {
@@ -14,6 +15,10 @@ import { recordError } from "@/src/lib/observability/recordError"
 import { getPrisma } from "@/app/lib/getPrisma"
 import { touchAuthenticatedActivity } from "@/app/lib/services/userActivity.service"
 import { recordProductEvent } from "@/app/lib/services/productEvent.service"
+
+/* ویرایش پروفایل نوشتن روی DB است → سقف per-user (پشت NAT هم درست کار می‌کند). */
+const PROFILE_UPDATE_MAX_ATTEMPTS = 30
+const PROFILE_UPDATE_WINDOW_MS = 15 * 60 * 1000
 
 // GET: اطلاعات حساب کاربری جاری
 export async function GET() {
@@ -39,6 +44,22 @@ export async function PATCH(req: NextRequest) {
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
 
+        if (
+            isRateLimited(
+                `profile:user:${user.id}`,
+                PROFILE_UPDATE_MAX_ATTEMPTS,
+                PROFILE_UPDATE_WINDOW_MS,
+            )
+        ) {
+            return errorResponse(
+                429,
+                "RATE_LIMITED",
+                "تعداد درخواست‌ها زیاد است؛ کمی بعد دوباره تلاش کن",
+                undefined,
+                context.requestId,
+            )
+        }
+
         const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
         if (!body) return validationErrorResponse(undefined, undefined, context.requestId)
 
@@ -54,22 +75,25 @@ export async function PATCH(req: NextRequest) {
         try {
             // changedFields فقط نام فیلدهای واقعاً تغییرکرده — هرگز مقدار (§8).
             // مبنای مقایسه: snapshot سمت سرور کاربر (getCurrentUser)؛ نه بدنه‌ی کلاینت.
+            // فقط کلیدهایی بررسی می‌شوند که واقعاً در بدنه آمده‌اند (PATCH جزئی).
             const changedFields = [
-                ...(parsed.data.username !== user.username ? ["username"] : []),
+                ...(parsed.data.username !== undefined && parsed.data.username !== user.username
+                    ? ["username"]
+                    : []),
                 ...(parsed.data.firstName !== undefined &&
-                (parsed.data.firstName ?? null) !== (user.firstName ?? null)
+                (parsed.data.firstName?.trim() || null) !== (user.firstName ?? null)
                     ? ["firstName"]
                     : []),
                 ...(parsed.data.lastName !== undefined &&
-                (parsed.data.lastName ?? null) !== (user.lastName ?? null)
+                (parsed.data.lastName?.trim() || null) !== (user.lastName ?? null)
                     ? ["lastName"]
                     : []),
                 ...(parsed.data.phone !== undefined &&
-                (parsed.data.phone ?? null) !== (user.phone ?? null)
+                (parsed.data.phone?.trim() || null) !== (user.phone ?? null)
                     ? ["phone"]
                     : []),
                 ...(parsed.data.birthDate !== undefined &&
-                (parsed.data.birthDate ?? null) !== birthDateInput(user.birthDate)
+                (parsed.data.birthDate || null) !== birthDateInput(user.birthDate)
                     ? ["birthDate"]
                     : []),
             ]
@@ -96,11 +120,13 @@ export async function PATCH(req: NextRequest) {
 }
 
 /**
- * نرمال‌سازی birthDate ذخیره‌شده به رشته‌ی ورودی ISO-سازگار برای مقایسه‌ی no-op (گام ۸).
- * snapshot سمت سرور (User.birthDate as Date) در مقابل رشته‌ی ISO ارسالی کلاینت مقایسه می‌شود.
+ * نرمال‌سازی birthDate ذخیره‌شده به `YYYY-MM-DD` برای مقایسه‌ی no-op (گام ۸).
+ * ورودی کلاینت `YYYY-MM-DD` است؛ مقایسه با ISO کامل همیشه «تغییرکرده» می‌داد
+ * حتی وقتی کاربر تاریخ را دست نزده بود. هر دو طرف اکنون فقط ۱۰ کاراکتر اول را
+ * مقایسه می‌کنند.
  */
 function birthDateInput(stored: Date | string | null): string | null {
     if (stored === null || stored === undefined) return null
-    if (typeof stored === "string") return stored
-    return stored.toISOString()
+    const iso = typeof stored === "string" ? stored : stored.toISOString()
+    return iso.slice(0, 10)
 }

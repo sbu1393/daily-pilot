@@ -167,7 +167,7 @@ describe("POST /api/auth/verify-otp", () => {
         // `mustChangePassword` هم از DB خوانده می‌شود تا در سشن حمل شود.
         expect(mocks.userFindUnique).toHaveBeenCalledWith({
             where: { email: EMAIL },
-            select: { id: true, username: true, email: true, mustChangePassword: true },
+            select: { id: true, username: true, email: true, mustChangePassword: true, password: true },
         })
         expect(mocks.createSession).toHaveBeenCalledWith(USER, expect.anything())
         expect(res.cookies.get("token")?.value).toBe("mocked-jwt")

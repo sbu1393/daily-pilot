@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server"
 import { requireVerifiedUser } from "@/app/lib/requireVerifiedUser"
+import { isRateLimited } from "@/app/lib/rateLimit"
 import { setAvatar, removeAvatar } from "@/app/lib/services/auth.service"
 import {
     errorResponse,
@@ -12,6 +13,24 @@ import { createObservabilityContext } from "@/src/lib/observability/context"
 import { recordError } from "@/src/lib/observability/recordError"
 
 const MAX_BYTES = 800 * 1024 // حداکثر حجم payload کدشده (~۶۰۰KB عکس اصلی)
+
+/* نوشتن آواتار/حذف آن per-user محدود می‌شود (payload بزرگ + نوشتن DB). */
+const AVATAR_MAX_ATTEMPTS = 20
+const AVATAR_WINDOW_MS = 15 * 60 * 1000
+
+function isAvatarRateLimited(userId: number): boolean {
+    return isRateLimited(`avatar:user:${userId}`, AVATAR_MAX_ATTEMPTS, AVATAR_WINDOW_MS)
+}
+
+function rateLimitedResponse(requestId: string) {
+    return errorResponse(
+        429,
+        "RATE_LIMITED",
+        "تعداد درخواست‌ها زیاد است؛ کمی بعد دوباره تلاش کن",
+        undefined,
+        requestId,
+    )
+}
 
 // بررسی ساختار Base64 بدون کتابخانه (فقط کاراکترها و طول — نه محتوای واقعی عکس)
 const BASE64_PAYLOAD_RE = /^[A-Za-z0-9+/]*={0,2}$/
@@ -26,6 +45,8 @@ export async function POST(req: NextRequest) {
         const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
+
+        if (isAvatarRateLimited(user.id)) return rateLimitedResponse(context.requestId)
 
         const body = (await req.json().catch(() => null)) as { image?: unknown } | null
         const image = typeof body?.image === "string" ? body.image : null
@@ -65,6 +86,8 @@ export async function DELETE() {
         const user = await requireVerifiedUser()
         if (!user) return unauthorizedResponse(context.requestId)
         context.userId = user.id
+
+        if (isAvatarRateLimited(user.id)) return rateLimitedResponse(context.requestId)
 
         await removeAvatar(user.id)
 

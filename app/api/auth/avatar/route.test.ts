@@ -10,9 +10,11 @@ const mocks = vi.hoisted(() => ({
     getCurrentUser: vi.fn(),
     setAvatar: vi.fn(),
     removeAvatar: vi.fn(),
+    isRateLimited: vi.fn(),
 }))
 
 vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: mocks.getCurrentUser }))
+vi.mock("@/app/lib/rateLimit", () => ({ isRateLimited: mocks.isRateLimited }))
 vi.mock("@/app/lib/services/auth.service", () => ({
     setAvatar: mocks.setAvatar,
     removeAvatar: mocks.removeAvatar,
@@ -23,6 +25,7 @@ import { DELETE, POST } from "./route"
 describe("/api/auth/avatar — X-Request-ID (فاز صفر §7)", () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mocks.isRateLimited.mockReturnValue(false)
         mocks.getCurrentUser.mockResolvedValue(USER)
     })
 
@@ -72,6 +75,7 @@ const callPOSTRaw = (rawBody: string) =>
 describe("POST /api/auth/avatar", () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mocks.isRateLimited.mockReturnValue(false)
         mocks.getCurrentUser.mockResolvedValue(USER)
     })
 
@@ -151,11 +155,28 @@ describe("POST /api/auth/avatar", () => {
         expect(res.status).toBe(401)
         expect(mocks.setAvatar).not.toHaveBeenCalled()
     })
+
+    it("returns 429 RATE_LIMITED and never calls the service", async () => {
+        mocks.isRateLimited.mockReturnValue(true)
+
+        const res = await callPOST({ image: VALID_IMAGE })
+
+        expect(res.status).toBe(429)
+        const parsed = await res.json()
+        expect(parsed.error.code).toBe("RATE_LIMITED")
+        expect(mocks.setAvatar).not.toHaveBeenCalled()
+        expect(mocks.isRateLimited).toHaveBeenCalledWith(
+            `avatar:user:${USER.id}`,
+            expect.any(Number),
+            expect.any(Number),
+        )
+    })
 })
 
 describe("DELETE /api/auth/avatar", () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mocks.isRateLimited.mockReturnValue(false)
         mocks.getCurrentUser.mockResolvedValue(USER)
     })
 
@@ -173,6 +194,15 @@ describe("DELETE /api/auth/avatar", () => {
         const res = await DELETE()
 
         expect(res.status).toBe(401)
+        expect(mocks.removeAvatar).not.toHaveBeenCalled()
+    })
+
+    it("returns 429 RATE_LIMITED and never touches the DB", async () => {
+        mocks.isRateLimited.mockReturnValue(true)
+
+        const res = await DELETE()
+
+        expect(res.status).toBe(429)
         expect(mocks.removeAvatar).not.toHaveBeenCalled()
     })
 })

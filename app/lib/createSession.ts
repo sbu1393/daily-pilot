@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import jwt from "jsonwebtoken"
+import { deriveSessionVersion } from "./sessionVersion"
 
 // ساخت session مشترک بین login و register (G-14):
 // JWT با payload {id, email} + کوکی httpOnly «token» با maxAge 7 روز
@@ -30,9 +31,11 @@ export function createSession(
         email: string
         mustChangePassword?: boolean
         resetTokenId?: string | null
+        /** هش رمز فعلی — تا claim `sv` از آن مشتق شود. */
+        password?: string
     },
     response: NextResponse,
-    options: { maxAgeSeconds?: number } = {},
+    options: { maxAgeSeconds?: number; passwordHash?: string } = {},
 ) {
     const secret = process.env.JWT_SECRET
 
@@ -45,6 +48,18 @@ export function createSession(
         Math.min(options.maxAgeSeconds ?? DEFAULT_SESSION_MAX_AGE_SECONDS, DEFAULT_SESSION_MAX_AGE_SECONDS),
     )
 
+    /*
+     * `sv` = نسخهٔ نشست. با تغییر رمز، هش عوض می‌شود و همهٔ توکن‌های قبلی در
+     * `getCurrentUser` رد می‌شوند. اگر هش در دسترس نباشد (مثلاً مسیری که فقط
+     * id/email دارد) مقدار `null` می‌رود؛ `getCurrentUser` آن را «توکن legacy»
+     * می‌داند و می‌پذیرد — تا هیچ مسیر فعلی نشکند.
+     */
+    const passwordHash = options.passwordHash ?? user.password
+    const sessionVersion =
+        typeof passwordHash === "string" && passwordHash.length > 0
+            ? deriveSessionVersion(passwordHash, secret)
+            : null
+
     const token = jwt.sign(
         {
             id: user.id,
@@ -53,6 +68,7 @@ export function createSession(
             // `null` نه `undefined`: کلید همیشه در payload هست تا شکل JWT
             // بین نشست‌های عادی و محدود یکنواخت بماند.
             resetTokenId: user.resetTokenId ?? null,
+            sv: sessionVersion,
         },
         secret,
         { expiresIn: maxAgeSeconds },

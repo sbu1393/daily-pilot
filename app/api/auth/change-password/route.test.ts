@@ -8,17 +8,24 @@ import { NextRequest } from "next/server"
 const mocks = vi.hoisted(() => ({
     getCurrentUser: vi.fn(),
     changePassword: vi.fn(),
+    isRateLimited: vi.fn(),
+    createSession: vi.fn(),
 }))
 
 vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: mocks.getCurrentUser }))
 vi.mock("@/app/lib/services/auth.service", () => ({ changePassword: mocks.changePassword }))
+vi.mock("@/app/lib/rateLimit", () => ({ isRateLimited: mocks.isRateLimited }))
+// createSession به JWT_SECRET نیاز دارد؛ رفتار خودش جدا سنجیده می‌شود.
+vi.mock("@/app/lib/createSession", () => ({ createSession: mocks.createSession }))
 
 import { POST } from "./route"
 
 describe("POST /api/auth/change-password — X-Request-ID (فاز صفر §7)", () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mocks.isRateLimited.mockReturnValue(false)
         mocks.getCurrentUser.mockResolvedValue(USER)
+        mocks.createSession.mockImplementation((_user: unknown, response: unknown) => response)
     })
 
     it("200 success carries X-Request-ID", async () => {
@@ -63,7 +70,9 @@ const callPOSTRaw = (rawBody: string) =>
 describe("POST /api/auth/change-password", () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mocks.isRateLimited.mockReturnValue(false)
         mocks.getCurrentUser.mockResolvedValue(USER)
+        mocks.createSession.mockImplementation((_user: unknown, response: unknown) => response)
     })
 
     it("returns 200 with { ok: true, message } on success", async () => {
@@ -74,6 +83,36 @@ describe("POST /api/auth/change-password", () => {
         expect(res.status).toBe(200)
         await expect(res.json()).resolves.toEqual({ ok: true, message: "رمز عبور با موفقیت تغییر یافت ✅" })
         expect(mocks.changePassword).toHaveBeenCalledWith(1, "oldpass123", "newpass123")
+    })
+
+    it("re-issues the current device session with the new password hash (sv)", async () => {
+        mocks.changePassword.mockResolvedValue("hashed-new-password")
+
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(200)
+        expect(mocks.createSession).toHaveBeenCalledTimes(1)
+        expect(mocks.createSession).toHaveBeenCalledWith(
+            { id: 1, email: "test@example.com", mustChangePassword: false, resetTokenId: null },
+            expect.anything(),
+            { passwordHash: "hashed-new-password" },
+        )
+    })
+
+    it("returns 429 RATE_LIMITED and never calls the service", async () => {
+        mocks.isRateLimited.mockReturnValue(true)
+
+        const res = await callPOST(VALID_BODY)
+
+        expect(res.status).toBe(429)
+        const parsed = await res.json()
+        expect(parsed.error.code).toBe("RATE_LIMITED")
+        expect(mocks.changePassword).not.toHaveBeenCalled()
+        expect(mocks.isRateLimited).toHaveBeenCalledWith(
+            `changepw:user:${USER.id}`,
+            expect.any(Number),
+            expect.any(Number),
+        )
     })
 
     it("returns 400 VALIDATION_ERROR when the new passwords do not match and never calls the service", async () => {

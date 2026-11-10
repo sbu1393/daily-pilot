@@ -30,6 +30,7 @@ vi.mock("./getPrisma", () => ({
 
 import jwt from "jsonwebtoken"
 import { EntitlementConflictError } from "./services/errors"
+import { deriveSessionVersion } from "./sessionVersion"
 import { getCurrentUser } from "./getCurrentUser"
 
 const SECRET = "unit-test-secret"
@@ -200,6 +201,71 @@ describe("getCurrentUser (M1 — auth vs infrastructure failures)", () => {
         )
 
         await expect(getCurrentUser()).resolves.toMatchObject({ resetTokenId: null })
+    })
+
+    /* ---------------- Session version (`sv`) — invalidation after password change ---------------- */
+
+    it("accepts a bound token whose sv matches the current DB password hash (and never returns the hash)", async () => {
+        mocks.findUnique.mockResolvedValue({ ...USER, password: "hashed-current-password" })
+        mocks.cookieToken.mockReturnValue(
+            cookieWith(
+                jwt.sign(
+                    {
+                        id: 1,
+                        email: "test@example.com",
+                        sv: deriveSessionVersion("hashed-current-password", SECRET),
+                    },
+                    SECRET,
+                ),
+            ),
+        )
+
+        const result = await getCurrentUser()
+
+        expect(result).toEqual({ ...USER, plan: "FREE", resetTokenId: null })
+        expect(result).not.toHaveProperty("password")
+    })
+
+    it("returns null for a bound token after the password hash changed (previous sessions invalidated)", async () => {
+        // توکن با هش قدیمی امضا شده، ولی DB هش جدید دارد (changePassword)
+        mocks.findUnique.mockResolvedValue({ ...USER, password: "hashed-new-password" })
+        mocks.cookieToken.mockReturnValue(
+            cookieWith(
+                jwt.sign(
+                    {
+                        id: 1,
+                        email: "test@example.com",
+                        sv: deriveSessionVersion("hashed-old-password", SECRET),
+                    },
+                    SECRET,
+                ),
+            ),
+        )
+
+        await expect(getCurrentUser()).resolves.toBeNull()
+        // هیچ کار پرهزینه‌ای (resolve پلن) بعد از رد نشست انجام نمی‌شود
+        expect(mocks.entFindUnique).not.toHaveBeenCalled()
+    })
+
+    it("returns null when the token is bound but the DB row has no password hash", async () => {
+        mocks.cookieToken.mockReturnValue(
+            cookieWith(
+                jwt.sign(
+                    { id: 1, email: "test@example.com", sv: "some-session-version" },
+                    SECRET,
+                ),
+            ),
+        )
+
+        await expect(getCurrentUser()).resolves.toBeNull()
+    })
+
+    it("selects password only for sv verification (not part of the public result)", async () => {
+        await getCurrentUser()
+
+        expect(mocks.findUnique).toHaveBeenCalledWith(
+            expect.objectContaining({ select: expect.objectContaining({ password: true }) }),
+        )
     })
 
     it("returns null (no DB call) when the session cookie is absent", async () => {

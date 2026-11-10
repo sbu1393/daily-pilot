@@ -137,36 +137,55 @@ export interface PrismaAuthClient extends PasswordResetClient {
 }
 
 export type ProfileUpdateInput = {
-    username: string
+    /*
+     * همهٔ فیلدها اختیاری‌اند چون قرارداد PATCH «جزئی» است: کلیدی که در بدنه
+     * نیست اصلاً لمس نمی‌شود. `null`/رشتهٔ خالی یعنی «پاک کردن صریح».
+     */
+    username?: string
     firstName?: string | null
     lastName?: string | null
     phone?: string | null
     birthDate?: string | null
 }
 
-// ---------- ویرایش پروفایل ----------
+// ---------- ویرایش پروفایل (Partial) ----------
 export async function updateProfile(userId: number, currentUsername: string, input: ProfileUpdateInput) {
-    const { username, firstName, lastName, phone, birthDate } = input
     const prisma = getPrisma()
 
-    // بررسی تکراری نبودن نام کاربری (اگر تغییر کرده باشد)
-    if (username !== currentUsername) {
-        const exists = await prisma.user.findFirst({
-            where: { username, id: { not: userId } },
-            select: { id: true },
-        })
-        if (exists) throw new UsernameTakenError()
+    /*
+     * فقط کلیدهای حاضر ساخته می‌شوند. `undefined` یعنی «در بدنه نبود» →
+     * در `data` قرار نمی‌گیرد و Prisma فیلد را بازنویسی نمی‌کند؛ `null` یا
+     * رشتهٔ خالی یعنی «پاک کن». این همان تفکیکی است که نسخهٔ قبلی نداشت و
+     * هر PATCH جزئی، نام/تلفن/تاریخ تولد را بی‌صدا null می‌کرد.
+     */
+    const data: {
+        username?: string
+        firstName?: string | null
+        lastName?: string | null
+        phone?: string | null
+        birthDate?: Date | null
+    } = {}
+
+    if (input.username !== undefined) {
+        // بررسی تکراری نبودن نام کاربری (اگر واقعاً تغییر کرده باشد)
+        if (input.username !== currentUsername) {
+            const exists = await prisma.user.findFirst({
+                where: { username: input.username, id: { not: userId } },
+                select: { id: true },
+            })
+            if (exists) throw new UsernameTakenError()
+        }
+        data.username = input.username
     }
+
+    if (input.firstName !== undefined) data.firstName = input.firstName?.trim() || null
+    if (input.lastName !== undefined) data.lastName = input.lastName?.trim() || null
+    if (input.phone !== undefined) data.phone = input.phone?.trim() || null
+    if (input.birthDate !== undefined) data.birthDate = input.birthDate ? new Date(input.birthDate) : null
 
     return prisma.user.update({
         where: { id: userId },
-        data: {
-            username,
-            firstName: firstName?.trim() || null,
-            lastName: lastName?.trim() || null,
-            phone: phone?.trim() || null,
-            birthDate: birthDate ? new Date(birthDate) : null,
-        },
+        data,
         select: {
             id: true,
             username: true,
@@ -212,7 +231,7 @@ export async function changePassword(
     userId: number,
     currentPassword: string,
     newPassword: string,
-): Promise<void> {
+): Promise<string> {
     const prisma = getPrisma()
     const record = await prisma.user.findUnique({
         where: { id: userId },
@@ -234,4 +253,11 @@ export async function changePassword(
 
     // رمز تازه تعیین شد ⇒ هر رمز موقتِ در جریان بی‌اثر است.
     await invalidateActiveTokensForUser(prisma as unknown as PasswordResetClient, userId)
+
+    /*
+     * هش تازه برگردانده می‌شود تا route بتواند همان لحظه کوکی این دستگاه را با
+     * نسخهٔ نشست جدید بازصدور کند (وگرنه کاربر همین دستگاه هم logout می‌شد).
+     * سایر دستگاه‌ها چون هش قدیمی را در claim `sv` دارند، در اولین درخواست باطل می‌شوند.
+     */
+    return hashed
 }

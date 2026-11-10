@@ -11,10 +11,12 @@ const mocks = vi.hoisted(() => ({
     touchAuthenticatedActivity: vi.fn(),
     recordProductEvent: vi.fn(),
     getPrisma: vi.fn(),
+    isRateLimited: vi.fn(),
 }))
 
 vi.mock("@/app/lib/getCurrentUser", () => ({ getCurrentUser: mocks.getCurrentUser }))
 vi.mock("@/app/lib/services/auth.service", () => ({ updateProfile: mocks.updateProfile }))
+vi.mock("@/app/lib/rateLimit", () => ({ isRateLimited: mocks.isRateLimited }))
 vi.mock("@/app/lib/getPrisma", () => ({ getPrisma: mocks.getPrisma }))
 vi.mock("@/app/lib/services/userActivity.service", () => ({
     touchAuthenticatedActivity: mocks.touchAuthenticatedActivity,
@@ -28,6 +30,7 @@ import { GET, PATCH } from "./route"
 describe("/api/auth/profile — X-Request-ID (فاز صفر §7)", () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mocks.isRateLimited.mockReturnValue(false)
         mocks.getCurrentUser.mockResolvedValue(USER)
         mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
         mocks.recordProductEvent.mockResolvedValue({ recorded: true, eventName: "profile.updated" })
@@ -87,6 +90,7 @@ const callPATCHRaw = (rawBody: string) =>
 describe("GET /api/auth/profile", () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mocks.isRateLimited.mockReturnValue(false)
         mocks.getCurrentUser.mockResolvedValue(USER)
     })
 
@@ -113,6 +117,7 @@ describe("GET /api/auth/profile", () => {
 describe("PATCH /api/auth/profile", () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mocks.isRateLimited.mockReturnValue(false)
         mocks.getCurrentUser.mockResolvedValue(USER)
         mocks.touchAuthenticatedActivity.mockResolvedValue({ touched: true })
         mocks.recordProductEvent.mockResolvedValue({ recorded: true, eventName: "profile.updated" })
@@ -132,6 +137,33 @@ describe("PATCH /api/auth/profile", () => {
             message: expect.any(String),
         })
         expect(mocks.updateProfile).toHaveBeenCalledWith(1, "test", { username: "test", firstName: "علی" })
+    })
+
+    it("forwards only the keys present in the body (true partial PATCH)", async () => {
+        const updated = { ...USER, phone: "09121234567" }
+        mocks.updateProfile.mockResolvedValue(updated)
+
+        const res = await callPATCH({ phone: "09121234567" })
+
+        expect(res.status).toBe(200)
+        // هیچ فیلد دیگری (username/firstName/…) به سرویس نمی‌رود و null نمی‌شود
+        expect(mocks.updateProfile).toHaveBeenCalledWith(1, "test", { phone: "09121234567" })
+    })
+
+    it("returns 429 RATE_LIMITED and never calls the service", async () => {
+        mocks.isRateLimited.mockReturnValue(true)
+
+        const res = await callPATCH({ phone: "09121234567" })
+
+        expect(res.status).toBe(429)
+        const parsed = await res.json()
+        expect(parsed.error.code).toBe("RATE_LIMITED")
+        expect(mocks.updateProfile).not.toHaveBeenCalled()
+        expect(mocks.isRateLimited).toHaveBeenCalledWith(
+            `profile:user:${USER.id}`,
+            expect.any(Number),
+            expect.any(Number),
+        )
     })
 
     it("returns 400 VALIDATION_ERROR for an invalid body and never calls the service", async () => {

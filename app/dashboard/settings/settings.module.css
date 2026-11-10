@@ -300,7 +300,8 @@
     }
 
     .nav {
-        grid-template-columns: repeat(3, 1fr);
+        /* ۴ تب → گرید ۲×۲ متقارن؛ گرید ۳ ستونه آیتم چهارم را تنها می‌گذاشت. */
+        grid-template-columns: repeat(2, 1fr);
     }
 
     .navItem {

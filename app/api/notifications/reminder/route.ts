@@ -41,6 +41,39 @@ const reminderScheduleSchema = z.object({
         .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, "زمان باید در قالب HH:MM باشد"),
 })
 
+/**
+ * GET — همان دو فیلد آینه‌شده را برمی‌گرداند.
+ *
+ * چرا لازم است؟ UI با localStorage شروع می‌کند، ولی طبق مدل «سرور منبع حقیقت»،
+ * هنگام mount باید بداند سرور چه چیزی دارد (ممکن است روی دستگاه دیگری عوض شده
+ * باشد). این GET فقط خواندن است و هیچ Push/زمان‌بندی‌ای دست نمی‌زند.
+ */
+export async function GET() {
+    const context = createObservabilityContext("/api/notifications/reminder", "notifications")
+    try {
+        const user = await requireVerifiedUser()
+        if (!user) return unauthorizedResponse(context.requestId)
+        context.userId = user.id
+
+        const settings = await getPrisma().user.findUnique({
+            where: { id: user.id },
+            select: { reminderEnabled: true, reminderTime: true },
+        })
+
+        if (!settings) return unauthorizedResponse(context.requestId)
+
+        return okResponse(
+            { enabled: settings.reminderEnabled, time: settings.reminderTime },
+            { requestId: context.requestId },
+        )
+    } catch (error) {
+        await recordError(error, context)
+        const mapped = toServiceErrorResponse(error, context.requestId)
+        if (mapped) return mapped
+        return errorResponse(500, "INTERNAL", "Server error", undefined, context.requestId)
+    }
+}
+
 export async function POST(req: NextRequest) {
     const context = createObservabilityContext("/api/notifications/reminder", "notifications")
     try {

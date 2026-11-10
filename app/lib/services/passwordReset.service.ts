@@ -211,7 +211,7 @@ async function incrementAttempts(prisma: PasswordResetClient, tokenId: string): 
 export async function consumeTokenAndSetPassword(
     tx: PasswordResetClient,
     input: { userId: number; tokenId: string; newPassword: string },
-): Promise<void> {
+): Promise<string> {
     const deleted = await tx.passwordResetToken.deleteMany({
         where: { id: input.tokenId, userId: input.userId },
     })
@@ -225,6 +225,9 @@ export async function consumeTokenAndSetPassword(
         where: { id: input.userId },
         data: { password: hashed, mustChangePassword: false },
     })
+
+    // هش تازه برای بستن نشست در همان response (claim `sv`) لازم است.
+    return hashed
 }
 
 /**

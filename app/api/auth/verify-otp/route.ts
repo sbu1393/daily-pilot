@@ -109,7 +109,8 @@ export async function POST(req: NextRequest) {
     const user = challengeId
       ? await prisma.user.findUnique({
           where: { email: record.email },
-          select: { id: true, username: true, email: true, mustChangePassword: true },
+          // `password` فقط برای ساخت claim `sv` (نسخهٔ نشست) لازم است؛ در پاسخ نمی‌رود.
+          select: { id: true, username: true, email: true, mustChangePassword: true, password: true },
         })
       : null
 

@@ -86,13 +86,13 @@
 
 /* ---------- مودال: چرخ‌های لمسی تاریخ شمسی + ساعت ۲۴ساعته ---------- */
 .pickerWheels {
-    --wheel-item: 40px;
-    --wheel-visible: 5;
+    --wheel-item: 36px;
+    --wheel-visible: 4;
     display: flex;
     flex-wrap: wrap;
     align-items: flex-end;
     justify-content: center;
-    gap: 10px;
+    gap: 8px;
     direction: rtl;
 }
 
@@ -100,7 +100,7 @@
     display: grid;
     grid-template-columns: minmax(3.2rem, 0.9fr) minmax(5rem, 1.35fr) minmax(3.8rem, 1fr);
     gap: 6px;
-    flex: 1 1 17rem;
+    flex: 1 1 14rem;
     min-width: 0;
 }
 
@@ -118,7 +118,7 @@
 .wheelColumn {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 0;
     min-width: 0;
 }
 
@@ -241,7 +241,7 @@
 .pickerColon {
     flex: 0 0 auto;
     align-self: flex-end;
-    margin-bottom: calc(var(--wheel-item) * var(--wheel-visible) / 2 - 0.65rem);
+    margin-bottom: calc(var(--wheel-item) * var(--wheel-visible) / 4);
     font-weight: 800;
     color: var(--muted);
 }
@@ -311,6 +311,7 @@
         --wheel-visible: 3;
         flex-direction: column;
         align-items: stretch;
+        gap: 6px;
     }
 
     .pickerTimeWheels {

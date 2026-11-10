@@ -36,7 +36,7 @@ type Props = {
 }
 
 /** هم‌گام با `--wheel-item` در reminder.module.css */
-const WHEEL_ITEM_HEIGHT = 40
+const WHEEL_ITEM_HEIGHT = 36
 
 /**
  * فقط برای مرورگرهایی که `scrollend` ندارند؛ با هر رویداد scroll ریست می‌شود

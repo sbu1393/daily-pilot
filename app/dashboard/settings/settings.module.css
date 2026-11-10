@@ -255,34 +255,28 @@
     max-width: 220px;
 }
 
-/* ====== تب‌های اطلاعات ====== */
-.infoTabs {
+/* ====== منطقه خطر / اقدام‌های اطلاعات ====== */
+.dangerZone {
+    border-color: rgba(220, 38, 38, .45);
+    background: linear-gradient(180deg, var(--danger-bg), var(--surface));
+}
+
+.dangerZone .cardTitle {
+    color: var(--danger);
+}
+
+.actionRow {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
 }
 
-.infoTab {
-    border: 1.5px solid var(--border);
-    background: var(--surface-solid);
-    color: var(--ink-2);
-    font: inherit;
-    font-size: .8rem;
-    font-weight: 700;
-    padding: 9px 16px;
-    border-radius: 999px;
-    cursor: pointer;
-    transition: var(--transition);
-}
-
-.infoTab:hover {
-    border-color: var(--primary);
-}
-
-.infoTabActive {
-    border-color: var(--primary);
-    background: var(--primary-soft);
-    color: var(--primary-dark);
+/* فوکوس کیبورد واضح برای کنترل‌هایی که کلاس سراسری dp-btn ندارند. */
+.navItem:focus-visible,
+.themeOption:focus-visible,
+.switch:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
 }
 
 /* اسپینر داخل دکمه‌های ذخیره/ارسال — هماهنگ با سایر بخش‌های برنامه */

@@ -11,9 +11,10 @@ import { AnimatePresence, motion } from "framer-motion"
 import Avatar from "@/app/components/Avatar"
 import AvatarUpload from "@/app/components/AvatarUpload"
 import FormInput from "@/app/components/FormInput"
+import AnimatedModal from "@/app/components/motion/AnimatedModal"
 import { profileSchema } from "@/app/schema/formSchema"
 import { useSettings } from "@/app/contexts/SettingsContext"
-import { ensureOfflineScope } from "@/app/lib/offline"
+import { ensureOfflineScope, setOfflineUserId } from "@/app/lib/offline"
 import { api } from "@/app/lib/api/client"
 import {
     ensurePushSubscription,
@@ -38,7 +39,8 @@ import { SETTINGS_PRIVACY_PARAGRAPHS } from "@/app/lib/privacyContent"
 import { DEFAULT_TIMEZONE, timezoneOptionsWith } from "@/app/lib/timezones"
 import InstallCard from "@/app/components/pwa/InstallCard"
 import styles from "./settings.module.css"
-import { AlarmClock, BellRing, LaptopMinimalCheck, LibraryBig, Loader2, LockKeyholeOpen, MonitorCog, Moon, Palette, Send, Settings, SunMedium, UserRound } from "lucide-react"
+import taskStyles from "@/app/components/task/task.module.css"
+import { AlarmClock, BellRing, Download, LaptopMinimalCheck, LibraryBig, LifeBuoy, Loader2, LockKeyholeOpen, MonitorCog, Moon, Palette, Send, Settings, SunMedium, Trash2, UserRound } from "lucide-react"
 
 type ProfileInput = z.infer<typeof profileSchema>
 
@@ -123,13 +125,10 @@ const tabMotion = {
     transition: { duration: .28, ease: "easeOut" as const },
 }
 
-type InfoTab = "about" | "feedback" | "privacy"
-
 export default function SettingsPanel({ user }: { user: UserData }) {
     const router = useRouter()
     const { settings, update, playBeep, requestNotificationPermission } = useSettings()
     const [tab, setTab] = useState<Tab>("account")
-    const [infoTab, setInfoTab] = useState<InfoTab>("about")
     const [saving, setSaving] = useState(false)
     const [birthDate, setBirthDate] = useState<string>(toDateInput(user.birthDate))
     const [birthJalali, setBirthJalali] = useState<JalaliParts>(() => {
@@ -145,6 +144,11 @@ export default function SettingsPanel({ user }: { user: UserData }) {
     const timezoneOptions = timezoneOptionsWith(user.timezone)
     // دکمه‌ی اعلان آزمایشی — وضعیت مستقل تا بقیهٔ دکمه‌ها را قفل نکند.
     const [testNotificationLoading, setTestNotificationLoading] = useState(false)
+    // خروجی داده‌ها و Danger Zone — هرکدام وضعیت بارگذاری جدا دارند.
+    const [exportLoading, setExportLoading] = useState(false)
+    const [deleteOpen, setDeleteOpen] = useState(false)
+    const [deletePassword, setDeletePassword] = useState("")
+    const [deleteLoading, setDeleteLoading] = useState(false)
     // گارد هم‌گام‌سازی یک‌بارهٔ اشتراک Push
     const pushSyncedRef = useRef(false)
     /*
@@ -426,6 +430,77 @@ export default function SettingsPanel({ user }: { user: UserData }) {
         }
     }
 
+    /*
+     * دریافت نسخه پشتیبان: چون پاسخ `Content-Disposition: attachment` است،
+     * از fetch + Blob استفاده می‌کنیم تا خطاهای HTTP (401/429/500) هم به
+     * Toast تبدیل شوند؛ ناوبری مستقیم به لینک در خطا صفحهٔ JSON نشان می‌داد.
+     */
+    const onExportData = async () => {
+        if (exportLoading) return
+        setExportLoading(true)
+        try {
+            const response = await fetch("/api/user/export", {
+                method: "GET",
+                headers: { Accept: "application/json" },
+                cache: "no-store",
+            })
+
+            if (!response.ok) {
+                const payload = (await response.json().catch(() => null)) as
+                    | { error?: { message?: string }; message?: string }
+                    | null
+                toast.error(
+                    payload?.error?.message ??
+                        payload?.message ??
+                        "دریافت نسخه پشتیبان ناموفق بود",
+                )
+                return
+            }
+
+            const blob = await response.blob()
+            const objectUrl = URL.createObjectURL(blob)
+            const link = document.createElement("a")
+            link.href = objectUrl
+            link.download = "roozsaz-data.json"
+            document.body.appendChild(link)
+            link.click()
+            link.remove()
+            URL.revokeObjectURL(objectUrl)
+            toast.success("نسخه پشتیبان با موفقیت دانلود شد ✅")
+        } catch {
+            toast.error("دریافت نسخه پشتیبان ناموفق بود؛ اتصال را بررسی کن")
+        } finally {
+            setExportLoading(false)
+        }
+    }
+
+    /*
+     * حذف حساب: تأیید دوم با رمز عبور. دکمه تا ورود رمز غیرفعال است و
+     * مودال در حین درخواست بسته نمی‌شود تا کاربر دوباره ارسال نکند.
+     */
+    const onDeleteAccount = async () => {
+        if (!deletePassword || deleteLoading) return
+        setDeleteLoading(true)
+        try {
+            await api("/api/user/delete-account", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password: deletePassword }),
+            })
+            toast.success("حساب کاربری حذف شد")
+            setDeleteOpen(false)
+            setDeletePassword("")
+            // پاک‌کردن scope محلی تا تنظیمات/کش حساب حذف‌شده روی دستگاه نماند.
+            setOfflineUserId(null)
+            // Reload کامل: وضعیت احراز هویت و کش‌های کلاینت باید از صفر ساخته شوند.
+            window.location.assign("/")
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "حذف حساب کاربری ناموفق بود")
+        } finally {
+            setDeleteLoading(false)
+        }
+    }
+
     const changePassword = async (e: React.FormEvent) => {
         e.preventDefault()
         setPasswordError(null)
@@ -472,11 +547,12 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                     </div>
                 </div>
 
-                <nav className={styles.nav}>
+                <nav className={styles.nav} aria-label="بخش‌های تنظیمات">
                     <button
                         type="button"
                         className={`${styles.navItem} ${tab === "account" ? styles.navItemActive : ""}`}
                         onClick={() => setTab("account")}
+                        aria-current={tab === "account" ? "page" : undefined}
                     >
                         <UserRound /> حساب کاربری
                     </button>
@@ -484,14 +560,16 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                         type="button"
                         className={`${styles.navItem} ${tab === "preferences" ? styles.navItemActive : ""}`}
                         onClick={() => setTab("preferences")}
+                        aria-current={tab === "preferences" ? "page" : undefined}
                     >
-                        <Settings /> تنظیمات
+                        <Settings /> تنظیمات برنامه
                     </button>
                     <button
                         type="button"
 
                         className={`${styles.navItem} ${tab === "install" ? styles.navItemActive : ""}`}
                         onClick={() => setTab("install")}
+                        aria-current={tab === "install" ? "page" : undefined}
                     >
                         <LaptopMinimalCheck /> نصب برنامه
                     </button>
@@ -500,8 +578,9 @@ export default function SettingsPanel({ user }: { user: UserData }) {
 
                         className={`${styles.navItem} ${tab === "info" ? styles.navItemActive : ""}`}
                         onClick={() => setTab("info")}
+                        aria-current={tab === "info" ? "page" : undefined}
                     >
-                        <LibraryBig /> اطلاعات
+                        <LibraryBig /> درباره و پشتیبانی
                     </button>
                 </nav>
             </div>
@@ -693,6 +772,55 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                                 </form>
                             )}
                         </div>
+
+                        {/*
+                         * خروجی داده‌ها: فایل JSON سمت سرور ساخته می‌شود و با
+                         * Content-Disposition دانلود می‌شود. هیچ داده‌ای از سمت
+                         * کلاینت تعیین نمی‌کند چه چیزی/برای چه کسی صادر شود.
+                         */}
+                        <div className={styles.card}>
+                            <h3 className={styles.cardTitle}><Download /> نسخه پشتیبان داده‌ها</h3>
+                            <p className={styles.muted}>
+                                یک فایل JSON شامل پروفایل، تسک‌ها، برنامه‌های روزانه و تنظیمات
+                                ذخیره‌شده روی سرور دریافت کنید. رمز عبور و اطلاعات نشست در این
+                                فایل نیست.
+                            </p>
+                            <button
+                                type="button"
+                                className="dp-btn dp-btn-primary"
+                                onClick={onExportData}
+                                disabled={exportLoading}
+                                aria-busy={exportLoading}
+                            >
+                                {exportLoading && (
+                                    <Loader2 size={16} className={styles.spinner} aria-hidden="true" />
+                                )}
+                                {exportLoading ? "در حال آماده‌سازی..." : "دریافت فایل JSON"}
+                            </button>
+                        </div>
+
+                        {/*
+                         * Danger Zone: آخرین کارت تب حساب کاربری. حذف فقط با
+                         * تأیید رمز عبور در مودال انجام می‌شود؛ این کارت خودش
+                         * هیچ داده‌ای را حذف نمی‌کند.
+                         */}
+                        <div className={`${styles.card} ${styles.dangerZone}`}>
+                            <h3 className={styles.cardTitle}><Trash2 /> منطقه خطر</h3>
+                            <p className={styles.muted}>
+                                حذف حساب کاربری بازگشت‌پذیر نیست. همهٔ تسک‌ها، برنامه‌های
+                                روزانه، تنظیمات و اشتراک‌های اعلان شما پاک می‌شوند.
+                            </p>
+                            <div>
+                                <button
+                                    type="button"
+                                    className="dp-btn dp-btn-danger"
+                                    onClick={() => setDeleteOpen(true)}
+                                >
+                                    <Trash2 size={16} aria-hidden="true" />
+                                    حذف حساب کاربری
+                                </button>
+                            </div>
+                        </div>
                     </motion.section>
                 )}
 
@@ -837,122 +965,135 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                 )}
 
 
-                {/* ===== اطلاعات ===== */}
+                {/* ===== اطلاعات و پشتیبانی ===== */}
                 {tab === "info" && (
                     <motion.section key="info" className={styles.section} {...tabMotion}>
-                        <h2 className={styles.title}>اطلاعات</h2>
-                        <p className={styles.subtitle}>درباره ما، بازخورد شما و حریم خصوصی.</p>
+                        <h2 className={styles.title}>درباره و پشتیبانی</h2>
+                        <p className={styles.subtitle}>
+                            درباره روزساز، حریم خصوصی و راه‌های ارتباط با ما.
+                        </p>
 
-                        <div className={styles.infoTabs}>
-                            {([
-                                { key: "about", label: "درباره ما" },
-                                { key: "feedback", label: "انتقادات و پیشنهادات" },
-                                { key: "privacy", label: "حریم خصوصی" },
-                            ] as const).map((t) => (
-                                <button
-                                    key={t.key}
-                                    type="button"
-                                    className={`${styles.infoTab} ${infoTab === t.key ? styles.infoTabActive : ""}`}
-                                    onClick={() => setInfoTab(t.key)}
-                                >
-                                    {t.label}
-                                </button>
-                            ))}
+                        {/*
+                         * قبلاً این تب سه زیرتب داشت و «بازخورد» فقط یک mailto
+                         * ناقص بود. اکنون همه‌چیز یک‌جا و بدون ناوبری تودرتو
+                         * نمایش داده می‌شود و مسیر بازخورد به سامانه تیکت
+                         * (که پیگیری واقعی دارد) وصل شده است.
+                         */}
+                        <div className={styles.card}>
+                            <h3 className={styles.cardTitle}>درباره روزساز</h3>
+                            <p className={styles.text}>
+                                روزساز یک برنامه‌ی هوشمند برنامه‌ریزی روزانه است که با کمک هوش مصنوعی
+                                به شما کمک می‌کند کارهای روزانه‌تان را اولویت‌بندی کنید، برای هر کار
+                                زمان واقع‌بینانه‌ای تخصیص دهید و عادت‌های بهتری بسازید.
+                            </p>
+                            <p className={styles.text}>
+                                موتور برنامه‌ریزی ما با در نظر گرفتن بودجه‌ی زمانی روز، اهمیت هر کار و
+                                تخمین زمان آن، برنامه‌ای متعادل می‌سازد که هم واقع‌بینانه باشد و هم
+                                به‌سادگی قابل انجام.
+                            </p>
+                            <p className={styles.text}>ساخته‌شده با ❤️ برای روزهای بهتر.</p>
                         </div>
 
-                        {infoTab === "about" && (
-                            <div className={styles.card}>
-                                <h3 className={styles.cardTitle}>درباره روزساز</h3>
-                                <p className={styles.text}>
-                                    روزساز یک برنامه‌ی هوشمند برنامه‌ریزی روزانه هست که با کمک هوش مصنوعی
-                                    به شما کمک می‌کنه کارهای روزانه‌ خودتون رو اولویت‌ بندی کنین، برای هر کار زمان
-                                واقع‌بینانه‌ای تخصیص بدین و عادت‌های بهتری بسازین.
-                                </p>
-                                <p className={styles.text}>
-                                    موتور برنامه‌ریزی ما با در نظر گرفتن بودجه‌ی زمانی روز، اهمیت هر کار و
-                                    تخمین زمان آن، برنامه‌ای متعادل میسازه که هم واقع‌بینانه باشه و هم
-                                    به‌سادگی قابل انجام.
-                                </p>
-                                <p className={styles.text}>ساخته‌شده با ❤️ برای روزهای بهتر.</p>
-                            </div>
-                        )}
-
-                        {infoTab === "feedback" && (
-                            <FeedbackForm />
-                        )}
-
-                        {infoTab === "privacy" && (
-                            <div className={styles.card}>
-                                <h3 className={styles.cardTitle}>سیاست حفظ حریم خصوصی</h3>
-                                {/* متن از app/lib/privacyContent.ts خوانده می‌شود تا با صفحه‌ی
-                                    /privacy یکی باشد. این نسخه دو ادعای نادرستِ نسخه‌ی قبلی را
-                                    اصلاح می‌کند: «هرگز به اشخاص ثالث واگذار نمی‌شود» (درست
-                                    نبود — عنوان کار به 1xai.ir و ایمیل به Resend می‌رود) و
-                                    «تنظیمات به سرور ارسال نمی‌شوند» (یادآور روزانه روی سرور
-                                    ذخیره می‌شود تا Push ارسال شود). */}
-                                {SETTINGS_PRIVACY_PARAGRAPHS.map((paragraph) => (
-                                    <p key={paragraph} className={styles.text}>
-                                        {paragraph}
-                                    </p>
-                                ))}
-                                <Link href="/privacy" className={styles.text}>
-                                    متن کامل سیاست حریم خصوصی
+                        <div className={styles.card}>
+                            <h3 className={styles.cardTitle}><LifeBuoy /> پشتیبانی و تیکت‌ها</h3>
+                            <p className={styles.muted}>
+                                برای گزارش مشکل، پیگیری درخواست یا ارسال پیشنهاد، یک تیکت ثبت کنید؛
+                                پاسخ‌ها در همین حساب قابل مشاهده و پیگیری هستند.
+                            </p>
+                            <div className={styles.actionRow}>
+                                <Link href="/support/new" className="dp-btn dp-btn-primary">
+                                    ثبت تیکت جدید
+                                </Link>
+                                <Link href="/support" className="dp-btn dp-btn-ghost">
+                                    تیکت‌های من
                                 </Link>
                             </div>
-                        )}
+                        </div>
+
+                        <div className={styles.card}>
+                            <h3 className={styles.cardTitle}>سیاست حفظ حریم خصوصی</h3>
+                            {/* متن از app/lib/privacyContent.ts خوانده می‌شود تا با صفحه‌ی
+                                /privacy یکی باشد. این نسخه دو ادعای نادرستِ نسخه‌ی قبلی را
+                                اصلاح می‌کند: «هرگز به اشخاص ثالث واگذار نمی‌شود» (درست
+                                نبود — عنوان کار به 1xai.ir و ایمیل به Resend می‌رود) و
+                                «تنظیمات به سرور ارسال نمی‌شوند» (یادآور روزانه روی سرور
+                                ذخیره می‌شود تا Push ارسال شود). */}
+                            {SETTINGS_PRIVACY_PARAGRAPHS.map((paragraph) => (
+                                <p key={paragraph} className={styles.text}>
+                                    {paragraph}
+                                </p>
+                            ))}
+                            <Link href="/privacy" className={styles.text}>
+                                متن کامل سیاست حریم خصوصی
+                            </Link>
+                        </div>
                     </motion.section>
                 )}
                 </AnimatePresence>
-            </div>
-        </div>
-    )
-}
 
-function FeedbackForm() {
-    const [message, setMessage] = useState("")
-    const [email, setEmail] = useState("")
+                {/* مودال تأیید حذف حساب — بیرون از AnimatePresence تا با تغییر تب ناگهان unmount نشود. */}
+                <AnimatedModal
+                    open={deleteOpen}
+                    onClose={() => {
+                        if (!deleteLoading) setDeleteOpen(false)
+                    }}
+                >
+                    <div className={taskStyles.modalHead}>
+                        <h4>حذف حساب کاربری</h4>
+                        <button
+                            type="button"
+                            className={taskStyles.closeBtn}
+                            onClick={() => {
+                                if (!deleteLoading) setDeleteOpen(false)
+                            }}
+                            aria-label="بستن"
+                        >
+                            ✕
+                        </button>
+                    </div>
 
-    const submit = () => {
-        if (!message.trim()) {
-            toast.error("لطفاً متن پیام را بنویسید")
-            return
-        }
-        const subject = encodeURIComponent("بازخورد کاربر روزساز")
-        const body = encodeURIComponent(`${message.trim()}\\n\\n— از طرف: ${email.trim() || "کاربر ناشناس"}`)
-        window.location.href = `mailto:info@rouzsaz.ir?subject=${subject}&body=${body}`
-        toast.success("برنامه‌ی ایمیل شما باز می‌شود؛ فقط کافی است ارسال را بزنید")
-    }
+                    <p className={taskStyles.hint}>
+                        این عمل بازگشت‌پذیر نیست. برای تأیید، رمز عبور فعلی خود را وارد کنید.
+                    </p>
 
-    return (
-        <div className={styles.card}>
-            <h3 className={styles.cardTitle}>انتقادات و پیشنهادات</h3>
-            <p className={styles.muted}>
-                نظر شما برای بهتر شدن روزساز ارزشمند است. پیام خود را بنویسید تا از طریق ایمیل برای ما ارسال شود.
-            </p>
-            <div className="dp-form">
-                <div className="dp-field">
-                    <label className="dp-field-label">ایمیل شما (اختیاری)</label>
-                    <input
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        placeholder="example@email.com"
-                        className="dp-input"
-                    />
-                </div>
-                <div className="dp-field">
-                    <label className="dp-field-label">پیام شما</label>
-                    <textarea
-                        value={message}
-                        onChange={(e) => setMessage(e.target.value)}
-                        rows={5}
-                        placeholder="نظر، پیشنهاد یا انتقاد خود را بنویسید..."
-                        className="dp-input fa-digits"
-                    />
-                </div>
-                <button type="button" className="dp-btn dp-btn-primary" onClick={submit}>
-                    ارسال بازخورد
-                </button>
+                    <div className="dp-form-group">
+                        <label className="dp-label" htmlFor="delete-account-password">
+                            رمز عبور فعلی
+                        </label>
+                        <input
+                            id="delete-account-password"
+                            type="password"
+                            className="dp-input"
+                            value={deletePassword}
+                            onChange={(e) => setDeletePassword(e.target.value)}
+                            autoComplete="current-password"
+                            disabled={deleteLoading}
+                            autoFocus
+                        />
+                    </div>
+
+                    <div className={taskStyles.modalActions}>
+                        <button
+                            type="button"
+                            className="dp-btn dp-btn-danger"
+                            onClick={onDeleteAccount}
+                            disabled={!deletePassword || deleteLoading}
+                        >
+                            {deleteLoading && (
+                                <Loader2 size={16} className={styles.spinner} aria-hidden="true" />
+                            )}
+                            {deleteLoading ? "در حال حذف..." : "حذف دائمی حساب"}
+                        </button>
+                        <button
+                            type="button"
+                            className="dp-btn dp-btn-ghost"
+                            onClick={() => setDeleteOpen(false)}
+                            disabled={deleteLoading}
+                        >
+                            انصراف
+                        </button>
+                    </div>
+                </AnimatedModal>
             </div>
         </div>
     )

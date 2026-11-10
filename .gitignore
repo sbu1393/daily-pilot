@@ -45,3 +45,5 @@ next-env.d.ts
 # Python (icon generator)
 __pycache__/
 *.pyc
+android/rouzsaz-release-key.jks
+gradle.properties

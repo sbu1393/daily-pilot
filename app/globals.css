@@ -576,7 +576,10 @@ samp {
 }
 
 .header-user {
-  position: relative;
+  /* عمداً positioned نیست: منوی پروفایل باید به خودِ هدر لنگر شود، نه به آواتار.
+     آواتار در RTL در انتهای خط (نزدیک لبه‌ی چپ صفحه) است؛ اگر containing block
+     منو باشد، منوی ۲۴۰px از صفحه بیرون می‌زند و اسکرول افقی ایجاد می‌کند. */
+  position: static;
   display: flex;
   align-items: center;
 }
@@ -620,10 +623,17 @@ samp {
 
 .header-menu {
   position: absolute;
+  /* containing block اکنون .app-header است (نه آواتار)؛ پس offset از کل هدر
+     حساب می‌شود و منو همیشه ۸px پایین‌تر از کادر هدر می‌نشیند. */
   top: calc(100% + 8px);
-  inset-inline-start: 0;
-  min-width: 240px;
-  max-width: min(240px, 100%);
+  /* در RTL یعنی از سمت چپ؛ هم‌تراز با padding اینلاین هدر و آواتار.
+     همچنین همیشه به سمت داخل صفحه باز می‌شود، نه بیرون از viewport. */
+  inset-inline-start: auto;
+  inset-inline-end: 22px;
+  min-width: 0;
+  width: 240px;
+  /* 100% = عرض هدر؛ ۴۴px حاشیه‌ی امن دو طرف برای صفحه‌های خیلی باریک. */
+  max-width: calc(100% - 44px);
   background: var(--surface-solid);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -635,11 +645,18 @@ samp {
   animation: dp-pop .16s ease;
 }
 
-@media (max-width: 400px) {
+/* هم‌تراز با padding اینلاین هدر در هر بریک‌پوینت.
+   این دو قاعده عمداً بعد از قاعده‌ی پایه آمده‌اند: media query specificity
+   اضافه نمی‌کند، پس اگر قبل از آن بودند، مقدار 22px برنده می‌شد. */
+@media (max-width: 560px) {
   .header-menu {
-    inset-inline-end: 0;
-    inset-inline-start: auto;
-    max-width: min(240px, 100vw);
+    inset-inline-end: 12px;
+  }
+}
+
+@media (max-width: 380px) {
+  .header-menu {
+    inset-inline-end: 10px;
   }
 }
 

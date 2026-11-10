@@ -20,6 +20,7 @@ import {
     fetchReminderSchedule,
     hasNotificationPermission,
     removePushSubscription,
+    sendTestNotification,
     syncReminderSchedule,
     type PushFailureReason,
 } from "@/app/lib/pushSubscription"
@@ -34,9 +35,10 @@ import {
 import moment from "moment-jalaali"
 import { faDigits } from "@/app/lib/time"
 import { SETTINGS_PRIVACY_PARAGRAPHS } from "@/app/lib/privacyContent"
+import { DEFAULT_TIMEZONE, timezoneOptionsWith } from "@/app/lib/timezones"
 import InstallCard from "@/app/components/pwa/InstallCard"
 import styles from "./settings.module.css"
-import { AlarmClock, BellRing, LaptopMinimalCheck, LibraryBig, LockKeyholeOpen, MonitorCog, Moon, Palette, Settings, SunMedium, UserRound } from "lucide-react"
+import { AlarmClock, BellRing, LaptopMinimalCheck, LibraryBig, Loader2, LockKeyholeOpen, MonitorCog, Moon, Palette, Send, Settings, SunMedium, UserRound } from "lucide-react"
 
 type ProfileInput = z.infer<typeof profileSchema>
 
@@ -49,6 +51,7 @@ type UserData = {
     image: string | null
     birthDate: string | Date | null
     phone: string | null
+    timezone: string | null
 }
 
 // تاریخ را برای input[type=date] به قالب YYYY-MM-DD تبدیل می‌کند
@@ -139,6 +142,9 @@ export default function SettingsPanel({ user }: { user: UserData }) {
             ? jalaliDaysInMonth(birthJalali.jy, birthJalali.jm)
             : 31
     const reminder = parseReminderTime(settings.reminderTime)
+    const timezoneOptions = timezoneOptionsWith(user.timezone)
+    // دکمه‌ی اعلان آزمایشی — وضعیت مستقل تا بقیهٔ دکمه‌ها را قفل نکند.
+    const [testNotificationLoading, setTestNotificationLoading] = useState(false)
     // گارد هم‌گام‌سازی یک‌بارهٔ اشتراک Push
     const pushSyncedRef = useRef(false)
     /*
@@ -172,6 +178,7 @@ export default function SettingsPanel({ user }: { user: UserData }) {
             lastName: user.lastName ?? "",
             phone: user.phone ?? "",
             birthDate: toDateInput(user.birthDate),
+            timezone: user.timezone ?? DEFAULT_TIMEZONE,
         },
     })
 
@@ -382,6 +389,43 @@ export default function SettingsPanel({ user }: { user: UserData }) {
         )
     }
 
+    /*
+     * اعلان آزمایشی: endpoint سرور به همان دستگاه‌های همین کاربر Push می‌فرستد.
+     * این دکمه «انتخاب ساعت» را تغییر نمی‌دهد و اشتراکی نمی‌سازد؛ فقط مسیر
+     * انتها-به-انتها (مجوز ← اشتراک ← سرور ← Push) را تأیید می‌کند.
+     */
+    const onSendTestNotification = async () => {
+        if (testNotificationLoading) return
+        setTestNotificationLoading(true)
+        try {
+            const result = await sendTestNotification()
+
+            if (!result.ok) {
+                toast.error(PUSH_REASON_LABEL[result.reason])
+                return
+            }
+
+            if (result.sent === 0) {
+                toast.info(
+                    "دستگاهی برای ارسال پیدا نشد؛ ابتدا یادآور روزانه را روشن کن و اجازهٔ اعلان را بده",
+                )
+                return
+            }
+
+            toast.success(
+                result.failed > 0
+                    ? `اعلان آزمایشی ارسال شد (${faDigits(result.sent)} موفق، ${faDigits(result.failed)} ناموفق)`
+                    : `اعلان آزمایشی برای ${faDigits(result.sent)} دستگاه ارسال شد ✅`,
+            )
+        } catch {
+            // sendTestNotification خودش خطاها را ساختاریافته برمی‌گرداند؛ این
+            // شاخه فقط برای خطاهای غیرمنتظره (مثلاً قطع کامل شبکه) است.
+            toast.error("ارسال اعلان آزمایشی ناموفق بود؛ کمی بعد دوباره تلاش کن")
+        } finally {
+            setTestNotificationLoading(false)
+        }
+    }
+
     const changePassword = async (e: React.FormEvent) => {
         e.preventDefault()
         setPasswordError(null)
@@ -409,7 +453,9 @@ export default function SettingsPanel({ user }: { user: UserData }) {
             setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" })
             toast.success("رمز عبور با موفقیت تغییر یافت ✅")
         } catch (error) {
-            setPasswordError(error instanceof Error ? error.message : "خطا در ارتباط با سرور")
+            const message = error instanceof Error ? error.message : "خطا در ارتباط با سرور"
+            setPasswordError(message)
+            toast.error(message)
         } finally {
             setPasswordLoading(false)
         }
@@ -506,6 +552,35 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                                 errors={errors}
                             />
 
+                            {/*
+                             * منطقه زمانی: یادآور سروری (cron) ساعت را با همین
+                             * مقدار تفسیر می‌کند. مقدار پیش‌فرض DB `Asia/Tehran`
+                             * است؛ کاربرانی که خارج از ایران‌اند می‌توانند آن را
+                             * اصلاح کنند تا یادآور در ساعت محلی خودشان برسد.
+                             */}
+                            <div className="dp-form-group">
+                                <label className="dp-label" htmlFor="timezone">منطقه زمانی</label>
+                                <select
+                                    id="timezone"
+                                    className={`dp-input ${errors.timezone ? "dp-input-error" : ""}`}
+                                    {...register("timezone")}
+                                >
+                                    {timezoneOptions.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                            {option.label}
+                                        </option>
+                                    ))}
+                                </select>
+                                <p className={styles.muted}>
+                                    ساعت یادآور و روزکاری بر اساس این منطقه زمانی محاسبه می‌شود.
+                                </p>
+                                {errors.timezone && (
+                                    <p className="dp-error-text">
+                                        {String(errors.timezone.message ?? "")}
+                                    </p>
+                                )}
+                            </div>
+
                             <div className="dp-field">
                                 <label className="dp-field-label">تاریخ تولد</label>
                                 <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
@@ -554,6 +629,9 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                             </div>
 
                             <button type="submit" className="dp-btn dp-btn-primary" disabled={saving}>
+                                {saving && (
+                                    <Loader2 size={16} className={styles.spinner} aria-hidden="true" />
+                                )}
                                 {saving ? "در حال ذخیره..." : "ذخیره تغییرات"}
                             </button>
                         </form>
@@ -607,6 +685,9 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                                         className="dp-btn dp-btn-primary dp-btn-block"
                                         disabled={passwordLoading}
                                     >
+                                        {passwordLoading && (
+                                            <Loader2 size={16} className={styles.spinner} aria-hidden="true" />
+                                        )}
                                         {passwordLoading ? "در حال تغییر..." : "تغییر رمز عبور"}
                                     </button>
                                 </form>
@@ -715,6 +796,30 @@ export default function SettingsPanel({ user }: { user: UserData }) {
                                     </div>
                                 </div>
                             )}
+                        </div>
+
+                        {/*
+                         * تست اعلان — بدون این دکمه هیچ راهی برای تأیید انتها-به-انتها
+                         * وجود نداشت. سرور فقط به دستگاه‌های همین کاربر Push می‌فرستد
+                         * و سقف ۵ بار در ۱۵ دقیقه دارد.
+                         */}
+                        <div className={styles.card}>
+                            <h3 className={styles.cardTitle}><Send /> تست اعلان</h3>
+                            <p className={styles.muted}>
+                                یک اعلان آزمایشی فوری برای دستگاه‌های همین حساب ارسال می‌شود تا از
+                                درستی مجوز و اشتراک اعلان مطمئن شوید.
+                            </p>
+                            <button
+                                type="button"
+                                className="dp-btn dp-btn-ghost"
+                                onClick={onSendTestNotification}
+                                disabled={testNotificationLoading}
+                            >
+                                {testNotificationLoading && (
+                                    <Loader2 size={16} className={styles.spinner} aria-hidden="true" />
+                                )}
+                                {testNotificationLoading ? "در حال ارسال..." : "ارسال اعلان آزمایشی"}
+                            </button>
                         </div>
                     </motion.section>
                 )}

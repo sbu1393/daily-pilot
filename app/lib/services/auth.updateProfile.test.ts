@@ -49,6 +49,25 @@ describe("updateProfile — partial update", () => {
         expect(lastData().birthDate).toEqual(new Date("2026-01-02"))
     })
 
+    it("منطقه زمانی فقط وقتی فرستاده شود نوشته می‌شود", async () => {
+        await updateProfile(7, "current-name", { timezone: "Europe/London" })
+
+        expect(lastData()).toEqual({ timezone: "Europe/London" })
+        expect(lastData()).not.toHaveProperty("firstName")
+    })
+
+    it("نبودن timezone آن را null/بازنویسی نمی‌کند", async () => {
+        await updateProfile(7, "current-name", { firstName: "علی" })
+
+        expect(lastData()).not.toHaveProperty("timezone")
+    })
+
+    it("فاصلهٔ اطراف منطقه زمانی trim می‌شود", async () => {
+        await updateProfile(7, "current-name", { timezone: "  Asia/Tehran  " })
+
+        expect(lastData()).toEqual({ timezone: "Asia/Tehran" })
+    })
+
     it("بدنهٔ خالی هیچ فیلدی را بازنویسی نمی‌کند", async () => {
         await updateProfile(7, "current-name", {})
 

@@ -96,6 +96,9 @@ export async function PATCH(req: NextRequest) {
                 (parsed.data.birthDate || null) !== birthDateInput(user.birthDate)
                     ? ["birthDate"]
                     : []),
+                ...(parsed.data.timezone !== undefined && parsed.data.timezone !== user.timezone
+                    ? ["timezone"]
+                    : []),
             ]
 
             const prisma = getPrisma()

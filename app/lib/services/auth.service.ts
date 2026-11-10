@@ -146,6 +146,8 @@ export type ProfileUpdateInput = {
     lastName?: string | null
     phone?: string | null
     birthDate?: string | null
+    /** منطقه زمانی IANA؛ با `timezoneSchema` در مرز API اعتبارسنجی شده است. */
+    timezone?: string
 }
 
 // ---------- ویرایش پروفایل (Partial) ----------
@@ -164,6 +166,7 @@ export async function updateProfile(userId: number, currentUsername: string, inp
         lastName?: string | null
         phone?: string | null
         birthDate?: Date | null
+        timezone?: string
     } = {}
 
     if (input.username !== undefined) {
@@ -182,6 +185,9 @@ export async function updateProfile(userId: number, currentUsername: string, inp
     if (input.lastName !== undefined) data.lastName = input.lastName?.trim() || null
     if (input.phone !== undefined) data.phone = input.phone?.trim() || null
     if (input.birthDate !== undefined) data.birthDate = input.birthDate ? new Date(input.birthDate) : null
+    // `timezone` هرگز null نمی‌شود (ستون non-null با پیش‌فرض Asia/Tehran)؛
+    // اسکیما هم رشتهٔ خالی/نامعتبر را رد می‌کند.
+    if (input.timezone !== undefined) data.timezone = input.timezone.trim()
 
     return prisma.user.update({
         where: { id: userId },

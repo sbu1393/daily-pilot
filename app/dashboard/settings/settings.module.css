@@ -285,6 +285,17 @@
     color: var(--primary-dark);
 }
 
+/* اسپینر داخل دکمه‌های ذخیره/ارسال — هماهنگ با سایر بخش‌های برنامه */
+.spinner {
+    animation: settingsSpin 900ms linear infinite;
+}
+
+@keyframes settingsSpin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 /* ====== موبایل ====== */
 @media (max-width: 860px) {
     .wrap {

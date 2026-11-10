@@ -219,6 +219,53 @@ describe("PATCH /api/auth/profile", () => {
         expect(mocks.updateProfile).toHaveBeenCalledWith(1, "test", { username: "test", birthDate: "2026-01-01" })
     })
 
+    it("accepts a valid timezone and forwards it to the service", async () => {
+        const updated = { ...USER, timezone: "Europe/London" }
+        mocks.updateProfile.mockResolvedValue(updated)
+
+        const res = await callPATCH({ timezone: "Europe/London" })
+
+        expect(res.status).toBe(200)
+        const parsed = await res.json()
+        expect(parsed.ok).toBe(true)
+        expect(parsed.data.timezone).toBe("Europe/London")
+        expect(mocks.updateProfile).toHaveBeenCalledWith(1, "test", { timezone: "Europe/London" })
+    })
+
+    it("returns 400 VALIDATION_ERROR for an unknown timezone and never calls the service", async () => {
+        const res = await callPATCH({ timezone: "Mars/Olympus" })
+
+        expect(res.status).toBe(400)
+        const parsed = await res.json()
+        expect(parsed.error.code).toBe("VALIDATION_ERROR")
+        expect(mocks.updateProfile).not.toHaveBeenCalled()
+    })
+
+    it("tracks timezone in changedFields only when it actually differs", async () => {
+        mocks.updateProfile.mockResolvedValue({ ...USER, timezone: "Europe/London" })
+
+        await callPATCH({ timezone: "Europe/London" })
+
+        expect(mocks.recordProductEvent).toHaveBeenCalledWith(
+            1,
+            "profile.updated",
+            { changedFields: ["timezone"] },
+            expect.anything(),
+        )
+
+        mocks.recordProductEvent.mockClear()
+        mocks.updateProfile.mockResolvedValue(USER)
+
+        await callPATCH({ timezone: "Asia/Tehran" })
+
+        expect(mocks.recordProductEvent).toHaveBeenCalledWith(
+            1,
+            "profile.updated",
+            { changedFields: [] },
+            expect.anything(),
+        )
+    })
+
     it("propagates ServiceError USERNAME_TAKEN as 409", async () => {
         mocks.updateProfile.mockRejectedValue(new UsernameTakenError())
 

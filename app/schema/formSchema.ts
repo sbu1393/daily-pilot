@@ -68,6 +68,20 @@ export const loginSchema = z.object({
 
 
 
+/**
+ * منطقه زمانی (IANA). اعتبارسنجی با خودِ `Intl` انجام می‌شود نه فهرست ثابت:
+ * فهرست‌های دستی با به‌روزرسانی tzdata کهنه می‌شوند و نام‌های معتبر جدید را
+ * رد می‌کنند. محیط Node/مرورگرِ پروژه ICU کامل دارد، پس `Asia/Tehran` و
+ * نام‌های مشابه بدون تغییر کار می‌کنند.
+ */
+export const timezoneSchema = z
+    .string()
+    .trim()
+    .min(1, "منطقه زمانی را انتخاب کنید")
+    .max(64, "منطقه زمانی معتبر نیست")
+    .refine(isValidTimezone, { message: "منطقه زمانی معتبر نیست" })
+
+
 export const profileSchema = z.object({
 
     /*
@@ -76,6 +90,12 @@ export const profileSchema = z.object({
      * وقتی فرستاده شود، دقیقاً همان قرارداد ثبت‌نام را دارد.
      */
     username: usernameSchema.optional(),
+
+    /*
+     * اختیاری مثل بقیهٔ فیلدها. مقدار پیش‌فرض DB `Asia/Tehran` است؛ نبودن کلید
+     * در بدنه یعنی «دست نزن»، نه «به پیش‌فرض برگردان».
+     */
+    timezone: timezoneSchema.optional(),
 
 
     firstName: z
@@ -171,5 +191,20 @@ function isValidBirthDate(value: string): boolean {
     const isLeap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0
     const daysInMonth = [31, isLeap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]
     return d >= 1 && d <= daysInMonth
+}
+
+/**
+ * آیا رشته یک منطقه زمانی IANA معتبر است؟ مرجع اعتبارسنجی، خودِ موتور ICU است:
+ * `Intl.DateTimeFormat` برای نام نامعتبر `RangeError` می‌دهد. این کار هم در
+ * سرور (Node) و هم در کلاینت (مرورگر) همان نتیجه را می‌دهد.
+ */
+export function isValidTimezone(value: string): boolean {
+    if (typeof value !== "string" || value.trim().length === 0) return false
+    try {
+        new Intl.DateTimeFormat("en-US", { timeZone: value })
+        return true
+    } catch {
+        return false
+    }
 }
 

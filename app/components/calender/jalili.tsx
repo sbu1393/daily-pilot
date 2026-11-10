@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import moment from "moment-jalaali"
 import { ChevronLeft, ChevronRight, Grid3X3, List } from "lucide-react"
 import { useCalendar } from "@/app/contexts/CalenderContext"
@@ -63,6 +63,9 @@ export default function JalaliCalendar() {
     })
     const [mounted, setMounted] = useState(false)
 
+    const scrollRef = useRef<HTMLDivElement>(null)
+    const todayRef = useRef<HTMLButtonElement>(null)
+
     useEffect(() => {
         setMounted(true)
     }, [])
@@ -102,6 +105,32 @@ export default function JalaliCalendar() {
             }
         })
     }, [rangeStart])
+
+    /*
+     * نوار «روزهای نزدیک» با تاریخ امروز شروع شود، نه از ابتدای لیست.
+     * فقط در رندر اولیه و هنگام بازگشت به این نما اجرا می‌شود؛ انتخاب روزهای
+     * دیگر توسط کاربر، اسکرول را جابه‌جا نمی‌کند.
+     *
+     * از `scrollBy` با اختلاف مرکزها استفاده می‌کنیم تا مستقل از جهت RTL
+     * عمل کند و برخلاف `scrollIntoView` هرگز صفحه را به‌صورت عمودی اسکرول نکند.
+     */
+    useEffect(() => {
+        if (!mounted || view !== "nearby") return
+
+        const container = scrollRef.current
+        const todayEl = todayRef.current
+        if (!container || !todayEl) return
+
+        const containerRect = container.getBoundingClientRect()
+        const itemRect = todayEl.getBoundingClientRect()
+        const delta =
+            itemRect.left + itemRect.width / 2 - (containerRect.left + containerRect.width / 2)
+
+        if (Math.abs(delta) < 1) return
+
+        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        container.scrollBy({ left: delta, behavior: reduceMotion ? "auto" : "smooth" })
+    }, [mounted, view, today])
 
     const moveMonth = (amount: number) => {
         const next = moment(
@@ -160,7 +189,7 @@ export default function JalaliCalendar() {
                     />
                 </>
             ) : (
-                <div className={styles.scroll} role="tablist" aria-label="انتخاب روز">
+                <div className={styles.scroll} role="tablist" aria-label="انتخاب روز" ref={scrollRef}>
                     {days.map((day) => {
                         const isActive = day.key === selectedDate
                         const isToday = day.key === today
@@ -169,6 +198,7 @@ export default function JalaliCalendar() {
                         return (
                             <button
                                 key={day.key}
+                                ref={isToday ? todayRef : undefined}
                                 type="button"
                                 role="tab"
                                 aria-selected={isActive}
